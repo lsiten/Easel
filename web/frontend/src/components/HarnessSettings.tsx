@@ -133,7 +133,7 @@ export default function HarnessSettings({ onChange, onSelect }: {
           <div className="settings-field">
             <label className="settings-field-label" htmlFor="harness-model">模型覆盖</label>
             <div className="settings-field-body">
-              {(runtime === 'codex' || runtime === 'opencode') && (
+              {(runtime === 'codex' || runtime === 'opencode' || runtime === 'pi') && (
                 <div className="settings-native-models">
                   <SettingsSelect label="原生模型" value={model} disabled={busy || settings?.locked}
                     options={[

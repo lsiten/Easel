@@ -13,6 +13,7 @@ from easel.harnesses import store
 from easel.harnesses.acp import ACPAdapter
 from easel.harnesses.base import HarnessError, RunRequest
 from easel.harnesses.codex import CodexAdapter
+from easel.harnesses.pi import PiAdapter, _sanitize_env
 from easel.harnesses.commands import acp_command, base_command
 from easel.harnesses.rpc import RPC
 from easel.harnesses import models as native_models
@@ -124,6 +125,22 @@ def audit(tmp_path):
     return [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
 
 
+PI_FIXTURE = Path(__file__).parent / "fixtures" / "pi_rpc.py"
+
+
+def pi_request_for(tmp_path, mode="normal", native_id="", model="test-model", sandbox="read-only"):
+    """Build a RunRequest that drives the fake Pi JSONL RPC fixture.
+
+    Mirrors :func:`request_for` but points at ``pi_rpc.py`` (Pi's JSONL, not
+    JSON-RPC) and lets the caller vary the sandbox so the Pi permission guard
+    can be exercised.
+    """
+    env = {**os.environ, "FAKE_HARNESS_MODE": mode,
+           "FAKE_HARNESS_AUDIT": str(tmp_path / "audit.jsonl"), "OPENAI_API_KEY": "secret-test-key"}
+    return RunRequest("hello", tmp_path, env, native_id, model, sandbox, 10,
+                      (sys.executable, str(PI_FIXTURE), "pi"))
+
+
 @pytest.mark.parametrize("runtime,adapter_type", [("codex", CodexAdapter), ("acp", ACPAdapter)])
 def test_web_reuses_native_process_and_resumes_after_cleanup(tmp_path, runtime, adapter_type):
     from dataclasses import replace
@@ -187,6 +204,125 @@ def test_acp_rejects_replacement_session_on_resume(tmp_path):
         asyncio.run(ACPAdapter().run(request_for(tmp_path, "acp", mode="wrong-resume", native_id="original"),
                                     lambda *args: None, reject, lambda identifier: None))
     assert not any(message.get("method") == "session/prompt" for message in audit(tmp_path))
+
+# --- Pi adapter (custom JSONL RPC, not JSON-RPC) ---
+
+
+@pytest.mark.parametrize("native_id", ["", "native-session"])
+def test_pi_streams_events_and_binds_session(tmp_path, native_id):
+    async def reject(questions):
+        raise AssertionError("No permissions expected")
+
+    identifiers = []
+    events = []
+    asyncio.run(PiAdapter().run(
+        pi_request_for(tmp_path, native_id=native_id),
+        lambda *event: events.append(event), reject, identifiers.append))
+    assert events == [("thinking", "思考"), ("token", "你好")]
+    # A later turn keeps the existing binding; only the first turn binds.
+    assert identifiers == (["native-session"] if not native_id else [])
+
+
+def test_pi_tool_activity(tmp_path):
+    async def reject(questions):
+        raise AssertionError("No permissions expected")
+
+    events = []
+    asyncio.run(PiAdapter().run(pi_request_for(tmp_path, mode="tool"),
+                                lambda *event: events.append(event),
+                                reject, lambda identifier: None))
+    assert ("activity", "工具：read_file") in events
+
+
+def test_pi_permission_is_forwarded_and_confirmed_once(tmp_path):
+    async def answer(questions):
+        assert len(questions[0]["options"]) == 2
+        assert "Always" not in str(questions[0]["options"])
+        return {"permission": ["允许本次"]}
+
+    asyncio.run(PiAdapter().run(pi_request_for(tmp_path, mode="permission"),
+                                lambda *args: None, answer, lambda identifier: None))
+    responses = [message for message in audit(tmp_path)
+                 if message.get("type") == "extension_ui_response"]
+    assert len(responses) == 1
+    assert responses[0]["confirmed"] is True
+
+
+def test_pi_noninteractive_permission_is_error(tmp_path):
+    async def reject(questions):
+        raise HarnessError("requires interactive approval")
+
+    with pytest.raises(HarnessError):
+        asyncio.run(PiAdapter().run(pi_request_for(tmp_path, mode="permission"),
+                                    lambda *args: None, reject, lambda identifier: None))
+
+
+@pytest.mark.parametrize("mode", ["error", "exit"])
+def test_pi_failure_never_leaks_keys(tmp_path, mode):
+    async def reject(questions):
+        raise AssertionError
+
+    with pytest.raises(HarnessError) as failure:
+        asyncio.run(PiAdapter().run(pi_request_for(tmp_path, mode=mode),
+                                    lambda *args: None, reject, lambda identifier: None))
+    assert "secret-test-key" not in str(failure.value)
+
+
+def test_pi_binding_cannot_replace_history(tmp_path):
+    async def reject(questions):
+        raise AssertionError("No permissions expected")
+
+    bound = []
+    with pytest.raises(HarnessError, match="历史"):
+        asyncio.run(PiAdapter().run(
+            pi_request_for(tmp_path, mode="wrong-resume", native_id="native-session"),
+            lambda *args: None, reject, bound.append))
+    # A mismatched native id must never rebind the session to another runtime.
+    assert bound == []
+
+
+@pytest.mark.parametrize("sandbox", ["danger-full-access", "no-sandbox"])
+def test_pi_rejects_unsafe_sandbox(tmp_path, sandbox):
+    async def reject(questions):
+        raise AssertionError
+
+    with pytest.raises(HarnessError, match="只允许"):
+        asyncio.run(PiAdapter().run(
+            pi_request_for(tmp_path, sandbox=sandbox),
+            lambda *args: None, reject, lambda identifier: None))
+
+
+def test_pi_model_catalog(tmp_path, monkeypatch):
+    request = pi_request_for(tmp_path)
+    monkeypatch.setattr(native_models, "base_command", lambda runtime: [
+        sys.executable, str(PI_FIXTURE)])
+    result = asyncio.run(native_models.available_models("pi", request))
+    assert result[0] == {"id": "hh/qwen3.8-27b-office",
+                         "label": "Qwen 3.8 Office", "default": True}
+    assert [item["id"] for item in result] == [
+        "hh/qwen3.8-27b-office", "anthropic/claude-sonnet-4-20250514"]
+
+
+def test_pi_model_catalog_redacts_errors(tmp_path, monkeypatch):
+    request = pi_request_for(tmp_path, mode="models-error")
+    monkeypatch.setattr(native_models, "base_command", lambda runtime: [
+        sys.executable, str(PI_FIXTURE)])
+    with pytest.raises(HarnessError) as caught:
+        asyncio.run(native_models.available_models("pi", request))
+    assert "secret-test-key" not in str(caught.value)
+
+
+def test_pi_sanitize_env_drops_socks_proxy_and_adds_loopback():
+    out = _sanitize_env({"HTTP_PROXY": "socks5h://127.0.0.1:50553"})
+    assert "HTTP_PROXY" not in out
+    assert set(out["NO_PROXY"].split(",")) == {"127.0.0.1", "::1", "localhost"}
+
+
+def test_pi_sanitize_env_keeps_http_proxy_and_merges_no_proxy():
+    out = _sanitize_env({"HTTP_PROXY": "http://proxy.example.com:3128",
+                         "NO_PROXY": "foo"})
+    assert out["HTTP_PROXY"] == "http://proxy.example.com:3128"
+    assert set(out["NO_PROXY"].split(",")) == {"foo", "127.0.0.1", "::1", "localhost"}
 
 
 def test_pooled_connections_isolate_sessions_and_configuration(tmp_path):

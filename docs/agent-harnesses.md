@@ -1,7 +1,7 @@
 # Agent 底座接入与本地测试
 
 Easel 将执行底座与模型供应商分开。Web **设置 → 模型配置 → 对话 → 执行引擎**
-统一选择仅聊天模式、OpenClaw、OpenCode、Codex 或通用 ACP。
+统一选择仅聊天模式、OpenClaw、OpenCode、Codex、Pi 或通用 ACP。
 标准安装默认安装并使用 OpenClaw；设置中可切换到已安装的其它底座，不自动安装 Codex / OpenCode。
 仅使用 `--api` 安装或没有任何 Agent 配置的环境回退到仅聊天模式。
 已经保存的底座、旧版连接配置和已有 OpenClaw 安装继续生效，不自动切换。
@@ -46,6 +46,7 @@ OpenClaw 会话与供应商设置。内部 `Adapter.run` 契约统一事件、�
 | OpenClaw | 保留现有 gateway / CLI 路径 | 原有 OpenClaw 配置 | 原有策略 |
 | OpenCode | `opencode acp`，私有 stdio ACP v1 | `opencode auth login` | OpenCode 原生策略，ACP 权限请求交由 Web 确认 |
 | Codex | `codex app-server`，私有 stdio 原生 RPC | `codex login` 或原生配置 | 默认 workspace-write，网络受限；额外授权需逐次确认 |
+| Pi | `pi --mode rpc`，私有 JSONL（非 JSON-RPC）协议 | `pi` 原生登录 | 默认 read-only / workspace-write；扩展权限请求经 Web 确认；socks 代理被忽略（仅 http/https 生效） |
 | 通用 ACP | 本机管理员配置的 argv | 对应 Agent 原生登录 | 对应 Agent 原生策略，不声称提供操作系统沙箱 |
 
 Codex 不必通过第三方 ACP 桥接，以免丢失原生流式事件和权限控制。ACP 作为可复用适配器，
@@ -149,9 +150,9 @@ Web 不提供任意命令输入。内容是 JSON argv 数组，不走 shell。�
 - 执行引擎选择 OpenClaw 或仅聊天模式后，会立即显示该引擎自己的 API 配置，
   不需要先切换正在使用的底座。修改 API 前先点击“保存底座”，再保存下方配置；
   仅预览不会更改当前引擎、密钥或模型。
-- Codex 和 OpenCode 的“模型覆盖”提供下拉框，点击“拉取模型”才启动原生 CLI
+- Codex、Pi 和 OpenCode 的“模型覆盖”提供下拉框，点击“拉取模型”才启动原生 CLI
   读取列表，不创建对话，也不在打开设置时自动读取。Codex 使用 `model/list`，
-  OpenCode 使用 `opencode models`；列表由原生配置提供，不代表每个模型都已授权可用。
+  OpenCode 使用 `opencode models`，Pi 使用 `get_available_models`；列表由原生配置提供，不代表每个模型都已授权可用。
 - 可选择其它 GPT 模型或 OpenCode 供应商模型，也可手动填写模型 ID；
   留空沿用原生 CLI 默认模型。保存后请新建对话，原有历史仍绑定原底座与会话。
   读取列表失败时保留原有模型设置；原生认证仍由对应 CLI 管理。
