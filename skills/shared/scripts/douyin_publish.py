@@ -14,7 +14,7 @@ WJZ-P/douyin-upload-mcp-skill（src/douyin-ops.js）。确定性 IO 在脚本，
   - 登录：img[aria-label=二维码] 抠图轮询；命中短信验证给提示
 
 子命令: check / login / plan / publish / publish-video / selftest
-真实发布需：playwright + chromium + 已扫码登录 + 外网可达（默认走项目代理）。
+真实发布需：Playwright + 已安装 Ego（优先）或 Chrome + 已扫码登录 + 外网可达。
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
+from easel.browser import launch_persistent_context, select_browser
 import content_guard  # noqa: E402  出站内容安全闸门
 import platform_readback  # noqa: E402  发布读回对账（快照+列表对账协议）
 import human_pace  # noqa: E402  人类节奏（分档随机停顿）
@@ -160,7 +161,7 @@ def _launch(p, headed: bool, base: str | None, proxy: str | None):
     kwargs = dict(headless=not headed, locale="zh-CN", args=args)
     if proxy:
         kwargs["proxy"] = {"server": proxy}
-    return p.chromium.launch_persistent_context(str(profile), **kwargs)
+    return launch_persistent_context(p, str(profile), kwargs)
 
 
 def _wait_ready(page, timeout_ms: int = 15000) -> None:
@@ -936,14 +937,10 @@ def _handle_sms(page, sf, qr_out: Path, code_file: Path, wait_s: int = 240) -> b
 def cmd_check(_a) -> int:
     ok = True
     try:
-        from playwright.sync_api import sync_playwright
+        import playwright  # noqa: F401
         print("✅ playwright 已安装")
-        with sync_playwright() as p:
-            path = p.chromium.executable_path
-            if path and Path(path).exists():
-                print(f"✅ chromium 内核：{path}")
-            else:
-                print("❌ 未安装浏览器内核（playwright install chromium）"); ok = False
+        browser = select_browser()
+        print(f"✅ {browser.name} 浏览器：{browser.executable}")
     except Exception as e:
         print(f"❌ playwright/内核不可用：{e}"); ok = False
     print(f"登录态目录：{_profile_dir(None)}")

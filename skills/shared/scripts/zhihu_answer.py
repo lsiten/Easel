@@ -25,6 +25,7 @@
 from __future__ import annotations
 import argparse, json, os, re, sys
 from pathlib import Path
+from easel.browser import launch_persistent_context
 from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -256,12 +257,9 @@ def publish_answer(question_url: str, content: str, headed: bool = False, dry_ru
     result = {"success": False, "url": "", "error": ""}
 
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(
-            str(PROFILE_DIR),
-            headless=not headed,
-            args=LAUNCH_ARGS,
-            viewport={"width": 1280, "height": 900},
-        )
+        ctx = launch_persistent_context(p, str(PROFILE_DIR), {
+            "headless": not headed, "args": LAUNCH_ARGS,
+            "viewport": {"width": 1280, "height": 900}})
         page = ctx.new_page()
 
         # 1. 打开问题页

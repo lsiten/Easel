@@ -470,14 +470,13 @@ fi
 run_step '执行引擎初始设置' python3 -m easel.installation "$PROJECT_ROOT" api
 ok "执行引擎可稍后在 Web 设置；新安装默认 API 仅聊天模式"
 
-step "6/6" "安装并验证 Chromium" "浏览器登录与发布"
-# Playwright is a runtime dependency for browser login/publishing.
+step "6/6" "安装并验证浏览器" "平台操作优先 Ego，其次 Chrome；Chromium 用于渲染"
 if [ "$SETUP_MODE" = check ]; then
     # check 模式跳过了 pip 安装，playwright 模块自然不在。这里不能当成失败，否则
     # check 模式必然在最后一步中断 —— 与上面 easel 命令那处同理。
     emit_action run_step 'playwright chromium' 'python3 -m playwright install chromium'
 elif python3 -c 'import playwright' >/dev/null 2>&1; then
-    # 降级而非中断：这是个 ~300MB 的下载，弱网下失败很常见，而它只影响浏览器登录/发布。
+    # Chromium 保留给 HTML/PDF/卡片渲染，账号流程另行检测 Ego / Chrome。
     CHROMIUM_OK=true
     run_step 'playwright chromium' python3 -m playwright install chromium || CHROMIUM_OK=false
     if [ "$CHROMIUM_OK" = true ] && [ "$SETUP_MODE" != check ]; then
@@ -487,12 +486,21 @@ elif python3 -c 'import playwright' >/dev/null 2>&1; then
     if [ "$CHROMIUM_OK" = true ]; then
         ok "Playwright Chromium 已就绪"
     else
-        warn_collect 'Playwright Chromium' '下载或校验失败，浏览器登录/发布不可用' \
+        warn_collect 'Playwright Chromium' '下载或校验失败，HTML/PDF/卡片渲染不可用' \
             'python3 -m playwright install chromium'
     fi
 else
     # 这个仍然致命：playwright 模块缺失意味着 pip 安装没装全，不是网络抖动。
     fatal "未找到 Playwright 模块；Python 依赖安装不完整（重试：bash setup.sh）"
+fi
+
+if [ "$SETUP_MODE" = check ]; then
+    emit_action run_step '平台浏览器检测' 'python3 -m easel.browser'
+elif python3 -m easel.browser; then
+    ok "复用本机已安装的 Ego / Chrome"
+else
+    warn_collect '平台浏览器' '未找到可用的 Ego / Chrome，请安装 Chrome 或检查 Ego 安装' \
+        'python3 -m playwright install chrome'
 fi
 
 write_install_report

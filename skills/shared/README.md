@@ -31,4 +31,6 @@
 - `tts.py` 的 edge 引擎需 `pip install edge-tts` 和到语音服务的网络连接；闭源引擎使用项目 `.env` 中的语音配置。代理按实际网络配置选择。
 - `ai_image.py` / `ai_video.py` / `ai_music.py` 纯标准库（urllib/hmac），但需**用户自备各服务的 API key**（配 .env），见各自 SKILL 的配置章节
 - `data-report`（pandas+matplotlib）、`infographic/gif_chart.py`（matplotlib+Pillow）、`auto-short-video/assemble.py`（ffmpeg）在各自 SKILL 的 scripts/ 下
-- 浏览器账号与发布脚本需 Playwright + Chromium；图片、音视频、统计等脚本还会使用 Pillow、FFmpeg、pandas 等依赖。项目 Python 依赖由 `pip install -e .` 安装，系统工具与浏览器内核由安装脚本补齐；各脚本 `check` / `--help` 和 `easel doctor` 用于确认当前环境。
+- 浏览器账号、发布、评论与数据抓取脚本使用 Playwright，并通过 `easel/browser.py` 统一选择已安装的 Ego，其次 Chrome。已安装 Ego 但启动失败时会报错，不静默降级。`python -m easel.browser` 可只读查看当前选择；非标准安装位置可通过环境变量 `EASEL_EGO_EXECUTABLE` / `EASEL_CHROME_EXECUTABLE` 指定浏览器程序路径。
+- Ego 使用原平台目录下独立的 `Ego/` 子目录，通过本机随机端口 CDP 连接隔离会话；首次切换需重新登录。Chrome 沿用原平台目录，不自动迁移 Cookie。Ego 关闭前原子保存 Cookie、localStorage 和 IndexedDB 到目录内的私有快照（POSIX 权限 `0600`），下次启动恢复；保存后释放会话、进程和目录锁。快照包含登录凭证，不得上传或公开。此持久化需要 Playwright 1.51+。
+- HTML/PDF/卡片等离线渲染继续使用 Playwright Chromium。图片、音视频、统计等脚本还会使用 Pillow、FFmpeg、pandas 等依赖。项目 Python 依赖由 `pip install -e .` 安装；安装脚本补齐渲染内核并检测平台浏览器，缺少 Ego / Chrome 时提示安装。各脚本 `check` / `--help` 和 `easel doctor` 用于确认当前环境。

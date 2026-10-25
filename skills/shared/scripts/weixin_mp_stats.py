@@ -29,6 +29,7 @@ else:
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
+from easel.browser import launch_persistent_context
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LOGIN_DIR = PROJECT_ROOT / "outputs" / "_login"
@@ -157,7 +158,7 @@ def _launch(p, headed, base, proxy):
     if proxy:
         kw["proxy"] = {"server": proxy}
     try:
-        ctx = p.chromium.launch_persistent_context(str(prof), **kw)
+        ctx = launch_persistent_context(p, str(prof), kw)
     except Exception:
         _unlock_profile(lock)
         raise

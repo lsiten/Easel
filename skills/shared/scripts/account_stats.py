@@ -7,7 +7,7 @@
 
 返回：概览(粉丝/获赞/关注) + 平台近7日各指标含环比 + 最新笔记链接 + 我方快照多窗口增长(较上次/日/周/月/年)。
 子命令：check / fetch / selftest
-真实抓取需：playwright + chromium + 已登录 + 干净网络（xhs 直连、其它走 env 代理，同发布层）。
+真实抓取需：Playwright + 已安装 Ego（优先）或 Chrome + 已登录 + 可访问平台的网络。
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from easel.browser import launch_persistent_context, select_browser
 from urllib.parse import urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -92,8 +93,8 @@ PLATFORMS: dict[str, dict] = {
         # 概览(粉丝/获赞)尽力解析、取不到则空——优雅降级，绝不伪造数字。
         "url": "https://my.csdn.net/main/my-article", "default_proxy": True,
         # 数据页被 Cloudflare/WAF 按「无头浏览器」特征拦（headless 命中 403）；真机验证：
-        # 真实 Chrome 通道 + headed 可绕过（headless 即便带 channel 仍 403），故强制这两项。
-        "channel": "chrome", "force_headed": True,
+        # 保留有头模式；实际浏览器统一优先 Ego、未安装时使用 Chrome。
+        "force_headed": True,
         "overview_dir": "after",
         "overview": {"followers": ["粉丝", "粉丝数"], "likes": ["获赞", "获赞数", "点赞"], "following": ["关注", "关注数"]},
         "metrics": ["阅读", "阅读总量", "点赞", "评论", "收藏"],
@@ -671,19 +672,16 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None, pr
     try:
         with sync_playwright() as p:
             if platform == "xiaohongshu":
-                # 与发布/登录共用 Cloak + 同一套启动参数；禁图版 Chromium 会把创作中心打回登录页。
+                # 与发布/登录共用浏览器入口及启动参数，沿用同一平台账号目录。
                 _clear_stale_chrome_locks(profile)
                 ctx = _xhs_launch(p, headed, base, proxy, login_assets=False)
             else:
-                # 部分平台（CSDN）数据页被 WAF 按无头特征拦 403：用真实 Chrome 通道 + 强制 headed
-                # 绕过（真机验证 headless 仍 403、headed 正常取到本人数据）。channel 需真实 Chrome 已装。
+                # CSDN 保留有头模式；浏览器统一按 Ego、Chrome 的顺序选择。
                 want_headed = headed or bool(cfg.get("force_headed"))
                 kwargs = dict(headless=not want_headed, locale="zh-CN", args=LAUNCH_ARGS)
-                if cfg.get("channel"):
-                    kwargs["channel"] = cfg["channel"]
                 if proxy:
                     kwargs["proxy"] = {"server": proxy}
-                ctx = p.chromium.launch_persistent_context(str(profile), **kwargs)
+                ctx = launch_persistent_context(p, str(profile), kwargs)
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             try:
                 if platform == "xiaohongshu":
@@ -1393,13 +1391,10 @@ def _scrape_notes(platform: str, page, cfg: dict) -> list[dict]:
 def cmd_check(_a) -> int:
     ok = True
     try:
-        from playwright.sync_api import sync_playwright
+        import playwright  # noqa: F401
         print("✅ playwright 已安装")
-        with sync_playwright() as p:
-            path = p.chromium.executable_path
-            print(f"✅ chromium 内核：{path}" if path and Path(path).exists()
-                  else "❌ 未安装浏览器内核（playwright install chromium）")
-            ok = bool(path and Path(path).exists())
+        browser = select_browser()
+        print(f"✅ {browser.name} 浏览器：{browser.executable}")
     except Exception as e:
         print(f"❌ playwright/内核不可用：{e}"); ok = False
     print(f"支持平台：{', '.join(PLATFORMS)}")

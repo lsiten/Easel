@@ -15,14 +15,14 @@ xpzouying/xiaohongshu-mcp（Go/go-rod，成熟稳定）。确定性 IO 固化在
   - 反检测：--disable-blink-features=AutomationControlled + 逐字符输入 + zh-CN
 
 子命令:
-  check          验 playwright + chromium 内核
+  check          检查 Playwright 及 Ego / Chrome 浏览器
   login          有头扫码登录并持久化 cookie
   plan           离线打印发布步骤与选择器（不启浏览器）
   publish        图文发布（--images 逗号分隔）
   publish-video  视频发布（--video）
   selftest       离线自检（选择器字典 / 参数解析 / 标题长度算法）
 
-真实发布需：playwright + chromium 内核 + 已扫码登录 + 外网可达（默认走项目代理）。
+真实发布需：Playwright + 已安装 Ego（优先）或 Chrome + 已扫码登录 + 外网可达。
 """
 from __future__ import annotations
 
@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
 import login_qr
 import login_transport
+from easel.browser import launch_persistent_context, select_browser
 import content_guard  # noqa: E402  出站内容安全闸门
 
 # --------------------------------------------------------------------------- #
@@ -142,24 +143,8 @@ def _profile_dir(base: str | None) -> Path:
     return root / PROFILE_NAME
 
 
-def _cloak_executable() -> Path | None:
-    """本机已装的 CloakBrowser 内核。只用 ~/.cloakbrowser，不用调研 profile / 9344 / 9345。
-
-    无头 Playwright Chromium 会被小红书 300012；同一出口下 Cloak 无头已实测能出码。
-    """
-    override = (os.environ.get("EASEL_CLOAK_BROWSER") or "").strip()
-    if override:
-        p = Path(override).expanduser()
-        return p if p.is_file() else None
-    root = Path.home() / ".cloakbrowser"
-    if not root.is_dir():
-        return None
-    choices = sorted(root.glob("chromium-*/chrome.exe"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return choices[0] if choices else None
-
-
 class _ProfileLock:
-    """同一份 XiaohongshuProfile 不能同时开两个 Cloak：账号页 whoami 和登录会把内核打成 exit 21。"""
+    """同一份 XiaohongshuProfile 的登录、发布与账号校验必须串行。"""
 
     def __init__(self, profile: Path):
         self.path = profile / ".easel.lock"
@@ -220,29 +205,6 @@ def _clear_stale_chrome_locks(profile: Path) -> None:
             p.unlink()
         except OSError:
             pass
-
-
-def _browser_channel() -> str | None:
-    """Cloak 找不到时，有头登录才退回本机 Chrome/Edge。"""
-    if os.name != "nt":
-        return None
-    pf = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files"))
-    pf86 = Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"))
-    local = Path(os.environ.get("LOCALAPPDATA", ""))
-    chrome = (
-        pf / "Google" / "Chrome" / "Application" / "chrome.exe",
-        pf86 / "Google" / "Chrome" / "Application" / "chrome.exe",
-        local / "Google" / "Chrome" / "Application" / "chrome.exe",
-    )
-    if any(p.is_file() for p in chrome):
-        return "chrome"
-    edge = (
-        pf / "Microsoft" / "Edge" / "Application" / "msedge.exe",
-        pf86 / "Microsoft" / "Edge" / "Application" / "msedge.exe",
-    )
-    if any(p.is_file() for p in edge):
-        return "msedge"
-    return None
 
 
 def _login_error(page) -> str:
@@ -1009,17 +971,10 @@ def _launch(p, headed: bool, base: str | None, proxy: str | None, *, login_asset
     else:
         # 显式直连：Chromium 级屏蔽系统/环境代理（开 VPN 也能用）——同抖音链兜底
         args.append("--no-proxy-server")
-    cloak = _cloak_executable()
-    if cloak:
-        kwargs["executable_path"] = str(cloak)
-    elif headed:
-        channel = _browser_channel()
-        if channel:
-            kwargs["channel"] = channel
     last: Exception | None = None
     for attempt in range(2):
         try:
-            context = p.chromium.launch_persistent_context(str(profile), **kwargs)
+            context = launch_persistent_context(p, str(profile), kwargs)
             if login_assets:
                 login_transport.install(context, "xiaohongshu")
             return context
@@ -1036,21 +991,12 @@ def _launch(p, headed: bool, base: str | None, proxy: str | None, *, login_asset
 def cmd_check(_a) -> int:
     ok = True
     try:
-        from playwright.sync_api import sync_playwright
+        import playwright  # noqa: F401
         print("✅ playwright 已安装")
-        with sync_playwright() as p:
-            path = p.chromium.executable_path
-            if path and Path(path).exists():
-                print(f"✅ chromium 内核：{path}")
-            else:
-                print("❌ 未安装浏览器内核（playwright install chromium）"); ok = False
+        browser = select_browser()
+        print(f"✅ {browser.name} 浏览器：{browser.executable}")
     except Exception as e:
         print(f"❌ playwright/内核不可用：{e}"); ok = False
-    cloak = _cloak_executable()
-    if cloak:
-        print(f"✅ CloakBrowser 内核：{cloak}")
-    else:
-        print("⚠️ 未找到 CloakBrowser（~/.cloakbrowser）；小红书登录可能被 300012")
     print(f"登录态目录：{_profile_dir(None)}")
     return 0 if ok else 3
 
@@ -1121,7 +1067,7 @@ def cmd_login(a) -> int:
                 if a.headed:
                     login_state.write_status(
                         sf, "window_login",
-                        "请在弹出的 CloakBrowser 窗口里扫码，不要关掉那个窗口。")
+                        "请在弹出的浏览器窗口里扫码，不要关掉那个窗口。")
                 explore_failed = False
                 try:
                     page.goto(EXPLORE_URL, wait_until="commit", timeout=30000)
@@ -1159,12 +1105,12 @@ def cmd_login(a) -> int:
                         raise
                     login_state.write_status(
                         sf, "window_login",
-                        f"{error}。请在弹出的 CloakBrowser 窗口里完成登录（扫码或短信），不要关掉那个窗口。")
+                        f"{error}。请在弹出的浏览器窗口里完成登录（扫码或短信），不要关掉那个窗口。")
                 if qr:
                     if a.headed:
                         login_state.write_status(
                             sf, "window_login",
-                            "请在弹出的 CloakBrowser 窗口里扫码，不要关掉那个窗口。也可以扫下面这张图。",
+                            "请在弹出的浏览器窗口里扫码，不要关掉那个窗口。也可以扫下面这张图。",
                             qr=str(qr_out))
                     else:
                         login_state.write_status(sf, "qr_ready", "二维码已就绪，请扫码", qr=str(qr_out))
@@ -1436,8 +1382,6 @@ def cmd_selftest(_a) -> int:
     # profile 目录路由
     assert _profile_dir(None).name == PROFILE_NAME
     assert "cloak-research-profile" not in str(_profile_dir(None))
-    cloak = _cloak_executable()
-    assert cloak is None or cloak.is_file()
     import shutil
     import tempfile
     tmp = Path(tempfile.mkdtemp(prefix="easel-xhs-lock-"))

@@ -12,7 +12,7 @@
     install <id> [<id> ...]     一键安装（--dir 给「工程目录类」工具）
     selftest                    自检（离线，不装任何东西）
 
-约束：仅标准库、Python 3.11 兼容、无交互。
+约束：Python 3.11 兼容、无交互；平台浏览器检测复用已安装的 easel.browser，其余检测仅用标准库。
 """
 from __future__ import annotations
 
@@ -65,22 +65,12 @@ WHISPER_MODEL_PY = (
 
 
 def _pyfn_check_cft() -> tuple[bool, str]:
-    import glob
-    la = os.environ.get("LOCALAPPDATA", "")
-    pf, pf86 = os.environ.get("PROGRAMFILES", ""), os.environ.get("PROGRAMFILES(X86)", "")
-    cands: list[str] = []
-    for base in (pf, pf86):
-        if base:
-            cands += glob.glob(os.path.join(base, "Google", "Chrome", "Application", "*", "chrome.exe"))
-    if la:
-        cands += glob.glob(os.path.join(la, "Google", "Chrome for Testing", "*", "chrome.exe"))
-        cands += glob.glob(os.path.join(la, "ms-playwright", "chromium-*", "chrome-win64", "chrome.exe"))
-    w = shutil.which("chrome")
-    if w:
-        cands.append(w)
-    if cands:
-        return True, Path(sorted(cands)[-1]).parent.parent.name or "已装"
-    return False, ""
+    from easel.browser import BrowserUnavailable, select_browser
+    try:
+        browser = select_browser()
+        return True, browser.name
+    except BrowserUnavailable as error:
+        return False, str(error)
 
 
 def _pyfn_check_model() -> tuple[bool, str]:
@@ -137,9 +127,9 @@ TOOLS: list[Tool] = [
          ["{python}", "-c", "import playwright;print('playwright ok')"],
          _pip_chain("playwright")
          + [("下载 Chromium", ["{python}", "-m", "playwright", "install", "chromium"], 1800)]),
-    Tool("cft", "Chrome for Testing", "pub", "登录态浏览器 · 平台登录用",
+    Tool("cft", "平台浏览器（Ego / Chrome）", "pub", "已安装 Ego 时优先使用，否则使用 Chrome",
          ["@pyfn:cft"],
-         [("playwright 自带 Chromium", ["{python}", "-m", "playwright", "install", "chromium"], 1800)]),
+         [("安装 Chrome", ["{python}", "-m", "playwright", "install", "chrome"], 1800)]),
     # ── 常用库 ──
     Tool("pylibs", "常用 Python 库", "common", "Pillow · edge-tts · pdfplumber · requests",
          ["{python}", "-c", "import PIL,edge_tts,pdfplumber,requests;print('4/4 ok')"],

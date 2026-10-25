@@ -258,7 +258,9 @@ on the selected engine and model; settings for one engine are not interchangeabl
 | AI music | `MUSIC_PROVIDER` plus provider settings | A supported music service |
 | Cloud voice | `VOICE_PROVIDER` plus provider settings | A supported voice service |
 | Local media processing | No model is required for supported local tools | FFmpeg |
-| Browser publishing | Log in from the Web workspace's Accounts page | Playwright Chromium and valid platform accounts |
+| Browser publishing | Log in from the Web workspace's Accounts page | Playwright, installed Ego (preferred) or Chrome, and valid platform accounts |
+
+Platform login, publishing, comments, and analytics share automatic browser selection: installed Ego first, otherwise Chrome. Run `python -m easel.browser` to inspect detection. Ego uses a separate process and a local CDP connection, with private session snapshots in an `Ego/` subdirectory of each platform profile. Cookies, localStorage and IndexedDB are saved atomically before closing and restored when reopening (Playwright 1.51+). Switching browsers requires signing in again; existing Chrome data is retained. An installed Ego that fails to start reports an error without silently switching browsers. Set `EASEL_EGO_EXECUTABLE` or `EASEL_CHROME_EXECUTABLE` for a custom browser location. Offline HTML/PDF/card rendering continues to use Playwright Chromium.
 
 Never commit `.env`, cookies, or platform login state. Real publishing can be affected by verification, permissions, platform risk controls, and UI changes; use previews and checks for the first attempt.
 

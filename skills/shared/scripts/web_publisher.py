@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import login_state  # noqa: E402
 import login_qr
 import login_transport
+from easel.browser import launch_persistent_context, select_browser
 import content_guard  # noqa: E402  出站内容安全闸门
 import platform_readback  # noqa: E402  发布读回对账（快手已接入，注册表见 _READBACK_VERIFIERS）
 import human_pace  # noqa: E402  人类节奏（提交前双停顿；EASEL_PACE_SKIP=1 跳过）
@@ -428,21 +429,15 @@ def cmd_check(_a) -> int:
     ok = True
     try:
         import playwright  # noqa
-        from playwright.sync_api import sync_playwright  # noqa
         print("✅ playwright 已安装")
     except Exception as e:
         print(f"❌ playwright 未安装：{e}（pip install playwright）"); ok = False
-    # 浏览器内核
+    # 与登录/发布/账号检查共用浏览器选择。
     try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            path = p.chromium.executable_path
-            if path and Path(path).exists():
-                print(f"✅ chromium 内核：{path}")
-            else:
-                print("❌ 未安装浏览器内核（playwright install chromium）"); ok = False
+        browser = select_browser()
+        print(f"✅ {browser.name} 浏览器：{browser.executable}")
     except Exception as e:
-        print(f"❌ 无法检查内核：{e}（playwright install chromium）"); ok = False
+        print(f"❌ 无法检查浏览器：{e}"); ok = False
     print("登录态目录：~/.easel-browser-profiles/<平台>Profile")
     return 0 if ok else 3
 
@@ -662,9 +657,9 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
     ctx = {"media": a.media or "", "title": a.title or "", "desc": a.desc or "",
            "tags": a.tags or "", "cover": a.cover or ""}
     with sync_playwright() as p:
-        browser = p.chromium.launch_persistent_context(
-            str(profile), headless=not headed, args=LAUNCH_ARGS + ["--no-proxy-server"],
-            viewport={"width": 1440, "height": 900})
+        browser = launch_persistent_context(p, str(profile), {
+            "headless": not headed, "args": LAUNCH_ARGS + ["--no-proxy-server"],
+            "viewport": {"width": 1440, "height": 900}})
         page = browser.pages[0] if browser.pages else browser.new_page()
         if not do_publish:
             page.goto(cfg["login_url"])
@@ -1414,9 +1409,9 @@ def cmd_login_qr(a) -> int:
 
         try:
             signal.signal(signal.SIGTERM, stop_login)
-            browser = p.chromium.launch_persistent_context(
-                str(profile), headless=True, locale="zh-CN",
-                args=LAUNCH_ARGS + ["--no-proxy-server"])
+            browser = launch_persistent_context(p, str(profile), {
+                "headless": True, "locale": "zh-CN",
+                "args": LAUNCH_ARGS + ["--no-proxy-server"]})
             page = browser.pages[0] if browser.pages else browser.new_page()
             _block_heavy(browser, a.platform)
             _observe_channels_account(browser, cfg)
@@ -1616,9 +1611,9 @@ def cmd_whoami(a) -> int:
         with sync_playwright() as p:
             profile = _profile_dir(a.platform, a.profile_base)
             profile.mkdir(parents=True, exist_ok=True)
-            browser = p.chromium.launch_persistent_context(
-                str(profile), headless=True, locale="zh-CN",
-                args=LAUNCH_ARGS + ["--no-proxy-server"])
+            browser = launch_persistent_context(p, str(profile), {
+                "headless": True, "locale": "zh-CN",
+                "args": LAUNCH_ARGS + ["--no-proxy-server"]})
             page = browser.pages[0] if browser.pages else browser.new_page()
             try:
                 _block_heavy(browser, a.platform, login_assets=False)

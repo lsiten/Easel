@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 from easel.direct_api import DirectAPIError, api_config, read_settings
+from easel.browser import BrowserUnavailable, select_browser
 
 # 项目根目录（Easel/）
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -143,6 +144,11 @@ def cmd_doctor(_args) -> int:
                       "运行 cd web/frontend && npm ci && npm run build")
     all_ok &= _check("Playwright Chromium", _chromium_available(),
                       "运行 python3 -m playwright install chromium")
+    try:
+        browser = select_browser()
+        _check(f"平台浏览器: {browser.name}", True)
+    except BrowserUnavailable as error:
+        all_ok &= _check("平台浏览器: Ego / Chrome", False, str(error))
 
     if direct and not alternate:
         try:

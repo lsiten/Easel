@@ -19,7 +19,8 @@
 - 使用 Ego 前先读取 `ego-browser` Skill，并运行 `ego-browser skill` 获取与本机版本匹配的规范；全程遵守 task space、控制权交接、结果验证和清理要求。
 - Ego 应用已安装但 CLI 不在 PATH 时，先检查用户本地命令目录和初始化状态；启动或连接失败要报告具体原因，不能把失败当成“未安装”。用户明确指定浏览器时遵从用户要求。
 - 公开只读页面可直接 HTTP 抓取。浏览器选择不会自动迁移账号或 Cookie，不能把另一个浏览器的登录态当作当前浏览器已登录。
-- 现有账号登录、发布和采集脚本仍按各自 SKILL 执行；它们的 Playwright 实现需要单独适配 Ego，不能通过替换启动路径冒充 Ego CLI 接入。
+- 账号登录、发布和采集脚本按各自 SKILL 执行，通过 `easel/browser.py` 统一选择 Ego → Chrome。Ego 使用隔离进程的本机 CDP 连接复用现有平台流程；这是脚本适配，Agent 临时操作网页仍使用 Ego Skill/CLI。
+- Ego 账号目录位于原平台目录下的 `Ego/`，Chrome 保留原目录；首次切换需重新登录，不自动迁移 Cookie。Ego 已安装但启动失败时明确报告，不静默切换 Chrome。
 
 ## 路径约定
 

@@ -165,12 +165,19 @@ try {
     & npm run build
     if ($LASTEXITCODE -ne 0) { Fail 'Web 前端构建失败。' }
 } finally { Pop-Location }
-Step '4/5' '安装 Playwright Chromium' '浏览器登录与发布'
+Step '4/5' '准备浏览器' '平台操作优先 Ego，其次 Chrome；Chromium 用于渲染'
 Info '安装 Playwright Chromium...'
-# 降级而非中断：这是个 ~300MB 的下载，弱网下失败很常见，且只影响浏览器登录/发布。
+# Chromium 保留给 HTML/PDF/卡片渲染，账号流程另行检测 Ego / Chrome。
 if (-not (Invoke-WithProgress 'Playwright Chromium' $Python @('-m','playwright','install','chromium'))) {
-    Add-Warning 'Playwright Chromium' '下载失败，浏览器登录/发布不可用' `
+    Add-Warning 'Playwright Chromium' '下载失败，HTML/PDF/卡片渲染不可用' `
         "$Python -m playwright install chromium"
+}
+& $Python -m easel.browser
+if ($LASTEXITCODE -ne 0) {
+    Add-Warning '平台浏览器' '未找到可用的 Ego / Chrome，请安装 Chrome 或检查 Ego 安装' `
+        "$Python -m playwright install chrome"
+} else {
+    Info '复用本机已安装的 Ego / Chrome'
 }
 
 $envPath = Join-Path $Root '.env'

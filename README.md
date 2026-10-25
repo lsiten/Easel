@@ -225,7 +225,7 @@ Windows 安装器会优先通过 `winget` 自动安装缺失的 Python 3.10+、N
 
 1. 检查 Python、Python `venv`、Node.js 和 Git；FFmpeg 缺失时会尝试通过系统包管理器安装，装不上只会降级提示（视频/音频类技能不可用），不再中断安装。
 2. 询问是否创建或复用项目虚拟环境 `.venv/`；默认选择 `Y`。如果系统缺少 `venv`，会提示安装对应系统包（例如 Debian/Ubuntu 的 `python3-venv`）。
-3. 安装 Python、Web、媒体和浏览器发布依赖，构建 React Web 工作台并安装 Chromium。Python 依赖与前端构建失败会停止；Chromium 下载失败只降级提示（浏览器登录/发布不可用）。
+3. 安装 Python、Web、媒体和浏览器发布依赖，构建 React Web 工作台并安装用于 HTML/PDF/卡片渲染的 Chromium。平台账号登录、发布和数据抓取优先使用已安装的 Ego，否则使用 Chrome；两者均未检测到时提示安装 Chrome。Python 依赖与前端构建失败会停止；Chromium 下载失败只影响离线渲染并降级提示。
 
 **模型 API Key 在浏览器里配，安装器不再在终端询问。** 装完运行 `easel web`，在设置中选择已安装并认证的 Codex / OpenCode / ACP / Pi，或配置仅聊天模式的模型 API。原生底座沿用各自 CLI 的认证，不需要把凭证复制到 Easel；仅聊天模式可在浏览器中保存 API 地址、模型与 Key，也可编辑 `.env` 后运行 `easel doctor` 复检。详见 [Agent 底座](docs/agent-harnesses.md)。
 
@@ -284,7 +284,9 @@ EASEL_DIRECT_API_KEY=你的_API_Key
 | AI 音乐 | `MUSIC_PROVIDER` 及对应服务配置 | 相应音乐生成服务 |
 | 云端配音 | `VOICE_PROVIDER` 及对应服务配置 | 相应语音生成服务 |
 | 图片与音视频处理 | 无额外模型时也可使用本地工具 | FFmpeg |
-| 浏览器发布 | 在 Web“账号”页面登录目标平台 | Playwright Chromium、有效平台账号 |
+| 浏览器发布 | 在 Web“账号”页面登录目标平台 | Playwright、已安装 Ego（优先）或 Chrome、有效平台账号 |
+
+平台浏览器在每次启动时检测，可用 `python -m easel.browser` 查看。Ego 通过独立进程的本机 CDP 连接复用平台流程；账号资料及私有会话快照存于原平台目录下的 `Ego/`，每次结束时保存 Cookie 和站点存储，重开恢复。首次切换需重新登录，Chrome 原有资料保留。已安装 Ego 但启动失败会明确报错，不自动切换 Chrome。非标准位置可用环境变量 `EASEL_EGO_EXECUTABLE` / `EASEL_CHROME_EXECUTABLE` 指定浏览器程序路径；AI 助手临时操作网页时使用 Ego Skill/CLI。
 
 ## 🧩 使用 Easel
 

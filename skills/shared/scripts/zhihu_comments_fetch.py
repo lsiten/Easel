@@ -9,6 +9,7 @@
 from __future__ import annotations
 import argparse, json, sys, time
 from pathlib import Path
+from easel.browser import launch_persistent_context
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROFILE_DIR = Path.home() / ".easel-browser-profiles" / "ZhihuProfile"
@@ -39,11 +40,9 @@ def fetch_comments(article_url: str, limit: int = 100):
                 print(f"[WARN] 解析响应失败: {e}", file=sys.stderr)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch_persistent_context(
-            str(PROFILE_DIR),
-            headless=True,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-        )
+        browser = launch_persistent_context(p, str(PROFILE_DIR), {
+            "headless": True,
+            "args": ["--no-sandbox", "--disable-blink-features=AutomationControlled"]})
         page = browser.new_page()
         page.on("response", on_response)
 

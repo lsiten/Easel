@@ -7,7 +7,7 @@
 子命令：check / fetch / reply / plan / selftest
   - fetch：拦截 comment/page 接口响应 → 输出评论 JSON（含子评论）。
   - reply：按 [{id,nickname,reply}] 逐条回评；**默认 dry-run，加 --exec 才真发**；--replied-file 去重。
-真实抓取/回复需：playwright + chromium + 已登录 + 干净网络（小红书对代理出口常判风险，建议 --no-proxy）。
+真实抓取/回复需：Playwright + 已安装 Ego（优先）或 Chrome + 已登录 + 可访问平台的网络。
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import random
 import sys
 import time
 from pathlib import Path
+from easel.browser import launch_persistent_context, select_browser
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import content_guard  # noqa: E402  出站内容安全闸门
@@ -283,7 +284,7 @@ def _launch(p, headed: bool, base: str | None, proxy: str | None):
     else:
         # 显式直连：Chromium 级屏蔽系统/环境代理（开 VPN 也能用）——同抖音链兜底
         args.append("--no-proxy-server")
-    return p.chromium.launch_persistent_context(str(profile), **kwargs)
+    return launch_persistent_context(p, str(profile), kwargs)
 
 
 def _open_note(page, note_id: str, token: str):
@@ -454,13 +455,10 @@ def _resolve_note(a) -> tuple[str, str]:
 def cmd_check(_a) -> int:
     ok = True
     try:
-        from playwright.sync_api import sync_playwright
+        import playwright  # noqa: F401
         print("✅ playwright 已安装")
-        with sync_playwright() as p:
-            path = p.chromium.executable_path
-            print(f"✅ chromium 内核：{path}" if path and Path(path).exists()
-                  else "❌ 未安装浏览器内核（playwright install chromium）")
-            ok = bool(path and Path(path).exists())
+        browser = select_browser()
+        print(f"✅ {browser.name} 浏览器：{browser.executable}")
     except Exception as e:
         print(f"❌ playwright/内核不可用：{e}"); ok = False
     pd = _profile_dir(None)
