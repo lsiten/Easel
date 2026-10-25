@@ -220,7 +220,7 @@ export default function ChatPage({ apiDirect, session, stream, onSend, onStop, o
             let actions;
             if (isFinal) {
               const copy = () => navigator.clipboard?.writeText(msg.content);
-              // 只允许对「最后一轮」重试，契合 OpenClaw append-only 模型（不改写历史）；已移除编辑
+              // 只允许对「最后一轮」重试，契合 append-only 模型（不改写历史）；已移除编辑
               const isLastFinal = i === session.messages.length - 1;
               if (msg.role === 'user') {
                 actions = {

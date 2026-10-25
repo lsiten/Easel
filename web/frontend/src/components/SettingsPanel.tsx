@@ -7,9 +7,9 @@ import type { JobView } from './EnvBoard';
 import {
   fetchEnvTools, startEnvInstall, fetchEnvJob,
   fetchModelChannels, runChannelSelftest, saveModelConfig,
-  fetchLocalAgents, enableLocalAgent, fetchAvailableModels,
+  fetchAvailableModels,
 } from '../lib/api';
-import type { EnvTool, ModelRow, SelftestResult, LocalAgentInfo } from '../lib/api';
+import type { EnvTool, ModelRow, SelftestResult } from '../lib/api';
 import { IconSlidersHorizontal, IconPackage, IconEllipsis } from './settingsIcons';
 
 interface Props {
@@ -162,13 +162,6 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
   const [selftest, setSelftest] = useState<{ testedAt: number; byBase: Record<string, SelftestResult> } | null>(null);
   const [testing, setTesting] = useState(false);
   const [selftestNote, setSelftestNote] = useState('');
-  // 本机 agent CLI（Claude Code / Gemini CLI…）：装了并登录过就免 API key
-  const [localAgents, setLocalAgents] = useState<LocalAgentInfo[]>([]);
-  const [localAgentsErr, setLocalAgentsErr] = useState('');
-  const [enabling, setEnabling] = useState('');
-  // 每个本机 agent 行上选中的模型（'' = 用该家默认）。
-  const [laModels, setLaModels] = useState<Record<string, string>>({});
-  const [localAgentNote, setLocalAgentNote] = useState('');
 
   // 拉取模型列表：{ 通道#行号 → { loading, models, err } }。结果按 baseUrl 落 localStorage（7 天过期），
   // 刷新页面/重开设置不用重新拉。
@@ -188,28 +181,7 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
   const protoRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const modelCellRefs = useRef<Record<string, HTMLSpanElement | null>>({});
 
-  useEffect(() => {
-    if (harness !== 'openclaw') return;
-    let alive = true;
-    fetchWithRetry(() => fetchLocalAgents(), 3, 10000)
-      .then((d) => { if (alive) setLocalAgents(d.agents || []); })
-      .catch((e) => { if (alive) setLocalAgentsErr(e instanceof Error ? e.message : '探测失败'); });
-    return () => { alive = false; };
-  }, [harness]);
 
-  const doEnableAgent = useCallback(async (id: string, model = '') => {
-    setEnabling(id);
-    setLocalAgentNote('');
-    try {
-      const d = await enableLocalAgent(id, model);
-      setLocalAgentNote(d.note || '已接入');
-      setLocalAgents((as) => as.map((a) => (a.id === id ? { ...a, configured: true } : a)));
-    } catch (e) {
-      setLocalAgentNote(e instanceof Error ? e.message : '接入失败');
-    } finally {
-      setEnabling('');
-    }
-  }, []);
 
   const pullModels = useCallback(async (key: string, r: ModelRow) => {
     setModelLists((m) => ({ ...m, [key]: { loading: true, models: m[key]?.models || [], err: '' } }));
@@ -234,7 +206,7 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
     let alive = true;
     if (!harness) return;
     setModelLoading(true);
-    const configuration = selectedHarness === 'api' || selectedHarness === 'openclaw' ? selectedHarness : undefined;
+    const configuration = selectedHarness === 'api' ? selectedHarness : undefined;
     fetchWithRetry(() => fetchModelChannels(configuration), 5, 15000)
       .then((d) => {
         if (!alive) return;
@@ -270,7 +242,7 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
     }
   }, [refreshEnv]);
 
-  // ── 模型配置可编辑（v2）：保存到 .env / openclaw ──────────
+  // ── 模型配置可编辑（v2）：保存到 .env ──────────
   const [saving, setSaving] = useState(false);
   const [savedNote, setSavedNote] = useState('');
 
@@ -682,16 +654,16 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
             <button
               className="btn btn-sm btn-primary"
               onClick={() => void saveCurrent()}
-              disabled={saving || modelLoading || sec !== 'model' || (chan === 'chat' && (selectedHarness !== harness || !['api', 'openclaw'].includes(harness)))}
-              title={chan === 'chat' && !['api', 'openclaw'].includes(harness) ? '请使用下方「保存底座」保存原生配置' : undefined}
+              disabled={saving || modelLoading || sec !== 'model' || (chan === 'chat' && (selectedHarness !== harness || harness !== 'api'))}
+              title={chan === 'chat' && harness !== 'api' ? '请使用下方「保存底座」保存原生配置' : undefined}
             >
               {saving ? '保存中…' : '保存配置'}
             </button>
             <button
               className="btn btn-sm"
               onClick={() => void doSelftest(sec === 'model' ? chan : 'all')}
-              disabled={testing || modelLoading || selectedHarness !== harness || (!['api', 'openclaw'].includes(harness) && (sec !== 'model' || chan === 'chat'))}
-              title={!['api', 'openclaw'].includes(harness) ? '原生对话请发送消息或运行 easel ping 验证' : undefined}
+              disabled={testing || modelLoading || selectedHarness !== harness || (harness !== 'api' && (sec !== 'model' || chan === 'chat'))}
+              title={harness !== 'api' ? '原生对话请发送消息或运行 easel ping 验证' : undefined}
             >
               {testing ? '自测中…' : '全部自测'}
             </button>
@@ -738,10 +710,10 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
                 {savedNote ? <div className={`save-note${savedNote.startsWith('保存失败') || savedNote.startsWith('没有') ? ' err' : ''}`}>{savedNote}</div> : null}
 
                 {chan === 'chat' && <HarnessSettings onChange={setHarness} onSelect={setSelectedHarness} />}
-                {chan === 'chat' && (selectedHarness === 'api' || selectedHarness === 'openclaw') && (
+                {chan === 'chat' && selectedHarness === 'api' && (
                   <section className="st-panel active">
                     <div className="panel-top">
-                      <strong>{selectedHarness === 'api' ? '仅聊天模式 API 配置' : 'OpenClaw API 配置'}</strong>
+                      <strong>仅聊天模式 API 配置</strong>
                       <span className={`pill ${chatOk ? 'ok' : 'off'}`}><span className="dot" />{chatOk ? '已配置' : '未配置'}</span>
                       {selftest && <span className="desc">上次自测 {hhmm(selftest.testedAt)}</span>}
                       <span className="spacer" />
@@ -750,59 +722,6 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
                     {renderBoard(chatRows, { onRow: (i, p) => updateRow(setChatRows, i, p), onPrimary: setPrimaryRow, onRemove: removeRow }, 'chat')}
                     {selectedHarness === 'api' ? <div className="foot-note">此通道使用独立的 EASEL_DIRECT_API_* 配置，与原有 OpenAI 通道分开保存。支持聊天、画像、文本和图片附件（需模型支持图片）。没有本机文件、浏览器或技能执行工具。</div>
                       : <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>}
-                    {harness === 'openclaw' && (() => {
-                      // 本机 agent 区块：装了 Claude Code / Gemini CLI 并登录过的用户不需要填 API Key。
-                      // 只展示「已装」的行 —— 没装的用户看一眼全是灰的只会困惑。
-                      const shown = localAgents.filter((a) => a.installed);
-                      if (localAgentsErr) return <div className="foot-note">本机 agent 探测失败：{localAgentsErr}</div>;
-                      if (!shown.length) return null;
-                      const usable = shown.filter((a) => a.supported);
-                      return (
-                        <div className="local-agents">
-                          <div className="la-head">
-                            本机 Agent
-                            <span className="desc">
-                              {usable.length
-                                ? `检测到可免 API Key 使用：${usable.map((a) => a.label).join('、')}`
-                                : '检测到的 CLI 暂无底座后端，仍需填 API Key'}
-                            </span>
-                          </div>
-                          {shown.map((a) => (
-                            <div className="la-row" key={a.id}>
-                              <span className="la-name">{a.label}<small>{a.path || a.command}</small></span>
-                              <span className={`la-state ${a.configured ? 'ok' : a.supported ? 'todo' : 'na'}`}>
-                                {a.configured ? '已接入' : a.supported ? '可接入' : '暂不支持'}
-                              </span>
-                              <span className="la-act">
-                                {a.supported && (a.models?.length ?? 0) > 0 && (
-                                  <select
-                                    className="la-model"
-                                    value={laModels[a.id] ?? ''}
-                                    title="选择该 agent 使用的模型"
-                                    onChange={(e) => setLaModels((m) => ({ ...m, [a.id]: e.target.value }))}
-                                  >
-                                    <option value="">默认模型</option>
-                                    {(a.models ?? []).map((m) => (
-                                      <option key={m.id} value={m.id}>{m.name}</option>
-                                    ))}
-                                  </select>
-                                )}
-                                {a.supported && (
-                                  <button
-                                    className="btn btn-sm"
-                                    disabled={enabling === a.id}
-                                    title={a.configured ? '重新应用所选模型（写入 openclaw.json 主模型）' : '写入 openclaw.json，免 API Key 接入'}
-                                    onClick={() => void doEnableAgent(a.id, laModels[a.id] ?? '')}
-                                  >{enabling === a.id ? '接入中…' : a.configured ? '应用模型' : '一键接入'}</button>
-                                )}
-                              </span>
-                              <span className="la-hint">{a.loginHint}</span>
-                            </div>
-                          ))}
-                          {localAgentNote && <div className="foot-note">{localAgentNote}</div>}
-                        </div>
-                      );
-                    })()}
                     <div className="foot-note">改完点右上角「保存配置」（key 留空=不改）；自动降级链随统一网关接入开放。</div>
                   </section>
                 )}
@@ -905,7 +824,7 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
         </div>
 
         <div className="settings-foot">
-          {harness === 'api' || harness === 'openclaw'
+          {harness === 'api'
             ? 'ⓘ 供应商配置保存到 .env；API 直连仅聊天、无工具。切换底座或对话模式后请新建对话。'
             : 'ⓘ 原生 Agent 认证由其 CLI 管理；「保存底座」只保存底座、模型覆盖和权限设置。媒体通道仍单独配置。'}
         </div>

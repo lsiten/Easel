@@ -6,14 +6,14 @@ All notable changes to Easel are documented in this file.
 
 ### Added
 
-- Added selectable execution engines in Web settings: OpenClaw, Codex, OpenCode, a locally configured ACP agent, and chat-only mode. Engine selection is independent of model providers; Codex and OpenCode expose native model catalogs without copying their credentials.
-- Added optional OpenClaw installation: interactive setup defaults to OpenClaw but allows skipping it; use `bash setup.sh --skip-openclaw` or `.\setup.ps1 -SkipOpenClaw` to install the Web workspace first and select an already installed harness later.
+- Added selectable execution engines in Web settings: Codex, OpenCode, a locally configured ACP agent, and chat-only mode, alongside the then-default engine (since retired). Engine selection is independent of model providers; Codex and OpenCode expose native model catalogs without copying their credentials.
+- Made the then-default engine installation optional, allowing the Web workspace to be installed first and an already installed harness to be selected later. The engine-specific setup switches are now retired.
 - Added a responsive creative-artifact gallery with previous/next controls, keyboard navigation, and support for multiple outputs.
 - Added documentation and Agent-prompt path validation, plus harness-settings regression coverage across Linux, macOS, Windows, and Python 3.10/3.12.
 
 ### Improved
 
-- Moved shared Agent prompts and workspace resources to `agents/`, and built-in skills to `skills/builtin/`, replacing the OpenClaw-specific directory names. Updated documentation, prompt paths, installer references, and skill synchronization accordingly.
+- Moved shared Agent prompts and workspace resources to `agents/`, and built-in skills to `skills/builtin/`, replacing engine-specific directory names. Updated documentation, prompt paths, installer references, and skill synchronization accordingly.
 - Improved harness CLI discovery across user-specific npm, Node, and native installations, including Windows launchers and incomplete environments.
 - Preserved conversation ownership, native-session continuation, and existing browser history when switching personas or execution engines.
 - Improved settings loading, unified input and dropdown styling, retained configuration panels for unavailable harnesses, and prevented the sidebar Settings button from wrapping.
@@ -29,7 +29,7 @@ All notable changes to Easel are documented in this file.
 
 ### Upgrade Notes
 
-- Update to this version and rerun the appropriate setup script. For an existing OpenClaw workspace, `bash agents/sync.sh --docs-only` refreshes prompts without replacing private memory or user-provided skills.
+- Update to this version and rerun the appropriate setup script. At the time of this release, the legacy workspace supported a docs-only prompt refresh without replacing private memory or user-provided skills; that synchronization path is now retired.
 - Codex and OpenCode must be installed and authenticated separately before selection. Chat-only mode does not run tools or skills; generic ACP requires a local command configuration.
 - Platform maintenance, network restrictions, and anti-abuse checks can still prevent QR login; this release improves detection and error reporting rather than bypassing those restrictions.
 
@@ -44,20 +44,20 @@ All notable changes to Easel are documented in this file.
 
 ### Improved
 
-- Improved conversation latency: the Web chat now talks to the resident gateway over its OpenAI-compatible HTTP endpoint instead of spawning a thin `openclaw agent` client every turn, saving roughly 3s per turn (measured on Linux: 7.6s → 4.5s end-to-end). Transport is pinned per session and never switches mid-conversation, so history is never silently dropped. Set `EASEL_CHAT_TRANSPORT=cli` to return to the old path.
+- Improved conversation latency in the now-retired engine integration: Web chat used a resident HTTP endpoint instead of spawning a client every turn, saving roughly 3s per turn (measured on Linux: 7.6s → 4.5s end-to-end). Transport was pinned per session to avoid silently dropping history.
 - Improved responsiveness of the outputs library: `/api/outputs` moved to a thread pool so a full product-tree scan no longer blocks the event loop.
 - Improved CI coverage: the suite now runs `pytest` instead of `pytest tests/`, so the 38 skill-bundled tests under `skills/**/tests/` actually run in CI.
 
 ### Fixed
 
 - Fixed Windows installation on PowerShell 5.1, where `setup.ps1` failed outright during the configuration-writing stage (issue #41).
-- Fixed workspace resolution: `sync.sh`, `setup.ps1`, `doctor` and the video pipeline each hard-coded a different workspace path, so on the other OpenClaw layout they wrote to a directory the agent never reads — while still reporting success. All four now ask OpenClaw itself for its runtime `workspaceDir` (issue #19).
+- Fixed workspace resolution in the now-retired engine integration: `sync.sh`, `setup.ps1`, `doctor` and the video pipeline each hard-coded a different workspace path, so an alternate layout could write to a directory the agent never read — while still reporting success. All four were changed to query the engine's runtime `workspaceDir` (issue #19).
 - Fixed a placeholder API key in `.env.example` silently disabling the whole OpenAI-compatible branch of `setup.sh`, which produced a config with no provider while `doctor` still reported all green. `doctor` now verifies that the primary model's provider actually has credentials.
 - Fixed the HTML preview in the content library: the built-in「复制到公众号」button now works inside the preview drawer, and the preview always renders the latest version instead of a heuristically cached one.
 - Fixed images breaking after pasting into WeChat: local images referenced by a preview are inlined as base64 data-URIs, so the bytes travel with the clipboard instead of requiring WeChat to fetch a local Easel URL.
 - Fixed `install_tool.py` crashing under non-UTF-8 locales on Windows, which left the install endpoint with an empty id allowlist and made the 环境安装 page reject every tool.
 - Fixed domestic-platform publishing to fall back to a direct connection (Chromium-level `--no-proxy-server`), so it works with a VPN enabled.
-- Fixed `scripts/gateway.ps1` missing its UTF-8 BOM — the only Chinese-containing `.ps1` without one, which PowerShell 5.1 decoded using the system ANSI code page.
+- Fixed the legacy Windows service launcher missing its UTF-8 BOM — the only Chinese-containing `.ps1` without one, which PowerShell 5.1 decoded using the system ANSI code page.
 
 ### Security
 
@@ -81,7 +81,7 @@ All notable changes to Easel are documented in this file.
 - Improved the Skill library display: Chinese display names shown large with the original name beneath, kept in sync across search and the drawer.
 - Improved in-conversation cards to support multi-select (`ask_user` multiSelect rendering and multi-value submission).
 - Improved file uploads: files exceeding the upload limit are automatically converted to local materials via a copy channel (without changing the 50MB config).
-- Improved reasoning visibility: `--thinking` now defaults to medium so chain-of-thought shows when the gateway supports it.
+- Improved reasoning visibility in the now-retired engine integration: `--thinking` defaulted to medium when supported by that runtime.
 
 ### Fixed
 
@@ -106,8 +106,8 @@ All notable changes to Easel are documented in this file.
 
 ### Fixed
 
-- Fixed OpenClaw version detection in `easel doctor` on Windows (the `.cmd` shim cannot be invoked bare).
-- Fixed cross-platform gateway/launcher robustness and Xiaohongshu login navigation races.
+- Fixed harness version detection in `easel doctor` on Windows (the `.cmd` shim cannot be invoked bare).
+- Fixed cross-platform legacy service/launcher robustness and Xiaohongshu login navigation races.
 
 [0.1.1]: https://github.com/ZJU-REAL/Easel/releases/tag/v0.1.1
 

@@ -4,63 +4,26 @@
 - f2p（fail→pass）：改前应失败、改后应通过 —— 证明修复生效。
 - p2p（pass→pass）：改前改后都通过 —— 证明无回归。
 
-覆盖三处 Python 修复：
-  H2  easel chat 必须走 openclaw_base_cmd()，不能写死 "openclaw" 字面量（Windows 崩）
+覆盖两处 Python 修复：
   M6  easel web 必须传播子进程返回码（不能恒返回 0）
   M5  easel skill 的 _resolve_input 对非 UTF-8 文本文件不能裸崩
 
-H1（scripts/gateway.sh macOS 兼容）因有启动副作用，在 BEFORE/AFTER 阶段用
-直接的 `bash scripts/gateway.sh` 调用验证，不放进 pytest。
-
-运行（轻量 venv，只需 pytest）：
-  /tmp/easel-pr1-venv/bin/python -m pytest tests/test_pr1.py -q
+运行：
+  .venv/bin/python -m pytest tests/test_pr1.py -q
 """
+
 from __future__ import annotations
 
 import sys
 import types
 from pathlib import Path
 
-import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from easel import cli  # noqa: E402
 from easel.commands import skill as cli_skill  # noqa: E402
-
-
-# ============================================================
-# f2p: H2 — easel chat 走 openclaw_base_cmd()
-# ============================================================
-
-def test_chat_cmd_uses_openclaw_base_cmd_not_literal(monkeypatch):
-    """easel chat 组装的命令必须以 openclaw_base_cmd() 的返回开头，
-    而不是写死的字面量 "openclaw"（后者在 Windows 上是 .cmd shim，CreateProcess 跑不了）。"""
-    base = ["node", "/fake/path/openclaw.mjs"]
-    monkeypatch.setattr(cli, "openclaw_base_cmd", lambda: base)
-
-    cmd = cli._build_chat_cmd("sess-1")
-
-    assert cmd[: len(base)] == base, "命令应以 openclaw_base_cmd() 的返回开头"
-    assert "openclaw" not in cmd[: len(base)], "不应出现裸 PATH 字面量 'openclaw'"
-    # 关键参数仍在
-    assert "--profile" in cmd and "easel" in cmd
-    assert "tui" in cmd, "必须用 tui 子命令（chat 别名会强制本地模式，与 gateway 冲突）"
-    assert "--session" in cmd and "sess-1" in cmd
-    assert "--timeout-ms" in cmd
-
-
-def test_chat_cmd_attaches_message_only_when_prefix_present(monkeypatch):
-    """画像前缀非空时挂 --message；为空时不挂（与原 cmd_chat 行为一致）。"""
-    monkeypatch.setattr(cli, "openclaw_base_cmd", lambda: ["node", "/fake/oc.mjs"])
-
-    without = cli._build_chat_cmd("s", "")
-    assert "--message" not in without
-
-    with_prefix = cli._build_chat_cmd("s", "我当前使用的画像是「测试」。")
-    assert "--message" in with_prefix
-    assert "我当前使用的画像是「测试」。" in with_prefix
 
 
 # ============================================================
@@ -175,16 +138,3 @@ def test_find_skill_resolves_skill_prefix():
 
 def test_find_skill_missing():
     assert cli_skill._find_skill("nonexistent-xyz-000") is None
-
-
-# ============================================================
-# p2p: openclaw_base_cmd 仍是可调用、被 lru_cache 缓存的稳定接口
-# ============================================================
-
-def test_openclaw_base_cmd_is_cached_callable():
-    """修复后 cli 仍依赖 openclaw_base_cmd，确认它可被 monkeypatch 且为同一对象（lru_cache）。"""
-    from easel.openclaw_cmd import openclaw_base_cmd
-
-    assert callable(openclaw_base_cmd)
-    # lru_cache 包装后 .cache_info 存在，证明未意外替换成普通函数
-    assert hasattr(openclaw_base_cmd, "cache_info")

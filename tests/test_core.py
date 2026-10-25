@@ -245,7 +245,7 @@ def test_find_skill_produce_resolves():
     assert cli_skill._find_skill("social-content") == "social-content"
 
 
-def test_find_skill_openclaw_prefix_resolution():
+def test_find_skill_prefix_resolution():
     # 传裸名应能解析出带 skill- 前缀的技能
     assert cli_skill._find_skill("quality-gate") == "skill-quality-gate"
 
@@ -558,30 +558,6 @@ def test_chat_stop_waits_for_process_and_supervisor_cleanup():
     result, proc = asyncio.run(scenario())
     assert result == {"stopped": True}
     assert proc.terminated and proc.poll() == -15
-
-
-def test_raw_stream_events_are_isolated_by_run_id():
-    # 共享 raw 流里事件带 runId（无 sessionId）：本轮闩锁自己的 runId 后，别的 run 的事件被拒。
-    own = json.dumps({
-        "event": "assistant_text_stream", "evtType": "text_delta",
-        "runId": "run-a", "delta": "自己的回答",
-    })
-    foreign = json.dumps({
-        "event": "assistant_thinking_stream", "evtType": "thinking_delta",
-        "runId": "run-b", "delta": "其他会话的思考",
-    })
-
-    assert web._raw_event_for_run(own, "run-a")["delta"] == "自己的回答"
-    assert web._raw_event_for_run(foreign, "run-a") is None
-
-
-def test_raw_stream_parser_accepts_events_before_run_is_latched():
-    # expected_run_id=None = 本轮尚未闩锁 → 先放行，调用方据此从 event['runId'] 闩锁。
-    ev = json.dumps({
-        "event": "assistant_text_stream", "evtType": "text_delta",
-        "runId": "run-a", "delta": "首个事件",
-    })
-    assert web._raw_event_for_run(ev, None)["delta"] == "首个事件"
 
 
 # ---- Gemini 适配器：流式端点改写 + finishReason 归一 ----

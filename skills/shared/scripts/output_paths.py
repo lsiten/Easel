@@ -15,7 +15,7 @@ def _discover_root() -> Path:
     for parent in (Path(__file__).resolve().parent, *Path(__file__).resolve().parents):
         outputs = parent / "outputs"
         if outputs.exists():
-            # The OpenClaw workspace exposes outputs as a symlink to the project.
+            # The runtime workspace may expose outputs as a symlink to the project.
             return outputs.resolve().parent
     raise RuntimeError("找不到 Easel 项目根；请设置 EASEL_ROOT")
 

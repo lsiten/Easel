@@ -31,7 +31,7 @@ def text_content(content: object) -> str:
 
 
 def encode_signature(signature: str) -> str:
-    # OpenClaw normalizes tool-call IDs to at most 40 alphanumeric characters.
+    # The agent runtime normalizes tool-call IDs to at most 40 alphanumeric characters.
     call_id = "call" + uuid.uuid4().hex
     SIGNATURES[call_id] = signature
     if len(SIGNATURES) > 4096:
@@ -233,7 +233,7 @@ class Handler(BaseHTTPRequestHandler):
             model = body.get("model", DEFAULT_MODEL)
             if body.get("stream"):
                 # 走 Gemini 原生 SSE，把 thought/answer/tool 增量逐块转成 OpenAI chunk，
-                # 让上层 OpenClaw 逐字流式 + 实时显示思考 CoT（reasoning_content）。
+                # 让上层 Agent 底座逐字流式 + 实时显示思考 CoT（reasoning_content）。
                 self.stream_gemini(endpoint, payload, api_key, model)
             else:
                 request = Request(

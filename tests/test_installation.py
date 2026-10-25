@@ -23,7 +23,6 @@ def test_skip_initializes_chat_only_without_touching_env_or_profile(tmp_path):
     assert installation.initialize_runtime(tmp_path) == "api"
     assert store.settings(tmp_path / "outputs", {"EASEL_CHAT_TRANSPORT": "http"})["runtime"] == "api"
     assert env.read_bytes() == original
-    assert not (tmp_path / "home" / ".openclaw-easel").exists()
     assert not (tmp_path / "home" / ".codex").exists()
 
 
@@ -55,15 +54,6 @@ def test_explicit_environment_selection_is_not_overridden(tmp_path, monkeypatch,
     assert not (tmp_path / "outputs" / "_harness" / "config.json").exists()
 
 
-def test_skip_keeps_existing_openclaw_profile_but_does_not_require_it(tmp_path):
-    state = tmp_path / "home" / ".openclaw-easel" / "openclaw.json"
-    state.parent.mkdir(parents=True)
-    state.write_bytes(b'{"custom": "keep"}')
-    original = state.read_bytes()
-    installation.initialize_runtime(tmp_path)
-    assert store.settings(tmp_path / "outputs", {})["runtime"] == "api"
-    assert state.read_bytes() == original
-
 
 def test_repeated_skip_is_idempotent(tmp_path):
     installation.initialize_runtime(tmp_path)
@@ -93,7 +83,7 @@ def test_real_install_linux_creates_environment_before_setup():
     workflow = (Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml").read_text()
     install_job = workflow.split("\n  install-real:", 1)[1]
     creation = install_job.index("run: python -m venv .venv")
-    setup = install_job.index("run: bash setup.sh --openclaw")
+    setup = install_job.index("run: bash setup.sh")
     doctor = install_job.index(".venv/bin/easel doctor")
     assert creation < setup < doctor
     assert "if: runner.os == 'Linux'" in install_job[:creation].rsplit("- name:", 1)[1]

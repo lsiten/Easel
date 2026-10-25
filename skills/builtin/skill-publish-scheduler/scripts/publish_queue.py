@@ -176,7 +176,7 @@ def cmd_run(a) -> int:
         print(f"    委派：调用对应平台 publisher SKILL（skill-{it['platform']}-... / "
               f"cross-platform-publish）执行发布")
         if a.exec:
-            # 真实发布由上层（OpenClaw agent）按此计划委派各平台 publisher SKILL；
+            # 真实发布由上层 agent 按此计划委派各平台 publisher SKILL；
             # 本脚本不直接驱动浏览器，只负责调度与状态。此处标记为待上层回填。
             it["note"] = (it.get("note", "") + " [run:待平台SKILL回填结果]").strip()
     if a.exec:

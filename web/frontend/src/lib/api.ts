@@ -24,6 +24,13 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** 给接口 URL 追加 ?persona=（无 persona 时原样返回）；用于按画像隔离登录态/数据的接口。 */
+function appendPersona(url: string, persona?: string): string {
+  if (!persona) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}persona=${encodeURIComponent(persona)}`;
+}
+
 export interface StatusResponse {
   gateway: boolean;
   transport?: string;
@@ -139,6 +146,7 @@ export interface OutputNode {
   children?: OutputNode[];   // 仅 dir
   fileCount?: number;        // 仅 dir：递归文件数
   meta?: OutputMeta;         // 仅顶层项目 dir
+  external?: boolean;        // 外部只读内容源（本地知识库）：前端隐藏删除、后端拒写/删
 }
 
 /** @deprecated 用 OutputNode（type==='file'）。保留别名减少改动面。 */
@@ -262,8 +270,8 @@ export function deleteIdea(id: string): Promise<{ ok: boolean }> {
   return request(`/api/ideas/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
-export function fetchSkills(): Promise<SkillItem[]> {
-  return request<SkillItem[]>('/api/skills');
+export function fetchSkills(persona?: string): Promise<SkillItem[]> {
+  return request<SkillItem[]>(persona ? `/api/skills?persona=${encodeURIComponent(persona)}` : '/api/skills');
 }
 
 export function fetchSkillDetail(name: string): Promise<SkillDetail> {
@@ -310,8 +318,70 @@ export function profileBuildStatus(name: string): Promise<ProfileBuildStatus> {
   return request<ProfileBuildStatus>(`/api/profile/build/status/${encodeURIComponent(name)}`);
 }
 
-export function fetchOutputs(): Promise<OutputNode[]> {
-  return request<OutputNode[]>('/api/outputs');
+export function fetchOutputs(persona?: string): Promise<OutputNode[]> {
+  // persona 有知识库聚焦时，后端只返回该画像命中的内容源子节点（通用/空=全量）。
+  return request<OutputNode[]>(persona ? `/api/outputs?persona=${encodeURIComponent(persona)}` : '/api/outputs');
+}
+
+/** 懒加载外部内容源（本地知识库）某层子节点；路径形如 @<source>/<子路径>。 */
+export function fetchOutputChildren(path: string, persona?: string): Promise<OutputNode[]> {
+  const base = `/api/output-children/${path.split('/').map(encodeURIComponent).join('/')}`;
+  return request<OutputNode[]>(persona ? `${base}?persona=${encodeURIComponent(persona)}` : base);
+}
+
+/** 某画像对知识库的聚焦范围；用于内容库显示「当前查询视角」。无聚焦 → focused=false（通用）。 */
+export function fetchKbScope(persona?: string): Promise<{ focused: boolean; patterns: string[] }> {
+  return persona
+    ? request<{ focused: boolean; patterns: string[] }>(`/api/persona/${encodeURIComponent(persona)}/kb-scope`)
+    : Promise.resolve({ focused: false, patterns: [] });
+}
+
+// ── 知识库能力（集成项目 Otter Wiki / llm-wiki）：查询 / 沉淀，随画像聚焦 ──
+export interface KbStatus {
+  available: boolean; source: string; vault: string; documents: number; blocks: number;
+  error?: string;
+}
+export interface KbHit { heading: string; line_start: number; line_end: number; snippet: string; artifact_hash?: string; }
+export interface KbDoc { relative_path: string; best_score: number; hits: KbHit[]; }
+export interface KbQueryResult {
+  question: string; total_hits: number; documents: KbDoc[];
+  source?: string; scoped?: boolean; available?: boolean; error?: string;
+}
+export interface KbAskResult { question: string; summary: string; available?: boolean; error?: string; }
+export interface KbSearchHit { relative_path: string; heading?: string; line_start?: number; snippet?: string; score?: number; }
+export interface KbSearchResult { query: string; hits: KbSearchHit[]; source?: string; scoped?: boolean; available?: boolean; error?: string; }
+export interface KbDepositResult {
+  applied: boolean; conflict?: boolean; target?: string; plan_sha256?: string;
+  preview?: string; transaction_id?: string; changed?: string[]; error?: string; available?: boolean;
+}
+
+export function kbStatus(persona?: string): Promise<KbStatus> {
+  return request<KbStatus>(persona ? `/api/kb/status?persona=${encodeURIComponent(persona)}` : '/api/kb/status');
+}
+export function kbQuery(question: string, limit = 10, persona?: string): Promise<KbQueryResult> {
+  const q = new URLSearchParams({ question, limit: String(limit) });
+  if (persona) q.set('persona', persona);
+  return request<KbQueryResult>(`/api/kb/query?${q.toString()}`);
+}
+export function kbAsk(question: string, limit = 10, persona?: string): Promise<KbAskResult> {
+  const q = new URLSearchParams({ question, limit: String(limit) });
+  if (persona) q.set('persona', persona);
+  return request<KbAskResult>(`/api/kb/ask?${q.toString()}`);
+}
+export function kbSearch(query: string, limit = 10, persona?: string): Promise<KbSearchResult> {
+  const q = new URLSearchParams({ query, limit: String(limit) });
+  if (persona) q.set('persona', persona);
+  return request<KbSearchResult>(`/api/kb/search?${q.toString()}`);
+}
+export function kbIngest(body: { source: string; target?: string; title?: string; apply?: boolean; }, persona?: string): Promise<KbDepositResult> {
+  return request<KbDepositResult>('/api/kb/ingest' + (persona ? `?persona=${encodeURIComponent(persona)}` : ''), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+}
+export function kbSave(body: { title: string; content: string; target?: string; apply?: boolean; }, persona?: string): Promise<KbDepositResult> {
+  return request<KbDepositResult>('/api/kb/save' + (persona ? `?persona=${encodeURIComponent(persona)}` : ''), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
 }
 
 export function fetchArtifactArchive(path: string, signal?: AbortSignal): Promise<{ paths: string[] }> {
@@ -334,7 +404,7 @@ export function deleteOutput(path: string): Promise<{ ok: boolean; deleted: stri
 
 export interface UploadedFile { id: string; name: string; path: string; }
 
-/** OpenClaw ask_user 问答题（SSE question 事件 payload）。 */
+/** ask_user 问答题（SSE question 事件 payload）。 */
 export interface ChatQuestionOption { label: string; description?: string; }
 export interface ChatQuestionItem {
   questionId: string;
@@ -445,13 +515,13 @@ export function saveCredentials(
 }
 
 /** 启动「公众号后台」扫码登录（数据中心取数用，独立于 AppID 凭证）。返回二维码状态。 */
-export function startMpLogin(platform: string): Promise<LoginStatus> {
-  return request<LoginStatus>(`/api/accounts/${encodeURIComponent(platform)}/mp-login`, { method: 'POST' });
+export function startMpLogin(platform: string, persona?: string): Promise<LoginStatus> {
+  return request<LoginStatus>(appendPersona(`/api/accounts/${encodeURIComponent(platform)}/mp-login`, persona), { method: 'POST' });
 }
 
 /** 轮询公众号后台扫码登录状态。 */
-export function mpLoginStatus(platform: string): Promise<LoginStatus> {
-  return request<LoginStatus>(`/api/accounts/${encodeURIComponent(platform)}/mp-login/status`,
+export function mpLoginStatus(platform: string, persona?: string): Promise<LoginStatus> {
+  return request<LoginStatus>(appendPersona(`/api/accounts/${encodeURIComponent(platform)}/mp-login/status`, persona),
     { signal: AbortSignal.timeout(8000) });
 }
 
@@ -463,8 +533,8 @@ export interface LoginStatus {
   qrTs?: number;
 }
 
-export function fetchAccounts(): Promise<AccountItem[]> {
-  return request<AccountItem[]>('/api/accounts');
+export function fetchAccounts(persona?: string): Promise<AccountItem[]> {
+  return request<AccountItem[]>(appendPersona('/api/accounts', persona));
 }
 
 export interface AccountWhoami {
@@ -474,13 +544,13 @@ export interface AccountWhoami {
 }
 
 /** 真校验某平台登录态 + 拉昵称/头像（后端起 headless 浏览器，数秒）。 */
-export function accountWhoami(platform: string, force = false): Promise<AccountWhoami> {
-  return request<AccountWhoami>(`/api/accounts/${encodeURIComponent(platform)}/whoami${force ? '?force=true' : ''}`);
+export function accountWhoami(platform: string, force = false, persona?: string): Promise<AccountWhoami> {
+  return request<AccountWhoami>(appendPersona(`/api/accounts/${encodeURIComponent(platform)}/whoami${force ? '?force=true' : ''}`, persona));
 }
 
 /** 退出登录：删该平台持久化登录态。 */
-export function logoutAccount(platform: string): Promise<{ ok: boolean; deleted: string[] }> {
-  return request(`/api/logout/${encodeURIComponent(platform)}`, { method: 'POST' });
+export function logoutAccount(platform: string, persona?: string): Promise<{ ok: boolean; deleted: string[] }> {
+  return request(appendPersona(`/api/logout/${encodeURIComponent(platform)}`, persona), { method: 'POST' });
 }
 
 export interface PublishResult {
@@ -529,25 +599,25 @@ export interface PublishStatus {
 }
 
 /** 轮询异步发布状态（抖音）。 */
-export function publishStatus(platform: string): Promise<PublishStatus> {
-  return request<PublishStatus>(`/api/publish/${encodeURIComponent(platform)}/status`);
+export function publishStatus(platform: string, persona?: string): Promise<PublishStatus> {
+  return request<PublishStatus>(appendPersona(`/api/publish/${encodeURIComponent(platform)}/status`, persona));
 }
 
 /** 发布触发短信墙时回填验证码。 */
-export function submitPublishSms(platform: string, code: string): Promise<{ ok: boolean }> {
-  return request(`/api/publish/${encodeURIComponent(platform)}/sms`, {
+export function submitPublishSms(platform: string, code: string, persona?: string): Promise<{ ok: boolean }> {
+  return request(appendPersona(`/api/publish/${encodeURIComponent(platform)}/sms`, persona), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code }),
   });
 }
 
-export function startLogin(platform: string): Promise<LoginStart> {
-  return request<LoginStart>(`/api/login/${encodeURIComponent(platform)}?restart=true`, { method: 'POST' });
+export function startLogin(platform: string, persona?: string): Promise<LoginStart> {
+  return request<LoginStart>(appendPersona(`/api/login/${encodeURIComponent(platform)}?restart=true`, persona), { method: 'POST' });
 }
 
-export function loginStatus(platform: string): Promise<LoginStatus> {
-  return request<LoginStatus>(`/api/login/${encodeURIComponent(platform)}/status`,
+export function loginStatus(platform: string, persona?: string): Promise<LoginStatus> {
+  return request<LoginStatus>(appendPersona(`/api/login/${encodeURIComponent(platform)}/status`, persona),
     { signal: AbortSignal.timeout(8000) });
 }
 
@@ -576,19 +646,19 @@ export interface AccountAnalytics {
 }
 
 /** 支持抓数据的平台 + 各自登录态。 */
-export function fetchAnalyticsPlatforms(): Promise<AnalyticsPlatform[]> {
-  return request<AnalyticsPlatform[]>('/api/analytics/platforms');
+export function fetchAnalyticsPlatforms(persona?: string): Promise<AnalyticsPlatform[]> {
+  return request<AnalyticsPlatform[]>(appendPersona('/api/analytics/platforms', persona));
 }
 
 /** 抓某平台已登录账号的创作数据，客户端等待时限略长于后端。 */
-export function fetchAccountAnalytics(platform: string): Promise<AccountAnalytics> {
-  return request<AccountAnalytics>(`/api/analytics/${encodeURIComponent(platform)}`,
+export function fetchAccountAnalytics(platform: string, persona?: string): Promise<AccountAnalytics> {
+  return request<AccountAnalytics>(appendPersona(`/api/analytics/${encodeURIComponent(platform)}`, persona),
     { signal: AbortSignal.timeout(platform === 'wechat-oa' ? 195000 : 105000) });
 }
 
 /** 回填短信验证码（登录风控短信墙）：提交后 runner 读走填码继续登录。 */
-export function submitLoginSms(platform: string, code: string): Promise<{ ok: boolean }> {
-  return request(`/api/login/${encodeURIComponent(platform)}/sms`, {
+export function submitLoginSms(platform: string, code: string, persona?: string): Promise<{ ok: boolean }> {
+  return request(appendPersona(`/api/login/${encodeURIComponent(platform)}/sms`, persona), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code }),
@@ -596,11 +666,11 @@ export function submitLoginSms(platform: string, code: string): Promise<{ ok: bo
 }
 
 /** 用户显式停止：终止后端正在跑的对话 agent，释放会话锁，令下一句能立刻发。 */
-export function stopChat(sessionId: string): Promise<{ stopped: boolean }> {
+export function stopChat(sessionId: string, persona?: string): Promise<{ stopped: boolean }> {
   return request('/api/chat/stop', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ sessionId, persona: persona || undefined }),
   });
 }
 
@@ -751,9 +821,12 @@ export function streamChat(
   return controller;
 }
 
-/** 取某会话最近一轮的完整结果（SSE 断线后据此取回）。 */
-export function fetchLastTurn(sessionId: string, turnId?: string): Promise<{ status: string; text: string; turn_id?: string }> {
-  const query = turnId ? `?turn_id=${encodeURIComponent(turnId)}` : '';
+/** 取某会话最近一轮的完整结果（SSE 断线后据此取回）。persona 用于画像级隔离：后端据此把会话折成 effective key。 */
+export function fetchLastTurn(sessionId: string, persona?: string, turnId?: string): Promise<{ status: string; text: string; turn_id?: string }> {
+  const parts: string[] = [];
+  if (persona) parts.push(`persona=${encodeURIComponent(persona)}`);
+  if (turnId) parts.push(`turn_id=${encodeURIComponent(turnId)}`);
+  const query = parts.length ? `?${parts.join('&')}` : '';
   return request(`/api/chat/last/${encodeURIComponent(sessionId)}${query}`);
 }
 
@@ -868,7 +941,7 @@ export function saveModelConfig(channel: string, rows: ModelSaveRow[]): Promise<
 export interface ModelChannelRows { rows: ModelRow[] }
 
 export interface ModelChannelsResponse {
-  transport?: 'api' | 'openclaw';
+  transport?: 'api';
   channels: {
     chat: ModelChannelRows;
     transcribe: ModelChannelRows;
@@ -884,7 +957,7 @@ export function fetchModelChannels(runtime?: string): Promise<ModelChannelsRespo
   return request(`/api/settings/models${runtime ? `?runtime=${encodeURIComponent(runtime)}` : ''}`);
 }
 
-export function saveChatTransport(transport: 'api' | 'openclaw'): Promise<ModelChannelsResponse> {
+export function saveChatTransport(transport: 'api'): Promise<ModelChannelsResponse> {
   return request('/api/settings/chat/transport', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ transport }),
@@ -915,7 +988,6 @@ export interface LocalAgentInfo {
   installed: boolean;
   command: string;
   path: string;
-  openclawProvider: string | null;
   configProvider?: string | null;
   supported: boolean;
   configured: boolean;

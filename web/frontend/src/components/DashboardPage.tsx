@@ -51,7 +51,8 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
   const [anaSel, setAnaSel] = useState('');
   const [anaData, setAnaData] = useState<Record<string, AccountAnalytics | 'loading' | 'error'>>(() => {
     try {
-      const cache = JSON.parse(localStorage.getItem('easel_analytics') || '{}') as Record<string, AccountAnalytics | 'loading' | 'error'>;
+      const anaKey = persona ? `easel_analytics__${encodeURIComponent(persona)}` : 'easel_analytics';
+      const cache = JSON.parse(localStorage.getItem(anaKey) || '{}') as Record<string, AccountAnalytics | 'loading' | 'error'>;
       return Object.fromEntries(Object.entries(cache).filter(([platform, value]) =>
         value && typeof value === 'object' && value.platform === platform
         && typeof value.loggedIn === 'boolean'));
@@ -61,7 +62,7 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
   const [anaErrors, setAnaErrors] = useState<Record<string, string>>({});
   const [anaWin, setAnaWin] = useState<'last' | 'day' | 'week' | 'month' | 'year'>('week');
   // whoami 自愈：登录态以真实 profile 为准（与账号页共享 localStorage 缓存）
-  const [whoamiMap, setWhoamiMap] = useState<Record<string, AccountWhoami>>(() => getWhoamiCache());
+  const [whoamiMap, setWhoamiMap] = useState<Record<string, AccountWhoami>>(() => getWhoamiCache(persona));
   // 与 AccountsPage 同款：卸载后不再触发 setState（whoami 每个平台要起浏览器，最慢数秒）
   const aliveRef = useRef(true);
   useEffect(() => {
@@ -72,12 +73,12 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
   useEffect(() => {
     fetchTrends('weibo,douyin', 6).then((d) => setTrends(d.trends)).catch(() => {});
     fetchSchedule().then(setSchedule).catch(() => {});
-    fetchOutputs().then(setOutputs).catch(() => {});
-    fetchAccounts().then(setAccounts).catch(() => {});
+    fetchOutputs(persona).then(setOutputs).catch(() => {});
+    fetchAccounts(persona).then(setAccounts).catch(() => {});
     fetchIdeas().then(setIdeas).catch(() => {});
-    fetchAnalyticsPlatforms().then((ps) => {
+    fetchAnalyticsPlatforms(persona).then((ps) => {
       setAnaPlats(ps);
-      const cache = getWhoamiCache();
+      const cache = getWhoamiCache(persona);
       const isLog = (p: AnalyticsPlatform) => p.loggedIn || !!cache[p.platform]?.loggedIn;
       const first = ps.find(isLog);
       if (first) setAnaSel((s) => s || first.platform);
@@ -85,6 +86,7 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
       // B 站走 cookie、公众号走凭证/官方 API 判定，都不起浏览器。
       const API_BASED = new Set(['bilibili', 'wechat-oa']);
       verifyStale(ps.filter((p) => !API_BASED.has(p.platform)).map((p) => p.platform), {
+        persona,
         alive: () => aliveRef.current,
         onUpdate: (platform, r) => {
           setWhoamiMap((m) => ({ ...m, [platform]: r }));
@@ -92,7 +94,7 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
         },
       });
     }).catch(() => {});
-  }, []);
+  }, [persona]);
 
   const runAna = (platform: string) => {
     setAnaSel(platform);
@@ -100,12 +102,12 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
     anaPending.current.add(platform);
     setAnaErrors((errors) => ({ ...errors, [platform]: '' }));
     setAnaData((d) => ({ ...d, [platform]: 'loading' }));
-    fetchAccountAnalytics(platform)
+    fetchAccountAnalytics(platform, persona)
       .then((r) => setAnaData((d) => {
         const next = { ...d, [platform]: r };
         const cache = Object.fromEntries(Object.entries(next).filter(([, value]) =>
           value && typeof value === 'object'));
-        try { localStorage.setItem('easel_analytics', JSON.stringify(cache)); } catch { /* quota */ }
+        try { localStorage.setItem(persona ? `easel_analytics__${encodeURIComponent(persona)}` : 'easel_analytics', JSON.stringify(cache)); } catch { /* quota */ }
         return next;
       }))
       .catch((error: unknown) => {
@@ -150,10 +152,9 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
         <h1 className="page-title" style={{ fontSize: 26 }}>{greet} 👋</h1>
         <p className="page-subtitle">
           {apiDirect ? (gatewayStatus === 'connected' ? '仅聊天模式已配置，可开始对话。' : '请先配置仅聊天模式的模型 API。')
-            : agentRuntime !== 'openclaw' ? (gatewayStatus === 'connected'
+            : (gatewayStatus === 'connected'
             ? `${agentRuntime} CLI 已安装；原生登录及模型可用性请发送消息验证。`
-            : `请先在服务器安装并配置 ${agentRuntime} CLI。`)
-            : gatewayStatus === 'connected' ? '一切就绪。' : '⚠ 网关未连接。'}
+            : `请先在服务器安装并配置 ${agentRuntime} CLI。`)}
           {persona ? ` 当前画像「${persona}」。` : ' 通用模式——指定画像效果更好。'}
           从热点到发布，一站式搞定今天的内容。
         </p>

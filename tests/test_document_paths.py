@@ -59,16 +59,6 @@ def test_sdk_resources_resolve_to_vendor_package_root(tmp_path):
     assert validate_document(document, tmp_path) == ([], 1)
 
 
-def test_old_repository_paths_are_rejected_but_native_openclaw_paths_are_valid(tmp_path):
-    document = write_file(
-        tmp_path, "agents/workspace/AGENTS.md",
-        "`~/.openclaw/workspace-easel` `~/.openclaw-easel/workspace`\n"
-        "`skills/openclaw/example/SKILL.md` `openclaw/workspace/AGENTS.md`\n",
-    )
-    issues, _ = validate_document(document, tmp_path)
-    assert len([issue for issue in issues if issue.reason == "obsolete repository path"]) == 2
-    assert all(issue.line == 2 for issue in issues)
-
 
 def test_audit_includes_nested_skill_docs_shared_and_all_prompt_files(tmp_path):
     paths = [
@@ -120,12 +110,3 @@ def test_documented_command_scripts_resolve_relative_to_skill_root(tmp_path, mon
     assert validate_skill_commands.resolve_script(document, "$ROOT/scripts/run.py") is None
 
 
-def test_windows_repository_paths_are_checked_on_any_host(tmp_path):
-    write_file(tmp_path, "agents/workspace/AGENTS.md")
-    document = write_file(
-        tmp_path, "README.md",
-        r"`agents\workspace\AGENTS.md` `skills\openclaw\example\SKILL.md`",
-    )
-    issues, checked = validate_document(document, tmp_path)
-    assert checked == 2
-    assert len([issue for issue in issues if issue.reason == "obsolete repository path"]) == 1

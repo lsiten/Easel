@@ -20,6 +20,11 @@ for (const platform of ['zhihu', 'xiaohongshu', 'weixin-channels']) {
     const exports = {};
     runInNewContext(outputText, {
       exports, encodeURIComponent,
+      appendPersona: (url, persona) => {
+        if (!persona) return url;
+        const sep = url.includes('?') ? '&' : '?';
+        return `${url}${sep}persona=${encodeURIComponent(persona)}`;
+      },
       request: async (path, options) => { calls.push({ path, options }); return { state: 'starting' }; },
     });
     assert.equal((await exports.startLogin(platform)).state, 'starting');

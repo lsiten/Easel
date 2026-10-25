@@ -36,7 +36,7 @@ ORIGINAL_ENV = (
 
 @pytest.fixture()
 def sandbox(tmp_path, monkeypatch):
-    monkeypatch.setenv("EASEL_AGENT_RUNTIME", "openclaw")
+    monkeypatch.setenv("EASEL_AGENT_RUNTIME", "api")
     env_file = tmp_path / ".env"
     env_file.write_text(ORIGINAL_ENV, encoding="utf-8")
     monkeypatch.setattr(web, "ENV_FILE", env_file)
@@ -148,16 +148,3 @@ def test_fetch_reuses_stored_key_when_draft_empty(sandbox, monkeypatch):
     assert url == "https://api.openai.com/v1/models"
     assert headers.get("authorization") == "Bearer sk-fak...test"
 
-
-def test_fetch_custom_slot_uses_provider_name(sandbox, monkeypatch):
-    """自定义供应商：凭据按 provider 名从 openclaw.json 取。"""
-    monkeypatch.setattr(web, "_openclaw_provider_creds",
-                        lambda: {"myproxy": ("https://my.example.com/v1", "sk-stored")})
-    capture: list = []
-    _stub_opener(monkeypatch, json.dumps({"data": [{"id": "m2"}]}).encode(), capture)
-    resp = sandbox.post("/api/settings/models/available",
-                        json={"slot": "custom", "name": "myproxy"})
-    assert resp.status_code == 200, resp.text
-    url, headers = capture[0]
-    assert url == "https://my.example.com/v1/models"
-    assert headers.get("authorization") == "Bearer sk-stored"

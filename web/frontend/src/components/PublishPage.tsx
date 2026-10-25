@@ -21,11 +21,13 @@ const PLATFORMS: { key: string; label: string; titleLimit?: number; bodyLimit: n
   { key: 'zhihu', label: '知乎', bodyLimit: 5000, hint: '长文/回答，讲清逻辑' },
   { key: 'bilibili', label: 'B站', titleLimit: 80, bodyLimit: 2000, hint: '需附视频，标题≤80、简介≤2000，默认投「知识」分区' },
   { key: 'wechat-oa', label: '公众号', titleLimit: 64, bodyLimit: 20000, hint: '图文文章，正文用 Markdown，首图作封面，发到草稿箱；需先在账号页「登录公众号后台」扫码' },
+  { key: 'csdn', label: 'CSDN', titleLimit: 60, bodyLimit: 50000, hint: '技术文章/博客，Markdown 正文，无需媒体' },
+  { key: 'juejin', label: '掘金', titleLimit: 30, bodyLimit: 50000, hint: '技术文章/专栏，Markdown 正文，无需媒体' },
 ];
 const LABEL2KEY = Object.fromEntries(PLATFORMS.map((p) => [p.label, p.key]));
 
 // 能一键发布的平台（有后端 publisher）
-const PUBLISHABLE = new Set(['xiaohongshu', 'douyin', 'kuaishou', 'weixin-channels', 'zhihu', 'bilibili', 'wechat-oa']);
+const PUBLISHABLE = new Set(['xiaohongshu', 'douyin', 'kuaishou', 'weixin-channels', 'zhihu', 'bilibili', 'wechat-oa', 'csdn', 'juejin']);
 // 必须附带媒体的平台（无媒体发不了）——公众号需要一张封面图，也计入
 const MEDIA_REQUIRED = new Set(['xiaohongshu', 'douyin', 'kuaishou', 'weixin-channels', 'bilibili', 'wechat-oa']);
 // 只能发视频的平台（抖音/视频号/B站：图文不走此链路，必须视频）
@@ -91,8 +93,8 @@ export default function PublishPage({ persona }: PublishPageProps) {
 
   // 登录态 + 可选媒体列表
   useEffect(() => {
-    fetchAccounts().then(setAccounts).catch(() => { /* 忽略 */ });
-    fetchOutputs().then((roots) => {
+    fetchAccounts(persona).then(setAccounts).catch(() => { /* 忽略 */ });
+    fetchOutputs(persona).then((roots) => {
       const files: OutputFile[] = [];
       const walk = (n: OutputFile) => {
         if (n.type === 'file') { if (n.kind === 'image' || n.kind === 'video') files.push(n); return; }
@@ -256,7 +258,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
         resolve(); return;
       }
       let s;
-      try { s = await publishStatus(key); } catch { return; }  // 单次失败忽略
+      try { s = await publishStatus(key, persona); } catch { return; }  // 单次失败忽略
       if (s.state === 'sms_required' || s.state === 'verifying') {
         setPubSms({ platform: key, name: label, state: s.state, message: s.message });
         setPub((r) => ({ ...r, [key]: { status: 'publishing', msg: s.message || '需短信验证' } }));
@@ -281,7 +283,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
     if (code.length < 4) { showToast('验证码应为 4-6 位数字'); return; }
     setPubSmsBusy(true);
     try {
-      await submitPublishSms(pubSms.platform, code);
+      await submitPublishSms(pubSms.platform, code, persona);
       setPubSmsCode('');
       setPubSms((p) => p && ({ ...p, state: 'verifying', message: '正在验证验证码…' }));
     } catch (e) {

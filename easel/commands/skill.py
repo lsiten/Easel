@@ -1,6 +1,6 @@
-"""easel skill — 运行 SKILL，统一通过 OpenClaw agent 处理。
+"""easel skill — 运行 SKILL，统一通过 Agent 底座（Codex / OpenCode / ACP / Pi）执行。
 
-所有 SKILL 请求都发给 OpenClaw agent，由 OpenClaw 根据 AGENTS.md 的规则
+所有 SKILL 请求都发给当前选定的 Agent 底座，由底座根据 AGENTS.md 的规则
 读对应 SKILL 自己执行、并凝练 Profile。
 这样无论从 chat / skill / web 哪个入口进来，逻辑都是一致的。
 
@@ -12,14 +12,10 @@
 
 from __future__ import annotations
 
-import os
-import re
-import subprocess
 import sys
 import time
 from pathlib import Path
 
-from easel.openclaw_cmd import openclaw_base_cmd
 from easel.persona import persona_prefix, profile_exists
 from easel.timeouts import TIMEOUT_PRODUCE
 from easel.direct_api import read_settings
@@ -27,7 +23,6 @@ from easel.direct_api import read_settings
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SKILLS_DIR = PROJECT_ROOT / "skills" / "builtin"
 PROFILES_DIR = PROJECT_ROOT / "profiles"
-OPENCLAW_PROFILE = "easel"
 
 
 def _list_all_skills() -> list[str]:
@@ -86,61 +81,6 @@ def _check_profile_exists(name: str) -> bool:
     return False
 
 
-def _proxy_env() -> dict[str, str]:
-    """返回带外网代理的环境变量（保护内网直连）。"""
-    env = os.environ.copy()
-    env.setdefault("EASEL_ROOT", str(PROJECT_ROOT))
-    env.setdefault("http_proxy", os.environ.get("EASEL_PROXY", ""))
-    env.setdefault("https_proxy", os.environ.get("EASEL_PROXY", ""))
-    env.setdefault("no_proxy", "localhost,127.0.0.1,*.xiaohongshu.com,*.devops.xiaohongshu.com,10.*")
-    return env
-
-
-def _run_via_openclaw(message: str, timeout: int = 300) -> int:
-    """统一通过 OpenClaw agent 执行。"""
-    session_key = f"skill-{int(time.time() * 1000)}"
-
-    cmd = openclaw_base_cmd() + [
-        "--profile", OPENCLAW_PROFILE,
-        "agent", "--agent", "main",
-        "--session-key", f"agent:main:{session_key}",
-        "--timeout", str(timeout),
-        "--message", message,
-    ]
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True,
-                                cwd=str(PROJECT_ROOT), timeout=timeout + 30,
-                                env=_proxy_env())
-    except subprocess.TimeoutExpired:
-        print("⏱️ 请求超时", file=sys.stderr)
-        return 124
-    except Exception as e:  # noqa: BLE001 — 兜底，避免裸崩堆栈（与 web 行为一致）
-        print(f"❌ {e}", file=sys.stderr)
-        return 1
-
-    if result.stdout:
-        lines = []
-        for line in result.stdout.splitlines():
-            clean = re.sub(r'\x1b\[[0-9;]*m', '', line)
-            if clean.startswith("[") and any(
-                tag in clean[:40] for tag in
-                ["[provider-", "[agents/", "[agent/", "[plugins]", "[tools]",
-                 "[diagnostic]", "[fetch-", "[heartbeat]", "[health-", "[gateway]"]
-            ):
-                continue
-            if clean.strip():
-                lines.append(clean)
-        output = "\n".join(lines).strip()
-        if output:
-            print(output)
-
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
-
-    return result.returncode
-
-
 def cmd_skill(args) -> int:
     from easel import harnesses
     from easel.harnesses.base import HarnessError
@@ -164,7 +104,7 @@ def cmd_skill(args) -> int:
     if args.profile and not _check_profile_exists(args.profile):
         return 1
 
-    # 构造消息——发给 OpenClaw，让它按 AGENTS.md 规则处理
+    # 构造消息——发给 Agent 底座，让它按 AGENTS.md 规则处理
     content = _resolve_input(args.input)
 
     message = f"{persona_prefix(args.profile)}请执行 /{skill_full}，内容如下：\n\n{content}"
@@ -177,12 +117,10 @@ def cmd_skill(args) -> int:
         print(f"[easel] 画像: {args.profile}")
     print("─" * 50)
 
-    if runtime != "openclaw":
-        try:
-            asyncio.run(harnesses.console_turn(message, PROJECT_ROOT, settings, timeout=timeout))
-            print()
-            return 0
-        except (HarnessError, asyncio.TimeoutError) as error:
-            print(f"\nAgent 执行失败：{error or '请求超时'}")
-            return 1
-    return _run_via_openclaw(message, timeout=timeout)
+    try:
+        asyncio.run(harnesses.console_turn(message, PROJECT_ROOT, settings, timeout=timeout))
+        print()
+        return 0
+    except (HarnessError, asyncio.TimeoutError) as error:
+        print(f"\nAgent 执行失败：{error or '请求超时'}")
+        return 1

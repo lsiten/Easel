@@ -15,10 +15,6 @@ FENCE_RE = re.compile(r"(?m)^([ \t]*)(`{3,}|~{3,})[^\n]*\n.*?^\1\2[ \t]*$", re.S
 INLINE_RE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 LINK_RE = re.compile(r"\[[^\]\n]*\]\(([^)\n]+)\)")
 ROOT_PATH_RE = re.compile(r"(?<![\w/\\.-])(?:skills|agents)[/\\][^\s`\"'(),;，；。]+")
-OLD_PATH_RE = re.compile(
-    r"(?<![\w/~\\.-])(?:skills[/\\]openclaw(?:/|\\)"
-    r"|openclaw[/\\](?:workspace|sync\.sh|openclaw\.json5))"
-)
 RESOURCE_PREFIXES = ("scripts/", "references/", "assets/", "tools/", "docs/", "themes/")
 OPTIONAL_PATHS = {
     "skills/shared/scripts/models",
@@ -98,9 +94,6 @@ def validate_document(document: Path, root: Path) -> tuple[list[PathIssue], int]
     issues = []
     checked = 0
     seen = set()
-    for match in OLD_PATH_RE.finditer(text):
-        line = text.count("\n", 0, match.start()) + 1
-        issues.append(PathIssue(document, line, match[0], "obsolete repository path"))
     matches = (
         [(match, False) for match in INLINE_RE.finditer(visible)]
         + [(match, True) for match in LINK_RE.finditer(link_text)]

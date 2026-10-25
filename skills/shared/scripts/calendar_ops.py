@@ -33,7 +33,7 @@ from pathlib import Path
 
 def _find_root() -> Path:
     """定位项目根：优先 EASEL_ROOT env，否则向上找含 outputs/setup.sh 的目录。
-    兼容两种布局——项目 skills/shared/scripts/（根在 parents[3]）与 OpenClaw workspace
+    兼容两种布局——项目 skills/shared/scripts/（根在 parents[3]）与 Easel 运行时 workspace
     拍平后的 shared/scripts/（根在 parents[2]，其 outputs 为真项目 outputs 的软链）。
     硬编码 parents[N] 两边深度不同会算错，故用标记探测。"""
     env = os.environ.get("EASEL_ROOT")
@@ -117,7 +117,7 @@ def _parse_date(s: str):
 # --------------------------------------------------------------------------- #
 def _forward_publish_log(platform: str, title: str, url: str, ptype: str,
                          tags: str, source: str, profile: str = "") -> None:
-    # 兼容两种布局：项目根 skills/builtin/... 与 OpenClaw workspace 拍平后的 skills/...
+    # 兼容两种布局：项目根 skills/builtin/... 与 Easel 运行时 workspace 拍平后的 skills/...
     candidates = [
         PROJECT_ROOT / "skills" / "builtin" / "skill-publish-log" / "scripts" / "log.py",
         PROJECT_ROOT / "skills" / "skill-publish-log" / "scripts" / "log.py",

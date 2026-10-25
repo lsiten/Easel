@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import fnmatch
+import json
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -71,7 +73,7 @@ def load_profile_text(name: str) -> str:
 def persona_prefix(name: str | None) -> str:
     """把画像作为消息前缀内联。无画像或画像不存在时返回空串。
 
-    明确账号记忆作用域，避免 OpenClaw 的全局 MEMORY.md 污染并行画像会话。
+    明确账号记忆作用域，避免工作区全局 MEMORY.md 污染并行画像会话。
     """
     if name and profile_exists(name):
         return (
@@ -102,11 +104,83 @@ def turn_reminder() -> str:
 
 
 def chat_turn_message(user_message: str, name: str | None) -> str:
-    """构造发给 OpenClaw 的一轮对话消息：画像前缀（如有）+ 用户原文 + 末尾行为提醒。
+    """构造发给 Agent 底座的一轮对话消息：画像前缀（如有）+ 用户原文 + 末尾行为提醒。
 
     末尾提醒对抗长对话里「忘记先查 SKILL」的指令衰减（见 TURN_REMINDER）。
-    对用户不可见（前端只显示用户原文），只进 OpenClaw 上下文。
+    对用户不可见（前端只显示用户原文），只进底座上下文。
     """
     prefix = persona_prefix(name)
     head = f"{prefix}\n\n" if prefix else ""
     return f"{head}{user_message}\n\n{turn_reminder()}"
+
+
+# --- 知识库（外部内容源）聚焦：画像 → glob 范围，查询/沉淀随画像而不同 --------
+def _persona_kb_scope(persona: str | None) -> list[str]:
+    """当前画像对「外部内容源/知识库」的聚焦 glob 列表（相对源根）。
+    来源 profiles/kb_scopes.json；缺省/非法/该画像无配置 → 空（不聚焦，通用显示全库）。
+    每个条目支持精确名、前缀（如 02-技术沉淀）、或 glob（如 03-新闻资讯/06-*）。"""
+    if not persona or not valid_persona_name(persona) or not profile_exists(persona):
+        return []
+    fp = PROFILES_DIR / "kb_scopes.json"
+    try:
+        data = json.loads(fp.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+    entry = data.get(persona)
+    if isinstance(entry, list):
+        return [str(x).strip() for x in entry if isinstance(x, str) and x.strip()]
+    return []
+
+
+def _kb_in_scope(rel: str, patterns: list[str]) -> bool:
+    """rel 相对源根的路径是否在 patterns 聚焦范围内。
+    patterns 为空 → 全放行（通用）；否则命中精确/前缀/glob，或作为某命中路径的祖先，才保留。"""
+    if not patterns:
+        return True
+    for pat in patterns:
+        if pat in ("", "*"):
+            return True
+        if rel == pat or rel.startswith(pat + "/"):
+            return True
+        if pat.startswith(rel + "/"):   # rel 是某命中路径的祖先 → 保留以便下钻
+            return True
+        if fnmatch.fnmatch(rel, pat):
+            return True
+    return False
+
+
+# --- 技能库聚焦：画像 → 技能 glob 范围（与知识库同源思路，查询/可见随画像而不同）---
+# 语义 A1（与 KB 一致）：scope 为空 = 全量（通用/无画像/该画像未配置）；非空 = 仅命中。
+# 技能按「目录名」匹配：支持精确名、前缀（如 skill-）、或 glob（如 skill-xhs-*）。
+def _persona_skill_scope(persona: str | None) -> list[str]:
+    """当前画像对「技能库」的聚焦 glob 列表。来源 profiles/skill_scopes.json。
+    缺省/非法/该画像无配置 → 空（不聚焦，通用显示全库）。"""
+    if not persona or not valid_persona_name(persona) or not profile_exists(persona):
+        return []
+    fp = PROFILES_DIR / "skill_scopes.json"
+    try:
+        data = json.loads(fp.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+    entry = data.get(persona)
+    if isinstance(entry, list):
+        return [str(x).strip() for x in entry if isinstance(x, str) and x.strip()]
+    return []
+
+
+def _skill_in_scope(name: str, patterns: list[str]) -> bool:
+    """技能目录名 name 是否在 patterns 聚焦范围内。
+    patterns 为空 → 全放行（通用）；否则命中精确名/前缀/glob 才保留。"""
+    if not patterns:
+        return True
+    for pat in patterns:
+        if pat in ("", "*"):
+            return True
+        # 精确名/前缀（pat 可为 "skill-xhs" 或 "skill-xhs-"）或 glob（如 skill-xhs-*）
+        if name.startswith(pat) or fnmatch.fnmatch(name, pat):
+            return True
+    return False

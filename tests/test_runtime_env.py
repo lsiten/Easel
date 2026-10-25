@@ -31,23 +31,23 @@ def test_web_environment_recovers_nvm_agents_and_matching_node(home):
     newer = home / ".nvm/versions/node/v24.21.0/bin"
     for directory in (older, newer):
         executable(directory, "node")
-        executable(directory, "openclaw")
+        executable(directory, "codex")
     executable(newer, "opencode")
-    original = {"PATH": str(home / "empty"), "EASEL_AGENT_RUNTIME": "openclaw", "API_KEY": "unchanged"}
+    original = {"PATH": str(home / "empty"), "EASEL_AGENT_RUNTIME": "codex", "API_KEY": "unchanged"}
     result = runtime_env.web_environment(original)
     assert result["PATH"].split(os.pathsep)[1] == str(newer)
-    assert runtime_env.shutil.which("openclaw", path=result["PATH"]) == str(newer / "openclaw")
+    assert runtime_env.shutil.which("codex", path=result["PATH"]) == str(newer / "codex")
     assert runtime_env.shutil.which("opencode", path=result["PATH"]) == str(newer / "opencode")
     assert runtime_env.shutil.which("node", path=result["PATH"]) == str(newer / "node")
     assert result["API_KEY"] == original["API_KEY"]
-    assert result["EASEL_AGENT_RUNTIME"] == "openclaw"
+    assert result["EASEL_AGENT_RUNTIME"] == "codex"
     assert original["PATH"] == str(home / "empty")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Unix user installation directories")
 def test_web_environment_preserves_an_existing_complete_path(home):
     current = home / "current"
-    for name in ("openclaw", "opencode", "codex", "node"):
+    for name in ("opencode", "codex", "node"):
         executable(current, name)
     executable(home / ".opencode/bin", "opencode")
     environment = {"PATH": str(current)}
@@ -67,11 +67,11 @@ def test_web_environment_ignores_absent_and_nonexecutable_agents(home):
 def test_web_environment_supports_user_and_custom_prefixes(home):
     prefix = home / "custom prefix"
     native = home / ".opencode/bin"
-    executable(prefix / "bin", "openclaw")
+    executable(prefix / "bin", "codex")
     executable(native, "opencode")
     environment = {"PATH": str(home / "empty"), "EASEL_NPM_GLOBAL_PREFIX": str(prefix)}
     result = runtime_env.web_environment(environment)
-    assert runtime_env.shutil.which("openclaw", path=result["PATH"]) == str(prefix / "bin/openclaw")
+    assert runtime_env.shutil.which("codex", path=result["PATH"]) == str(prefix / "bin/codex")
     assert runtime_env.shutil.which("opencode", path=result["PATH"]) == str(native / "opencode")
 
 
@@ -79,12 +79,12 @@ def test_web_environment_supports_user_and_custom_prefixes(home):
 def test_web_environment_prefers_explicit_easel_prefix(home):
     preferred = home / "easel-prefix"
     fallback = home / "npm-prefix"
-    executable(preferred / "bin", "openclaw")
-    executable(fallback / "bin", "openclaw")
+    executable(preferred / "bin", "codex")
+    executable(fallback / "bin", "codex")
     environment = {"PATH": str(home / "empty"), "EASEL_NPM_GLOBAL_PREFIX": str(preferred),
                    "npm_config_prefix": str(fallback)}
     result = runtime_env.web_environment(environment)
-    assert runtime_env.shutil.which("openclaw", path=result["PATH"]) == str(preferred / "bin/openclaw")
+    assert runtime_env.shutil.which("codex", path=result["PATH"]) == str(preferred / "bin/codex")
 
 
 def test_web_environment_preserves_windows_path(home, monkeypatch):
@@ -100,12 +100,10 @@ def test_web_environment_does_not_replace_existing_cli_or_node(home):
     for name in ("codex", "node"):
         executable(current, name)
         executable(recovered, name)
-    executable(recovered, "openclaw")
     executable(recovered, "opencode")
     result = runtime_env.web_environment({"PATH": str(current)})
     assert runtime_env.shutil.which("codex", path=result["PATH"]) == str(current / "codex")
     assert runtime_env.shutil.which("node", path=result["PATH"]) == str(current / "node")
-    assert runtime_env.shutil.which("openclaw", path=result["PATH"]) == str(recovered / "openclaw")
     assert runtime_env.web_environment(result) == result
 
 
@@ -133,18 +131,18 @@ def test_web_environment_reads_npmrc_prefix_with_spaces(home, custom_config):
 def test_web_environment_supports_custom_node_installations(home, variable, relative):
     root = home / "node toolchain"
     directory = root / relative
-    executable(directory, "openclaw")
+    executable(directory, "codex")
     executable(directory, "opencode")
     executable(directory, "node")
     result = runtime_env.web_environment({"PATH": str(home / "empty"), variable: str(root)})
-    assert runtime_env.shutil.which("openclaw", path=result["PATH"]) == str(directory / "openclaw")
+    assert runtime_env.shutil.which("codex", path=result["PATH"]) == str(directory / "codex")
     assert runtime_env.shutil.which("opencode", path=result["PATH"]) == str(directory / "opencode")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Unix user installation directories")
 def test_web_environment_recovers_node_even_when_agents_are_on_path(home):
     current = home / "current"
-    for name in ("openclaw", "opencode", "codex"):
+    for name in ("opencode", "codex"):
         executable(current, name)
     node = executable(home / ".nvm/versions/node/v24.21.0/bin", "node")
     result = runtime_env.web_environment({"PATH": str(current)})
@@ -173,12 +171,12 @@ def test_web_environment_recovers_windows_user_installations(home, monkeypatch, 
     else:
         directory = home / "nvm/v24.21.0"
         environment["NVM_HOME"] = str(home / "nvm")
-    for name in ("openclaw.cmd", "opencode.cmd", "codex.cmd", "node.exe"):
+    for name in ("opencode.cmd", "codex.cmd", "node.exe"):
         executable(directory, name)
     result = runtime_env.web_environment(environment)
     assert "PATH" not in result
     assert result["Path"].split(";")[0] == environment["Path"]
-    for name in ("openclaw", "opencode", "codex", "node"):
+    for name in ("opencode", "codex", "node"):
         assert windows_which(name, result["Path"]) == str(directory / (f"{name}.exe" if name == "node" else f"{name}.cmd"))
     assert runtime_env.web_environment(result) == result
 
@@ -199,7 +197,7 @@ def test_web_environment_tolerates_inaccessible_installations(home, monkeypatch)
 
 
 def test_web_launcher_passes_recovered_environment(monkeypatch):
-    environment = {"PATH": "/current", "EASEL_AGENT_RUNTIME": "openclaw"}
+    environment = {"PATH": "/current", "EASEL_AGENT_RUNTIME": "codex"}
     recovered = {**environment, "PATH": "/agents:/current"}
     monkeypatch.setattr(cli, "_proxy_env", lambda: environment)
     resolve = Mock(return_value=recovered)

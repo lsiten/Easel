@@ -3,7 +3,6 @@ from dataclasses import replace
 import asyncio
 import json
 import os
-import subprocess
 import sys
 
 import pytest
@@ -38,7 +37,6 @@ def test_native_harnesses_receive_all_shared_documents_and_actual_runtime(tmp_pa
     assert str(tmp_path / "profiles") in instructions
     assert "直接使用该实际路径" in instructions
     assert "不是项目根中的必需目录" in instructions
-    assert "OpenClaw gateway" not in instructions
     assert "额外工具权限必须由用户确认" in instructions
 
 
@@ -92,75 +90,7 @@ def test_workspace_changes_reload_instructions_and_resume_original_session(tmp_p
     asyncio.run(scenario())
 
 
-def test_shared_identity_does_not_assume_openclaw_gateway_or_env_authentication():
+def test_shared_identity_declares_actual_runtime_config():
     root = Path(__file__).resolve().parents[1]
     identity = (root / "agents" / "workspace" / "AGENTS.md").read_text(encoding="utf-8")
-    assert "运行在 OpenClaw gateway" not in identity
     assert "当前执行引擎的配置管理" in identity
-    assert not (root / "openclaw" / "workspace" / "AGENTS.md").exists()
-
-
-@pytest.mark.skipif(os.name == "nt", reason="Bash workspace sync is Unix-only")
-def test_openclaw_sync_uses_shared_workspace_and_preserves_instruction_source(tmp_path):
-    root = Path(__file__).resolve().parents[1]
-    target = tmp_path / "workspace"
-    home = tmp_path / "home"
-    home.mkdir()
-    result = subprocess.run(
-        ["bash", str(root / "agents" / "sync.sh")],
-        cwd=root, env={**os.environ, "HOME": str(home),
-                       "EASEL_OPENCLAW_WORKSPACE": str(target)},
-        capture_output=True, text=True, timeout=45,
-    )
-    assert result.returncode == 0, result.stderr
-    for document in (root / "agents" / "workspace").glob("*.md"):
-        synced = target / document.name
-        assert synced.read_text(encoding="utf-8").startswith(document.read_text(encoding="utf-8"))
-        assert synced.stat().st_nlink == 1
-    instructions = (target / "AGENTS.md").read_text(encoding="utf-8")
-    assert "当前执行引擎：OpenClaw" in instructions
-    assert f'cd "{root}"' in instructions
-    assert (target / "easel-profiles").resolve() == root / "profiles"
-    assert (target / "outputs").resolve() == root / "outputs"
-    original_skills = {skill.name for skill in (root / "skills" / "builtin").iterdir() if skill.is_dir()}
-    assert {skill.name for skill in (target / "skills").iterdir()} == original_skills
-    assert (target / "shared" / "scripts" / "web_publisher.py").is_file()
-
-
-@pytest.mark.skipif(os.name == "nt", reason="Bash workspace sync is Unix-only")
-def test_document_only_sync_preserves_memory_custom_skills_scripts_and_links(tmp_path):
-    root = Path(__file__).resolve().parents[1]
-    target = tmp_path / "workspace with spaces"
-    original = {
-        "USER.md": "custom user",
-        "MEMORY.md": "custom memory",
-        "skills/custom/SKILL.md": "custom skill",
-        "skills/ai-image-gen/local.md": "custom reference",
-        "shared/scripts/custom.py": "custom script",
-    }
-    for relative, content in original.items():
-        destination = target / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(content, encoding="utf-8")
-    outputs = target / "outputs"
-    outputs.symlink_to(tmp_path / "custom-output")
-    result = subprocess.run(
-        ["bash", str(root / "agents" / "sync.sh"), "--docs-only"],
-        cwd=root, env={**os.environ, "HOME": str(tmp_path),
-                       "EASEL_OPENCLAW_WORKSPACE": str(target)},
-        capture_output=True, text=True, timeout=45,
-    )
-    assert result.returncode == 0, result.stderr
-    for relative, content in original.items():
-        assert (target / relative).read_text(encoding="utf-8") == content
-    assert outputs.readlink() == tmp_path / "custom-output"
-    assert not (target / "easel-profiles").exists()
-    assert not (target / "shared" / "scripts" / "web_publisher.py").exists()
-    assert (target / "skills" / "ai-image-gen" / "SKILL.md").read_bytes() == (
-        root / "skills" / "builtin" / "ai-image-gen" / "SKILL.md"
-    ).read_bytes()
-    instructions = (target / "AGENTS.md").read_text(encoding="utf-8")
-    assert instructions.startswith((root / "agents" / "workspace" / "AGENTS.md").read_text(encoding="utf-8"))
-    context = (target / "CONTEXT.md").read_text(encoding="utf-8")
-    assert f'cd "{root}"' in context
-    assert str(root / ".venv" / "bin" / "python") in context

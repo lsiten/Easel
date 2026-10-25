@@ -5,12 +5,91 @@ import asyncio
 import json
 import os
 import signal
+import time
 
 from easel import __version__
 
 from .base import HarnessError, RunRequest
 from .commands import base_command
 from .rpc import RPC
+
+
+_MODEL_CACHE: dict = {}
+_MODEL_CACHE_TTL = 120.0
+
+
+def _configured_model(runtime: str) -> str:
+    """The model a runtime is *explicitly* configured with in its own config
+    file, preferred over the harness's built-in default catalog.
+
+    A placeholder secret in the environment (e.g. ``ANTHROPIC_API_KEY=
+    sk-ant-REPLACE_ME``) makes a harness treat its built-in provider catalog
+    as configured and pick an unreachable default (``api.anthropic.com``).
+    The harness's config file holds the model the user actually set up, so we
+    prefer it. Returns "" when nothing usable is configured.
+    """
+    if runtime != "pi":
+        return ""
+    from pathlib import Path
+    candidates = []
+    cfg_dir = os.environ.get("PI_CONFIG_DIR")
+    if cfg_dir:
+        candidates.append(Path(cfg_dir) / "models.json")
+    candidates.append(Path.home() / ".pi" / "agent" / "models.json")
+    for path in candidates:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        providers = data.get("providers")
+        if not isinstance(providers, dict):
+            break  # file exists but is not a usable catalog
+        for provider, spec in providers.items():
+            if not isinstance(spec, dict):
+                continue
+            for model in spec.get("models") or []:
+                if isinstance(model, dict) and _valid_id(model.get("id")):
+                    model_id = model["id"]
+                    return (f"{provider}/{model_id}"
+                            if isinstance(provider, str) and provider
+                            else model_id)
+        break
+    return ""
+
+
+async def resolve_effective_model(runtime: str, explicit: str,
+                                  request: "RunRequest") -> str:
+    """Model id to hand a native harness so an *empty* selection is never
+    silently routed to the harness's built-in default.
+
+    A configured selection (*explicit*) always wins. When it is empty we
+    prefer the model the runtime is explicitly configured with in its own
+    config file, then fall back to its native catalog, so the turn uses a
+    configured/reachable model instead of the harness's built-in default,
+    which may point at an unreachable endpoint (e.g. ``api.anthropic.com``
+    on a LAN with no key). The result is cached with a short TTL so we do
+    not spawn an extra CLI process on every turn; an empty result (nothing
+    resolved) preserves the previous behaviour.
+    """
+    if explicit:
+        return explicit
+    if runtime not in ("pi", "codex", "opencode"):
+        return ""
+    now = time.monotonic()
+    cached = _MODEL_CACHE.get(runtime)
+    if cached is not None and now - cached[0] < _MODEL_CACHE_TTL:
+        return cached[1]
+    model = _configured_model(runtime)
+    if not model:
+        try:
+            catalog = await available_models(runtime, request)
+        except Exception:
+            catalog = []
+        if catalog:
+            default = next((m for m in catalog if m.get("default")), None)
+            model = (default or catalog[0]).get("id", "")
+    _MODEL_CACHE[runtime] = (now, model)
+    return model
 
 
 def _valid_id(value):

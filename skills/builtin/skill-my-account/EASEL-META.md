@@ -14,7 +14,7 @@
 ## 定位与由来
 
 第九次会话做归因层「创作数据」卡片时新增了 `account_stats.py`（抓已登录账号的粉丝/获赞/作品列表），
-但**只有 Web 后端 `/api/analytics` 在用**；三个 publisher 的 `whoami` 也只被账号页调用。结果 OpenClaw
+但**只有 Web 后端 `/api/analytics` 在用**；三个 publisher 的 `whoami` 也只被账号页调用。结果
 agent **没有指向这些能力的 SKILL 入口**——用户问"我小红书最近发了什么帖子"，agent 因为不知道自己能查
 登录态，反而回问用户账号名（真机翻车，2026-07-31）。
 

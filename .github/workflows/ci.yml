@@ -68,7 +68,7 @@ jobs:
       - name: Install settings test dependencies
         run: python -m pip install pytest fastapi httpx uvicorn sse-starlette python-multipart requests websocket-client cryptography
       - name: Verify user installations and settings
-        run: python -m pytest -q tests/test_runtime_env.py tests/test_openclaw_cmd_resolution.py tests/test_openclaw_cmd_shim.py tests/test_agent_harnesses.py tests/test_pr1.py tests/test_installation.py tests/test_setup_optional_harness.py
+        run: python -m pytest -q tests/test_runtime_env.py tests/test_agent_harnesses.py tests/test_pr1.py tests/test_installation.py tests/test_setup_optional_harness.py
 
   # 两个安装脚本此前在 CI 里零覆盖 —— setup.ps1 把 setup.sh 的版本假设 bug 原样复刻了一
   # 遍却没人发现，根因就在这里。这个 job 全程在 ubuntu 上跑（shellcheck 与 PSScriptAnalyzer
@@ -212,23 +212,23 @@ jobs:
 
       - name: Install (Linux/macOS)
         if: runner.os != 'Windows'
-        run: bash setup.sh --openclaw
+        run: bash setup.sh --api
 
       - name: Install (Windows)
         if: runner.os == 'Windows'
         shell: powershell       # 5.1：Windows 自带版本，必须按它验证
-        run: ./setup.ps1 -OpenClaw -NonInteractive
+        run: ./setup.ps1 -NonInteractive
 
       # 这一条是重点：setup 必须可重入。2026.9.x 拒绝「会删掉已存在子键的整块写入」，
       # 于是首次安装能过、第二次重跑必失败 —— 两边都真实发生过，只有跑第二遍才看得见。
       - name: Install again (idempotency)
         if: runner.os != 'Windows'
-        run: bash setup.sh --openclaw
+        run: bash setup.sh --api
 
       - name: Install again (idempotency, Windows)
         if: runner.os == 'Windows'
         shell: powershell
-        run: ./setup.ps1 -OpenClaw -NonInteractive
+        run: ./setup.ps1 -NonInteractive
 
       - name: doctor
         shell: bash

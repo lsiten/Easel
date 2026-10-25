@@ -60,9 +60,9 @@ export default function SkillPage({ persona }: SkillPageProps) {
   const [selected, setSelected] = useState<string | null>(null);
 
   const load = () => {
-    fetchSkills().then(setSkills).catch(() => setError('加载 SKILL 列表失败'));
+    fetchSkills(persona).then(setSkills).catch(() => setError('加载 SKILL 列表失败'));
   };
-  useEffect(load, []);
+  useEffect(load, [persona]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

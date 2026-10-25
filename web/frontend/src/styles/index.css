@@ -491,7 +491,7 @@ textarea.field { resize: vertical; min-height: 90px; }
 .message-row.user { justify-content: flex-end; }
 .message-row.assistant { justify-content: flex-start; }
 
-/* ---- ask_user 问答题卡片（OpenClaw question RPC 桥接） ---- */
+/* ---- ask_user 问答题卡片 ---- */
 .question-card {
   background: var(--bg-elevated, #fff); border: 1px solid var(--border, rgba(0,0,0,.08));
   border-radius: var(--radius-lg, 14px); padding: 14px 16px;

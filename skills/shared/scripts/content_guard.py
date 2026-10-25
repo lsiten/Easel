@@ -4,13 +4,13 @@
 Easel 的 agent 会把生成的文案 / 评论 / 回答**真实发布到公开平台**。从 agent
 生成文本到 `--exec` 真发之间，过去没有任何安全过滤：一旦 agent 把内部设置误写进
 内容（API key、内部 URL、代理 IP、绝对路径、模型名、env 变量名、"由 AI 生成 /
-OpenClaw / Claude Code" 之类自曝措辞），就会**公开泄露且删不掉**。
+Claude Code" 之类自曝措辞），就会**公开泄露且删不掉**。
 
 本模块作为唯一真相源，扫描任意「要发到公开平台的文本」，检出疑似内部设置泄露。
 发布脚本在真发前调用 `guard_or_die(...)`。**分两级强制**（见 BLOCK_CATEGORIES）：
 - BLOCK 级 = 真·敏感信息（密钥 / 内部域名 / 代理 IP / 内部路径 / env 名 / .env 真值），
   几乎无正当理由出现在对外内容里 → **fail-closed 阻止发布（退出码 7）**，让 agent 改稿重发。
-- WARN 级 = AI 措辞（由 AI 生成 / OpenClaw / Claude / Anthropic / system prompt / 大模型）与
+- WARN 级 = AI 措辞（由 AI 生成 / Claude / Anthropic / system prompt / 大模型）与
   模型名（claude-* / gpt-image-2 / happyhorse）→ 这些在论文解读、AI 科普、技术文章里
   **可能是正常内容，硬拦会误伤** → **只告警、绝不拦截**，交给 agent/用户判断。
 
@@ -73,7 +73,6 @@ SECRET_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     ("proxy-ip", "med", _p(r":3128\b"), "代理端口 3128（独立出现）"),
     # ── 内部绝对路径 ──
     ("internal-path", "med", _p(r"/mnt/tidal-alsh01\S*"), "内部数据盘路径"),
-    ("internal-path", "med", _p(r"(?:~|/root)?/\.openclaw\S*"), "OpenClaw 内部路径"),
     ("internal-path", "med", _p(r"(?:~|/root)?/\.easel-browser-profiles\S*"), "登录态 profile 路径"),
     ("internal-path", "low", _p(r"/root/\.cc-mirror\S*"), "内部镜像路径"),
     # ── env 变量名 ──
@@ -89,7 +88,6 @@ SECRET_PATTERNS: list[tuple[str, str, "re.Pattern[str]", str]] = [
     ("model-name", "low", _p(r"\bhappyhorse\b", re.I), "内部生视频模型名"),
     # ── AI 自曝措辞（发出去会暴露"这是 AI/内部工具做的"）──
     ("ai-disclosure", "low", _p(r"由\s*AI\s*(?:生成|创作|撰写|制作|完成)"), "「由 AI 生成」类措辞"),
-    ("ai-disclosure", "low", _p(r"\bOpenClaw\b", re.I), "内部编排框架名"),
     ("ai-disclosure", "low", _p(r"Claude\s*Code", re.I), "内部制作引擎名"),
     ("ai-disclosure", "low", _p(r"\bAnthropic\b", re.I), "模型厂商名"),
     ("ai-disclosure", "low", _p(r"降级生成"), "内部降级措辞"),
@@ -341,7 +339,6 @@ def cmd_selftest(_a) -> int:
         ("model claude", "用的是 claude-4.8-opus 模型"),
         ("model happyhorse", "视频走 happyhorse i2v"),
         ("ai disclosure", "本文由 AI 生成，仅供参考"),
-        ("openclaw", "这是 OpenClaw 帮我做的"),
         ("claude code", "让 Claude Code 处理一下"),
         # 真实场景：一篇讲 LLM 的科普/论文解读，含 AI 词但绝不该被拦
         ("paper explainer", "这期解读这篇大模型论文，对比了 Claude 和 GPT 的推理能力，"

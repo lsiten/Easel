@@ -17,8 +17,7 @@ SDK 原生 render 走 Remotion（真人出镜/独白片）。但 Easel 做出来
   stills  逐场渲染 1 张代表帧（含运镜+字幕）到 <run-dir>/preview/（预览确认门用，成本低）
   render  全片渲染到 <run-dir>/workdir/out/final.mp4（预览点头后才跑）
 
-路径解析：scenes.json 里的图/音路径可为绝对；相对则依次按 cwd、--workspace、
-$EASEL_OPENCLAW_WORKSPACE 解析。字体走 fontconfig + --fontsdir（内置 MaShanZheng）。
+路径解析：scenes.json 里的图/音路径可为绝对；相对则依次按 cwd、--workspace 解析（workspace 经 EASEL_ROOT / cwd 兜底）。字体走 fontconfig + --fontsdir（内置 MaShanZheng）。
 """
 from __future__ import annotations
 
@@ -48,7 +47,7 @@ def resolve(path: str, workspace: Path | None) -> Path:
     p = Path(path)
     if p.is_absolute() and p.exists():
         return p
-    for base in (Path.cwd(), workspace, Path(os.environ.get("EASEL_OPENCLAW_WORKSPACE", ""))):
+    for base in (Path.cwd(), workspace):
         if base:
             cand = base / path
             if cand.exists():
@@ -347,7 +346,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="幻灯片口播剧 → 成片（ffmpeg）")
     ap.add_argument("mode", choices=["prep", "stills", "render"])
     ap.add_argument("--run-dir", required=True)
-    ap.add_argument("--workspace", default=os.environ.get("EASEL_OPENCLAW_WORKSPACE", ""))
+    ap.add_argument("--workspace", default="")
     args = ap.parse_args()
     rd = Path(args.run_dir).resolve()
     ws = Path(args.workspace).resolve() if args.workspace else None

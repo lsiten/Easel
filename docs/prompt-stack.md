@@ -7,7 +7,7 @@
 ```
 Layer 1: SOUL.md         人格 + 能力总览（搭子语气、沟通风格、对五层能力的自我认知）
 Layer 2: AGENTS.md       分工规则 + 编排逻辑 + Plan Mode + 制作层执行流程
-Layer 3: 运行时说明       当前引擎、项目路径与权限（OpenClaw 同步时另生成 CONTEXT.md）
+Layer 3: 运行时说明       当前引擎、项目路径与权限（各底座按需生成运行时说明）
 Layer 4: SKILL           被触发时加载 SKILL.md + 按需读取 references/ 下的文件
 ```
 
@@ -16,11 +16,11 @@ Layer 4: SKILL           被触发时加载 SKILL.md + 按需读取 references/ 
 > - **CLI `easel chat`**（多轮交互）：选画像后通过所选底座的原有消息通道注入同一前缀，画像随原生 session 历史留存供后续 turn 沿用（超长会话被压缩后可能丢，属已知取舍）。
 > - 三入口的画像逻辑统一收敛到 `easel/persona.py`（`list_personas` / `load_profile_text` / `persona_prefix`）。
 
-> **记忆作用域**：Easel 不使用任何引擎工作区的全局 `MEMORY.md` 承载账号知识；OpenClaw 的该文件由同步脚本保持为空。账号长期记忆只存放在 `profiles/<当前画像>/memory.md`，每个会话按自身绑定的画像直接读取。通用模式不读取任何画像记忆，也不通过动态改写全局文件切换画像。
+> **记忆作用域**：Easel 不使用任何引擎工作区的全局 `MEMORY.md` 承载账号知识；账号长期记忆只存放在 `profiles/<当前画像>/memory.md`，每个会话按自身绑定的画像直接读取。通用模式不读取任何画像记忆，也不通过动态改写全局文件切换画像。
 
-共享源文件位于 `agents/workspace/`。OpenClaw 沿用 `bash agents/sync.sh` 同步到它的隔离工作区；
-Codex 沿用 `developerInstructions`，OpenCode / 通用 ACP 沿用消息前缀注入方式，加载同一组 Markdown。
-各适配器追加当前引擎、实际 Easel 根目录与权限说明，不将 OpenClaw 的能力假定为其它引擎的能力。
+共享源文件位于 `agents/workspace/`。
+Codex 沿用 `developerInstructions`，OpenCode / 通用 ACP / Pi 沿用消息前缀注入方式，加载同一组 Markdown。
+各适配器追加当前引擎、实际 Easel 根目录与权限说明，不将任一底座的能力假定为其它底座的能力。
 原生进程复用期间共享说明变更会使缓存失效，下一轮重新加载说明并续接原有会话。
 
 ## 各层说明
@@ -34,8 +34,7 @@ Codex 沿用 `developerInstructions`，OpenCode / 通用 ACP 沿用消息前缀�
 通过对应适配器的常驻指令或每轮消息前缀提供。是最重要的文件。
 
 ### Layer 3 — 运行时说明（半静态）
-OpenClaw 由 `agents/sync.sh` 生成运行时项目根和 CONTEXT.md，换机器后重新同步。
-Codex / OpenCode / ACP 每次从请求构建同源运行时说明，并以实际 Easel 根目录启动原生进程。
+Codex / OpenCode / ACP / Pi 每次从请求构建同源运行时说明，并以实际 Easel 根目录启动原生进程。
 所有引擎跑项目脚本前都从这里确认项目根路径，**先 `cd` 到该目录再跑脚本**。
 
 ### Layer 4 — SKILL（按需）
@@ -45,7 +44,7 @@ Codex / OpenCode / ACP 每次从请求构建同源运行时说明，并以实际
 3. scripts/ 下的脚本（执行时调用，脚本本身不进 prompt）
 
 > 五层 SKILL（含制作层）由当前 Agent 按需读取并直接执行，产出成品到 `outputs/`。
-> OpenClaw 保留工作区技能同步，其他底座直接读取项目 `skills/builtin/` 和 `skills/shared/`。
+> Codex / OpenCode / ACP / Pi 直接读取项目 `skills/builtin/` 和 `skills/shared/`；仅聊天模式（`api`）不读取或执行本地技能。
 
 ## 设计原则
 

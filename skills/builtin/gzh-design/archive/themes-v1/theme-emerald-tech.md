@@ -90,7 +90,6 @@
     <span style="font-size:14px;font-weight:700;color:#FFFFFF;"><span leaf="">官方原生插件</span></span>
     <section style="display:flex;">
       <span style="background:#1A1A1A;color:#FFFFFF;font-size:12px;font-weight:600;padding:4px 14px;border-radius:4px;margin-left:8px;"><span leaf="">ClawBot</span></span>
-      <span style="background:#1A1A1A;color:#FFFFFF;font-size:12px;font-weight:600;padding:4px 14px;border-radius:4px;margin-left:8px;"><span leaf="">OpenClaw</span></span>
     </section>
   </section>
 </section>

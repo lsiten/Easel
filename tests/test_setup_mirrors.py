@@ -91,7 +91,7 @@ def test_npm_falls_back_to_npmmirror_when_official_unreachable(tmp_path: Path) -
     log = tmp_path / "calls.log"
     bin_dir = _stub_tools(tmp_path, npm_ping_ok=False, pypi_ok=True, log=log)
     text = SETUP_SH.read_text(encoding="utf-8")
-    block = _slice(text, "# ---- 2. npm 源 ----", "# ---- 3. 检测/安装 OpenClaw")
+    block = _slice(text, "# ---- 2. npm 源 ----", "# ---- 3. 安装 easel CLI")
 
     r = _run(block, tmp_path, bin_dir)
     assert r.returncode == 0, r.stderr
@@ -107,7 +107,7 @@ def test_npm_keeps_official_when_reachable(tmp_path: Path) -> None:
     log = tmp_path / "calls.log"
     bin_dir = _stub_tools(tmp_path, npm_ping_ok=True, pypi_ok=True, log=log)
     text = SETUP_SH.read_text(encoding="utf-8")
-    block = _slice(text, "# ---- 2. npm 源 ----", "# ---- 3. 检测/安装 OpenClaw")
+    block = _slice(text, "# ---- 2. npm 源 ----", "# ---- 3. 安装 easel CLI")
 
     r = _run(block, tmp_path, bin_dir)
     assert r.returncode == 0, r.stderr
@@ -121,7 +121,7 @@ def test_easel_npm_registry_override_wins(tmp_path: Path) -> None:
     log = tmp_path / "calls.log"
     bin_dir = _stub_tools(tmp_path, npm_ping_ok=False, pypi_ok=True, log=log)
     text = SETUP_SH.read_text(encoding="utf-8")
-    block = _slice(text, "# ---- 2. npm 源 ----", "# ---- 3. 检测/安装 OpenClaw")
+    block = _slice(text, "# ---- 2. npm 源 ----", "# ---- 3. 安装 easel CLI")
 
     r = _run(block, tmp_path, bin_dir,
              extra_env='EASEL_NPM_REGISTRY="https://my-mirror.example.com"')

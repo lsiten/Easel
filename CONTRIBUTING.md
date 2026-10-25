@@ -4,7 +4,7 @@
 
 ## 反馈 Issue
 
-- **环境问题**：附上 OS、Python、Node.js、`openclaw --version` 版本、`easel doctor` 输出和 `easel gateway logs` 相关片段。先查 [已知问题](docs/known-issues.md)。
+- **环境问题**：附上 OS、Python、Node.js、所选 Agent 底座的版本、`easel doctor` 输出和脱敏后的相关日志。仅聊天模式请注明模型 API 类型。先查 [已知问题](docs/known-issues.md)。
 - **功能建议 / 新技能**：先开 Issue 说明场景与预期产物，确认方向后再动手，避免大改撞车。
 
 ## 提交前必跑
@@ -18,7 +18,7 @@ python -m pytest tests/                      # 核心单测（不会调用真实
 
 路径校验覆盖根文档、`docs/`、`agents/` 和 `skills/` 下的 Markdown，以及画像模板和前端说明，包括深层参考文档和 Agent 提示材料。命令里的 `skills/...` 相对项目根，技能资源名相对技能目录，Markdown 链接与显式 `../` 相对当前文档；占位符和运行时生成的产物不要求预先存在。
 
-仅更新 OpenClaw 已同步的提示文档时可运行 `bash agents/sync.sh --docs-only`：更新内置技能与共享 Markdown、身份文档和运行时路径说明，不清空 `MEMORY.md`、不删除 `USER.md` 或自定义技能、不修改脚本和产物链接。其它原生执行引擎直接读取 `agents/workspace/`，不需要这一步。
+原生执行引擎直接读取 `agents/workspace/` 中的共享提示文档与项目技能目录，无需另行同步到隔离工作区。接入方式见 [Agent 底座](docs/agent-harnesses.md)。
 
 ## Skill 约定
 
@@ -31,7 +31,7 @@ python -m pytest tests/                      # 核心单测（不会调用真实
 
 - Python ≥ 3.10；Web 为 FastAPI + React（`web/`），CLI 入口在 `easel/`。
 - 超时只改 [`easel/timeouts.py`](easel/timeouts.py) 单一真相源，不要在调用处各写各的。
-- OpenClaw 的缺陷跟随上游修复，不在本仓库内置补丁；环境问题沉淀到 `easel doctor` 或 [known-issues](docs/known-issues.md)。
+- 原生 Agent 底座的缺陷跟随各自上游修复，不在本仓库内置补丁；环境问题沉淀到 `easel doctor` 或 [known-issues](docs/known-issues.md)。
 - 凭证不进仓库：`.env` 不入库；测试不得调用真实模型、真实平台或外部消息渠道。
 
 ## PR 约定

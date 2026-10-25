@@ -7,7 +7,7 @@
 | **来源仓库** | white0dew/XiaohongshuSkills |
 | **GitHub 地址** | https://github.com/white0dew/XiaohongshuSkills |
 | **Star 数** | ~300+ |
-| **功能描述** | 小红书自动发布/评论/检索，支持OpenClaw/Codex/CC |
+| **功能描述** | 小红书自动发布/评论/检索，支持 Codex/CC |
 | **SKILL.md 行数** | 316 |
 | **文件总数** | 19 |
 | **自包含** | 需要小红书Cookie |

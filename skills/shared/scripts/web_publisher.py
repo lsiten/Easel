@@ -264,6 +264,72 @@ PLATFORMS: dict[str, dict] = {
         "selector_caveat": "知乎专栏写文章页；正文为 Draft.js contenteditable。『发布』按钮须精确匹配"
                            "（避免误点『发布设置』）。首次需核对标题输入框与发布流程。",
     },
+    "csdn": {
+        "name": "CSDN",
+        "login_url": "https://passport.csdn.net/",
+        "publish_url": "https://editor.csdn.net/md/?not_checkout=1",
+        "whoami_url": "https://www.csdn.net/",
+        "profile": "CsdnProfile",
+        # 已登录判定：顶栏 .toolbar-btn-login-new 仅登录态出现（未登录是 .toolbar-btn-login，含「登录」按钮）。
+        # 真机 2026-10 校准：.csdn-profile-nickName 恒显「--」（含未登录）→ 不可作 login_check/me_name；
+        # 真实头像在 a.hasAvatar（src 尾含用户名，如 ..._<用户名>.jpg），故只取头像不取昵称。
+        "login_check": ".toolbar-btn-login-new",
+        "login_strict": True,
+        "logged_out_selector": ".toolbar-btn-login:not(.toolbar-btn-login-new), button:has-text('登录'), button:has-text('登录/注册')",
+        "login_qr_selector": "[class*='qrcode' i], [class*='scan' i], img[src*='qrcode' i], img[src*='scan' i], canvas",
+        "qr_loaded": "[class*='qrcode' i] img, [class*='qrcode' i] canvas, canvas",
+        "me_avatar_selector": "a.hasAvatar img, .toolbar-btn-login-new img",
+        "steps": [
+            {"action": "goto", "value": "https://editor.csdn.net/md/?not_checkout=1"},
+            {"action": "waitfor", "selector": ".article-bar__title--input, input", "value": "30000"},
+            {"action": "fill", "selector": ".article-bar__title--input, input[placeholder*='标题']", "value": "{title}"},
+            {"action": "type", "selector": "pre.editor__inner, [contenteditable=true]", "value": "{desc}"},
+            {"action": "wait", "value": "2000"},
+            {"action": "click", "selector": "button.btn-publish"},
+        ],
+        # 发布成功后离开创作编辑器（editor.csdn.net/md → 文章页/首页）——避免「点了发布=成功」假阳性
+        "publish_success": {"url_not_contains": "editor.csdn.net/md"},
+        "selector_caveat": "CSDN 顶栏 .toolbar-btn-login-new 仅登录态出现（已真机校准，作 login_check）。"
+                           "未登录时 passport.csdn.net 显示扫码登录页，但登录态下访问被重定向回 www.csdn.net，"
+                           "二维码/登录页选择器未能真机校准，login_qr_selector 为通用兜底，首次登录需人工核对二维码。"
+                           ".csdn-profile-nickName 恒显「--」→ 未取 me_name（真名在头像 URL/个人主页），仅取 a.hasAvatar 头像。"
+                           "发布走 editor.csdn.net/md（mp.csdn.net/edit 跳转至此）：标题 .article-bar__title--input、"
+                           "正文 pre.editor__inner(contenteditable)、发布 button.btn-publish；发布后离开 /md/ 判成功。"
+                           "发布前建议先核对「发布文章」是否弹确认框（若弹则需补一步确认）。",
+    },
+    "juejin": {
+        "name": "掘金",
+        "login_url": "https://juejin.cn/login",
+        "publish_url": "https://juejin.cn/editor/drafts/new?v=2",
+        "whoami_url": "https://juejin.cn/",
+        "profile": "JuejinProfile",
+        # 已登录判定：顶栏 .avatar-wrapper 仅登录态出现（未登录是「登录」按钮）。真机 2026-10 校准。
+        "login_check": ".avatar-wrapper",
+        "login_strict": True,
+        "logged_out_selector": "a:has-text('登录'), button:has-text('登录'), .login-btn",
+        "login_qr_selector": ".qrcode, .lazy.qrcode, [class*='qrcode' i], img[src*='qrcode' i], canvas",
+        "qr_loaded": ".qrcode img, [class*='qrcode' i] img, canvas",
+        "me_name_selector": ".jj-link.user-message",
+        "me_avatar_selector": ".avatar-wrapper .avatar-img, .jj-avatar img",
+        "steps": [
+            {"action": "goto", "value": "https://juejin.cn/editor/drafts/new?v=2"},
+            {"action": "waitfor", "selector": ".title-input, textarea", "value": "30000"},
+            {"action": "fill", "selector": ".title-input", "value": "{title}"},
+            {"action": "fill", "selector": "textarea.byte-input__textarea", "value": "{desc}"},
+            {"action": "wait", "value": "2000"},
+            {"action": "click", "selector": "button.xitu-btn:not(.btn-drafts)"},
+        ],
+        # 发布成功后离开创作编辑器（editor/drafts → 文章页/作品列表）
+        "publish_success": {"url_not_contains": "editor/drafts"},
+        "selector_caveat": "掘金顶栏 .avatar-wrapper 仅登录态出现（已真机校准，作 login_check）。"
+                           "未登录时 juejin.cn/login 显示扫码，但登录态下被重定向回首页，二维码选择器未能真机校准，"
+                           "login_qr_selector 为通用兜底（掘金登录可能在跨域字节/passport iframe 内），首次登录需人工核对二维码。"
+                           "me_name 取 .jj-link.user-message（悬停卡文案可能变动）、头像 .avatar-wrapper .avatar-img。"
+                           "发布走 editor/drafts/new（创作者中心→写文章跳转至此）：标题 .title-input、"
+                           "正文 textarea.byte-input__textarea、发布 button.xitu-btn（非 .btn-drafts 草稿按钮）；"
+                           "点击发布可能弹「确定并发布」二次确认（.publish-popup），如未离开编辑页需补一步确认。"
+                           "发布后离开 /editor/drafts/ 判成功。",
+    },
 }
 
 _ACTIONS = {"goto", "upload", "filechooser_upload", "fill", "type", "click", "js_click", "js_eval", "wait", "press", "waitfor", "screenshot"}

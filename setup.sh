@@ -4,34 +4,15 @@ set -euo pipefail
 # ============================================================
 # Easel 一键安装
 # 用法: git clone <repo> && cd Easel && bash setup.sh [--api]
-#
-# 环境隔离：所有 OpenClaw 配置存在 ~/.openclaw-easel/
-# 不影响用户本机已有的 OpenClaw 配置
 # ============================================================
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-PROFILE="easel"
-CHAT_MODE=http
-SKIP_OPENCLAW=false
-INSTALL_CHOICE=false
-OPENCLAW_BIN="openclaw"
-oc() { "$OPENCLAW_BIN" --profile "$PROFILE" "$@"; }
 for argument in "$@"; do
     case "$argument" in
-        --api|--skip-openclaw|--openclaw)
-            if [ "$INSTALL_CHOICE" = true ]; then
-                echo "执行引擎安装选项不能重复或同时指定。" >&2
-                exit 1
-            fi
-            INSTALL_CHOICE=true
-            case "$argument" in
-                --api) CHAT_MODE=api ;;
-                --skip-openclaw) CHAT_MODE=api; SKIP_OPENCLAW=true ;;
-            esac
-            ;;
+        --api) ;;
         --check) export EASEL_SETUP_MODE=check ;;
         --strict) export EASEL_SETUP_STRICT=1 ;;
-        *) echo "用法：bash setup.sh [--openclaw | --skip-openclaw | --api] [--check] [--strict]" >&2; exit 1 ;;
+        *) echo "用法：bash setup.sh [--api] [--check] [--strict]" >&2; exit 1 ;;
     esac
 done
 
@@ -95,16 +76,6 @@ run_with_progress() {
     return 1
 }
 
-# ============================================================
-# 安装模式、失败收集、以及对 OpenClaw 版本差异的容忍层
-#
-# 为什么需要这一层：本脚本对 OpenClaw 的 config schema 和子命令做了大量版本假设
-# （memorySearch 的位置、provider 的默认 api、config validate 是否存在、--replace
-# 是否存在……），每个假设只对某个版本区间成立。而脚本是 set -euo pipefail —— 任何
-# 一个假设落空，以前都是整个安装当场中断，用户只看到一行 openclaw 的英文报错。
-# 这类「小毛病搞挂整个安装」是本脚本历史上最主要的故障模式。
-# ============================================================
-
 # check：跑完所有探测与分支，但不真的改变任何状态，只向 stdout 吐 JSON 动作流。
 # CI 用它在 ubuntu 与 windows 上验证安装逻辑，不需要下载近 1GB 的依赖。
 SETUP_MODE="${EASEL_SETUP_MODE:-run}"
@@ -166,86 +137,6 @@ fatal() {
     exit 1
 }
 
-# ---- OpenClaw 能力探测（带记忆）----
-# 复用本脚本已验证可行的做法：读 --help 判断某个子命令/标志在当前版本上是否存在。
-# 比「先调用、失败再回退」可靠 —— 后者分不清「不支持该功能」和「这次配置真的错了」，
-# 历史上 setup.ps1 正是因此把 2026.9.x 的拒绝写入误报成「老版本不支持 --batch-file」。
-oc_supports() {   # $1 子命令（如 "config" / "config set"）  $2 要找的词
-    local cache_var rc
-    cache_var="OC_CAP_$(printf '%s_%s' "$1" "$2" | tr -c 'A-Za-z0-9' '_')"
-    eval "rc=\${$cache_var:-}"
-    if [ -z "$rc" ]; then
-        # shellcheck disable=SC2086  # $1 可能是 "config set" 两个词，需要分词
-        if oc $1 --help 2>&1 | grep -q -- "$2"; then rc=yes; else rc=no; fi
-        eval "$cache_var=\$rc"
-    fi
-    [ "$rc" = yes ]
-}
-
-# 捕获到变量再判退出码。不要写成 `$OC config set ... 2>&1 | sed ...`：
-# pipefail 下 sed 挡不住 openclaw 的非零退出，而管道里的 sed 只是在过滤噪音
-# —— 这正是历史上多处「config set 失败 → 整个安装中断」的成因。
-OC_LAST_OUT=""
-_oc_run() {   # $1 key  $2 value  [$3 --json|--json-replace]
-    local json_flag="" rc
-    case "${3:-}" in
-        --json)         json_flag="--strict-json" ;;
-        # --replace 明确声明「有意整块替换」。2026.9.x 起，整块写入若会删掉 provider 下
-        # 已存在的子键会被拒绝，而本脚本后面自己会写 timeoutSeconds —— 不声明就会首次
-        # 安装能过、第二次重跑必失败（不可重入）。老版本没有该标志，由调用方先探测。
-        --json-replace) json_flag="--strict-json --replace" ;;
-    esac
-    if [ "$SETUP_MODE" = check ]; then
-        emit_action config_set "$1" "$2"
-        OC_LAST_OUT=""
-        return 0
-    fi
-    set +e
-    # shellcheck disable=SC2086  # json_flag 为空时不能留下空参数
-    OC_LAST_OUT="$(oc config set "$1" "$2" $json_flag 2>&1)"
-    rc=$?
-    set -e
-    return $rc
-}
-
-# 静默尝试，只返回成败。用于探测哪套 schema 被接受。
-oc_try() { _oc_run "$@" >/dev/null 2>&1; }
-
-# 尽力而为的写入：失败记一条警告，绝不中断安装。
-#
-# 注意这里**必须返回 0**，哪怕写入失败。调用点形如 `oc_set '标签' some.key value`，
-# 在 set -e 下语句级的非零返回会直接中断脚本 —— 返回 1 等于根本没做 fail-soft
-# （只有 check 模式恰好看不出来，因为那条路径恒成功）。失败信息由 warn_collect
-# 记录并最终进汇总表，调用点不需要再分流。
-oc_set() {   # $1 label  $2 key  $3 value  [$4 --json|--json-replace]  [$5 severity]
-    local label="$1" severity="${5:-low}"
-    shift
-    if _oc_run "$@"; then
-            [ -n "$OC_LAST_OUT" ] && printf '%s\n' "$OC_LAST_OUT" | sed -e '/^No change$/d' -e '/^$/d'
-        return 0
-    fi
-    warn_collect "$label" "openclaw 不接受 $1（$(printf '%s' "$OC_LAST_OUT" | head -1)）" \
-        "" "$severity"
-    return 0
-}
-
-# 依次尝试多套候选 key，第一个成功即止；全失败只报一条警告（按意图而非按 key 计数）。
-# 用于那些「配置项位置随 OpenClaw 版本搬过家」的场景。
-oc_set_first() {   # $1 label  $2 value  $3 --json|--  然后是候选 key 列表
-    local label="$1" value="$2" json_flag="$3" k
-    shift 3
-    for k in "$@"; do
-        if [ "$json_flag" = "--json" ]; then
-            oc_try "$k" "$value" --json && { emit_action config_set_first_hit "$k" "$value"; return 0; }
-        else
-            oc_try "$k" "$value" && { emit_action config_set_first_hit "$k" "$value"; return 0; }
-        fi
-    done
-    # 同 oc_set：必须返回 0，否则 set -e 下会中断安装。
-    warn_collect "$label" "当前 OpenClaw 不接受任何已知写法（已试 $*）"
-    return 0
-}
-
 # 会改变状态的外部命令统一走这里，check 模式下只记录不执行。
 run_step() {   # $1 label  其余为命令
     local label="$1"
@@ -270,7 +161,6 @@ write_install_report() {   # [$1 fatal 原因]
         printf '{\n'
         printf '  "ts": %s,\n' "$(date +%s)"
         printf '  "installer": "setup.sh",\n'
-        printf '  "openclaw": "%s",\n' "$(_json_esc "${OPENCLAW_VERSION_STR:-unknown}")"
         printf '  "node": "%s",\n' "$(_json_esc "$(node -v 2>/dev/null || echo unknown)")"
         printf '  "fatal": %s,\n' "$fatal_json"
         printf '  "warnings": ['
@@ -328,40 +218,17 @@ echo -e "\n${CYAN}╭───────────────────�
 echo -e "${CYAN}│${NC}  ${MAGENTA}Easel${NC} · 社媒内容工作台安装向导                 ${CYAN}│${NC}"
 echo -e "${CYAN}│${NC}  ${DIM}多 Agent 执行引擎 · Linux / macOS${NC}               ${CYAN}│${NC}"
 echo -e "${CYAN}╰────────────────────────────────────────────────────╯${NC}"
-if [ "$INSTALL_CHOICE" = false ] && [ "$SETUP_MODE" != check ] && [ -t 0 ]; then
-    info "默认安装或复用 OpenClaw；也可以跳过，进入 Web 后选择已安装的 Codex / OpenCode。"
-    INSTALL_ANSWER="$(ask '是否安装或复用 OpenClaw？[Y/n]')"
-    case "$INSTALL_ANSWER" in
-        n|N|no|NO|0) CHAT_MODE=api; SKIP_OPENCLAW=true ;;
-    esac
-fi
-if [ "$SKIP_OPENCLAW" = true ]; then
-    echo -e "\n${DIM}  只安装 Easel 与 Web 依赖，不安装、配置或启动 OpenClaw。${NC}"
-    echo -e "${DIM}  已保存的底座不变；新用户进入 Web 后选择已有 Agent，或配置仅聊天模式。${NC}\n"
-elif [ "$CHAT_MODE" = "api" ]; then
-    echo -e "\n${DIM}  API 直连模式，不安装 OpenClaw，不启动 Gateway。${NC}\n"
-else
-    echo -e "\n${DIM}  Easel 会使用独立 profile ~/.openclaw-${PROFILE}/，不会覆盖已有 OpenClaw。${NC}\n"
-fi
+echo -e "\n${DIM}  安装 Easel 与 Web 依赖；进入 Web 设置选择 Codex / OpenCode / ACP / Pi，或 API 仅聊天模式。${NC}\n"
 
-# ---- 1. Node.js >= 24.16 ----
-# 跟随 openclaw@latest 的引擎要求：当前 2026.9.x 需要 Node >=24.16.0 <25 || >=26.1.0
-# （注意 25.x 与 26.0 被排除）。setup 默认安装 openclaw@latest，故 Node 下限对齐到 24.16。
 # 默认先走国内镜像再回落 nodejs.org：实测同一个包 nodejs.org ~20KB/s（20 分钟都下不完），
 # 阿里云 ~590KB/s（53 秒）。EASEL_NODE_MIRROR 可覆盖，镜像目录结构需与 nodejs.org/dist 一致。
 NODE_MIRROR_DEFAULT="https://mirrors.aliyun.com/nodejs-release"
-step "1/8" "检查系统环境" "Python · Node.js · Git · FFmpeg"
+step "1/6" "检查系统环境" "Python · Node.js · Git · FFmpeg"
 info "检查 Node.js..."
-node_version_ok() {  # $1=major $2=minor
-    if [ "$CHAT_MODE" = api ]; then
-        { [ "$1" -eq 20 ] && [ "$2" -ge 19 ]; } \
-            || { [ "$1" -eq 22 ] && [ "$2" -ge 12 ]; } \
-            || [ "$1" -ge 23 ]
-        return
-    fi
-    { [ "$1" -eq 24 ] && [ "$2" -ge 16 ]; } \
-        || { [ "$1" -eq 26 ] && [ "$2" -ge 1 ]; } \
-        || [ "$1" -ge 27 ]
+node_version_ok() {
+    { [ "$1" -eq 20 ] && [ "$2" -ge 19 ]; } \
+        || { [ "$1" -eq 22 ] && [ "$2" -ge 12 ]; } \
+        || [ "$1" -ge 23 ]
 }
 NODE_OK=false
 if command -v node &>/dev/null; then
@@ -387,7 +254,7 @@ else
             BREW_NODE24_PREFIX="$(brew --prefix node@24)"
             export PATH="$BREW_NODE24_PREFIX/bin:$PATH"
         else
-            echo "macOS 未找到 Homebrew。请先安装 Node.js 24.16+（Homebrew: brew install node@24），再重新运行 setup.sh。" >&2
+            echo "macOS 未找到 Homebrew。请先安装 Node.js 24（Homebrew: brew install node@24），再重新运行 setup.sh。" >&2
             exit 1
         fi
     else
@@ -416,7 +283,7 @@ else
                 warn "从 $base 下载 Node 失败，尝试下一个源"
             done
             if [ "$NODE_OK_DL" != true ]; then
-                echo "Node.js ${NODE_TARGET} 下载失败。请手动安装 Node 24.16+ 后重新运行，或用" >&2
+                echo "Node.js ${NODE_TARGET} 下载失败。请手动安装 Node 24 后重新运行，或用" >&2
                 echo "  EASEL_NODE_MIRROR=<镜像地址> bash setup.sh   指定可用镜像。" >&2
                 exit 1
             fi
@@ -427,7 +294,7 @@ else
                 if command -v sudo >/dev/null 2>&1; then
                     NODE_SUDO="sudo"
                 else
-                    echo "需要 root 才能写入 /usr/local，且未找到 sudo。请手动安装 Node 24.16+ 后重试。" >&2
+                    echo "需要 root 才能写入 /usr/local，且未找到 sudo。请手动安装 Node 24 后重试。" >&2
                     exit 1
                 fi
             fi
@@ -515,11 +382,10 @@ fi
 
 # ---- 2. npm 源 ----
 # 镜像选择：EASEL_NPM_REGISTRY 显式指定 > 连通性探测自动选择 > 默认官方源。
-# 国内网络直连 registry.npmjs.org 经常极慢或超时（OpenClaw 安装是全流程最常
-# 失败的一步），探测成功（≤3s）才用官方源；失败自动回落 npmmirror。
+# 国内网络直连 registry.npmjs.org 经常极慢或超时，探测失败自动回落 npmmirror。
 # 注意不再 `npm config set registry` 写用户全局配置 —— 改为安装命令上挂
 # --registry，只影响本次安装，装完用户 npm 配置一个字节都没动。
-step "2/8" "准备 Node.js 工具链" "选择 npm registry"
+step "2/6" "准备 Node.js 工具链" "选择 npm registry"
 NPM_REGISTRY="${EASEL_NPM_REGISTRY:-}"
 if [ -z "$NPM_REGISTRY" ]; then
     if npm ping --registry https://registry.npmjs.org --fetch-timeout=5000 \
@@ -535,73 +401,8 @@ else
 fi
 NPM_REGISTRY_ARGS=(--registry "$NPM_REGISTRY")
 
-# ---- 3. 检测/安装 OpenClaw（复用用户已有安装，不覆盖全局配置） ----
-if [ "$CHAT_MODE" != "api" ]; then
-step "3/8" "检测 OpenClaw" "已有安装将直接复用"
-info "检查 OpenClaw..."
-if command -v openclaw >/dev/null 2>&1; then
-    OPENCLAW_BIN="$(command -v openclaw)"
-    OPENCLAW_VERSION_STR="$("$OPENCLAW_BIN" --version 2>&1 | head -1)"
-    ok "检测到 OpenClaw：$OPENCLAW_VERSION_STR"
-else
-    info "安装 OpenClaw..."
-    run_step 'openclaw 全局安装' \
-        npm install -g openclaw@latest --loglevel warn "${NPM_REGISTRY_ARGS[@]}"
-    # npm 全局 bin 目录未必在当前 shell 的 PATH 上：macOS Homebrew 的 Node 会把全局包装到
-    # $(npm prefix -g)/bin（如 /opt/homebrew/Cellar/node/<ver>/bin），而 /opt/homebrew/bin 里
-    # 并没有 openclaw 链接。此时 command -v 拿到空值，后面 $OPENCLAW_BIN --version 会直接崩。
-    # 先把 npm 全局 bin 补进 PATH 再检测。
-    if ! command -v openclaw >/dev/null 2>&1; then
-        NPM_GLOBAL_BIN="$(npm prefix -g 2>/dev/null)/bin"
-        if [ -x "$NPM_GLOBAL_BIN/openclaw" ]; then
-            export PATH="$NPM_GLOBAL_BIN:$PATH"
-        fi
-    fi
-    OPENCLAW_BIN="$(command -v openclaw)"
-    if [ -z "$OPENCLAW_BIN" ]; then
-        echo "OpenClaw 安装后仍未在 PATH 中找到。请把 npm 全局 bin 目录（$(npm prefix -g 2>/dev/null)/bin）加入 PATH 后重新运行 setup.sh（幂等，会跳过已装部分）。" >&2
-        exit 1
-    fi
-    ok "OpenClaw 已安装：$("$OPENCLAW_BIN" --version 2>&1 | head -1)"
-fi
-
-# ---- 4. 初始化 Easel 专属 OpenClaw profile ----
-step "4/8" "初始化 Easel profile" "独立配置、独立 workspace、独立 Gateway"
-info "初始化 Easel profile (--profile $PROFILE)..."
-if [ -f "$HOME/.openclaw-${PROFILE}/openclaw.json" ]; then
-    ok "Profile 已存在"
-else
-    ONBOARD_HELP="$("$OPENCLAW_BIN" onboard --help 2>/dev/null || true)"
-    if [ -n "$ONBOARD_HELP" ]; then
-        ONBOARD_ARGS=(onboard --non-interactive --mode local --accept-risk)
-        for optional_arg in --skip-health --skip-channels --skip-skills \
-            --skip-ui --skip-hooks --skip-search; do
-            if printf '%s\n' "$ONBOARD_HELP" | grep -q -- "$optional_arg"; then
-                ONBOARD_ARGS+=("$optional_arg")
-            fi
-        done
-        if printf '%s\n' "$ONBOARD_HELP" | grep -q -- '--skip-daemon'; then
-            ONBOARD_ARGS+=(--skip-daemon)
-        elif printf '%s\n' "$ONBOARD_HELP" | grep -q -- '--no-install-daemon'; then
-            ONBOARD_ARGS+=(--no-install-daemon)
-        fi
-        run_step 'openclaw onboard' \
-            "$OPENCLAW_BIN" --profile "$PROFILE" "${ONBOARD_ARGS[@]}"
-    elif "$OPENCLAW_BIN" setup --help >/dev/null 2>&1; then
-        run_step 'openclaw setup' oc setup --non-interactive --mode local --accept-risk
-    else
-        echo "当前 OpenClaw 不支持可用的非交互初始化命令，请升级 OpenClaw 后重试。" >&2
-        exit 1
-    fi
-    ok "Profile 初始化完成 → ~/.openclaw-${PROFILE}/"
-fi
-
-else
-    ok "跳过 OpenClaw 安装和 profile 初始化；Web 工作台照常安装"
-fi
-
-# ---- 5. 安装 easel CLI ----
-step "5/8" "安装 Easel 运行依赖" "Web · 媒体 · 浏览器发布"
+# ---- 3. 安装 easel CLI ----
+step "3/6" "安装 Easel 运行依赖" "Web · 媒体 · 浏览器发布"
 info "[1/2] 安装 Python 依赖与 easel CLI..."
 # pip 镜像：EASEL_PIP_INDEX 显式指定 > 官方源连通性探测 > 默认官方源（同 npm 逻辑）。
 # 国内直连 pypi.org 装依赖（fastapi/playwright 等）经常超时；探测失败自动回落清华源。
@@ -633,14 +434,14 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 run_step 'pip install' run_with_progress "Python 依赖安装" python3 -m pip "${PIP_ARGS[@]}"
 # check 模式下 pip 安装被跳过，easel 自然不会出现 —— 这里不能当成失败，否则 check
-# 模式必然在第 5 步中断，整个「不下载依赖也能验证安装逻辑」的用途就没了。
+# 模式必然在依赖安装后中断，整个「不下载依赖也能验证安装逻辑」的用途就没了。
 if [ "$SETUP_MODE" != check ] && ! command -v easel >/dev/null 2>&1; then
     fatal "easel 命令未找到；请检查 Python 环境和 PATH（重试：bash setup.sh）"
 fi
 ok "[2/2] easel 命令可用"
 
-# ---- 6. 构建 Web 前端（Node 已装 → easel web 直接出真 UI，无需手动构建） ----
-step "6/8" "构建 Web 工作台" "React production bundle"
+# ---- 4. 构建 Web 前端（Node 已装 → easel web 直接出真 UI，无需手动构建） ----
+step "4/6" "构建 Web 工作台" "React production bundle"
 info "构建 Web 前端..."
 if [ -d "$PROJECT_ROOT/web/frontend" ]; then
     if [ "$SETUP_MODE" = check ]; then
@@ -659,485 +460,17 @@ else
     exit 1
 fi
 
-# ---- 7. 认证配置 ----
-if [ "$SKIP_OPENCLAW" = true ]; then
-    step "7/8" "准备执行引擎设置" "进入 Web 后选择已安装的 Agent；不迁移原生凭证"
-else
-    step "7/8" "同步模型配置" "准备模型配置"
-fi
+step "5/6" "准备执行引擎设置" "Codex · OpenCode · ACP · Pi · API 仅聊天模式"
 if [ -f "$PROJECT_ROOT/.env" ]; then
     ok ".env 已存在"
 else
-    cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
+    run_step '创建 .env' cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
     ok "已创建 .env；模型与执行引擎可以稍后在 Web 设置"
 fi
+run_step '执行引擎初始设置' python3 -m easel.installation "$PROJECT_ROOT" api
+ok "执行引擎可稍后在 Web 设置；新安装默认 API 仅聊天模式"
 
-# 安装模式由命令参数决定：默认 OpenClaw，只有 --api 选择直连。
-if [ "$SKIP_OPENCLAW" != true ]; then
-if [ "$SETUP_MODE" = check ]; then
-    emit_action env_set EASEL_CHAT_TRANSPORT "$CHAT_MODE"
-else
-python3 - "$PROJECT_ROOT/.env" "$CHAT_MODE" <<'PYENV'
-import sys
-from pathlib import Path
-path = Path(sys.argv[1])
-lines = [line for line in path.read_text().splitlines()
-         if line.strip().split("=", 1)[0] != "EASEL_CHAT_TRANSPORT"]
-path.write_text("\n".join(lines) + f"\nEASEL_CHAT_TRANSPORT={sys.argv[2]}\n")
-PYENV
-fi
-else
-    run_step '执行引擎初始设置' python3 -m easel.installation "$PROJECT_ROOT" api
-fi
-
-if [ "$CHAT_MODE" = "api" ]; then
-    MODEL_CONFIGURED=false
-    if [ "$SKIP_OPENCLAW" = true ]; then
-        ok "执行引擎可稍后配置；已有的 Codex / OpenCode 由 Web 自动检测，不要求额外填写 OpenClaw API Key"
-    else
-        ok "已启用仅聊天模式；请在 Web 设置填写模型 API 配置"
-    fi
-else
-# ---- 8. 同步 skills + workspace ----
-info "同步 Easel skills..."
-# 不要把 stderr 并进管道：sync.sh 解析不出 workspace 时那条警告只走 stderr，且不含 ✓/→，
-# 一并 grep 就被整条吃掉 —— 装完什么都没说，技能却同步到了 agent 不读的目录（issue #19
-# 的失败模式在这一层原样重建）。stdout 照旧过滤噪音，stderr 直通用户。
-# 注意两点：stderr 不能并进管道（见上），且 grep 无匹配时退出 1 —— 在 pipefail 下
-# 那会把一次成功的同步变成「安装中断」。先捕获 stdout，再分别判同步本身的成败。
-SYNC_RC=0
-SYNC_OUT="$(run_step 'agents/sync.sh' bash "$PROJECT_ROOT/agents/sync.sh")" || SYNC_RC=$?
-printf '%s\n' "$SYNC_OUT" | grep -E '✓|→' || true
-if [ "$SYNC_RC" -ne 0 ]; then
-    warn_collect '技能同步' "agents/sync.sh 退出码 $SYNC_RC；技能可能没进 agent 实际读取的 workspace" \
-        'bash agents/sync.sh' high
-fi
-
-# ---- 9. 认证信息写入 Easel 专属 OpenClaw config ----
-info "同步认证到 OpenClaw profile..."
-source "$PROJECT_ROOT/.env" 2>/dev/null || true
-
-# 独立网关配置优先于原有供应商；部分填写也进入此路径，后续明确校验而不静默回退。
-LOCAL_API_CONFIGURED=false
-if [ -n "${EASEL_DIRECT_API_BASE_URL:-}${EASEL_DIRECT_API_MODEL:-}${EASEL_DIRECT_API_KEY:-}" ]; then
-    LOCAL_API_CONFIGURED=true
-fi
-
-# 部分 OpenClaw 版本执行 config unset 后会把字段留成 null 而非真正删除该键，
-# 一旦落盘就再也无法通过 config set/doctor --fix 修复（每次校验都先失败）。
-# 这里在写入任何配置前，先把 models.providers.* 下残留的 null 叶子节点原地清空。
-OPENCLAW_JSON="$HOME/.openclaw-${PROFILE}/openclaw.json"
-if [ -f "$OPENCLAW_JSON" ]; then
-    python3 - "$OPENCLAW_JSON" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-with open(path) as f:
-    config = json.load(f)
-
-
-def strip_nulls(node):
-    if isinstance(node, dict):
-        changed = False
-        for key in list(node.keys()):
-            value = node[key]
-            if value is None:
-                del node[key]
-                changed = True
-            elif strip_nulls(value):
-                changed = True
-        return changed
-    return False
-
-
-providers = config.get("models", {}).get("providers", {})
-if strip_nulls(providers):
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
-        f.write("\n")
-PY
-fi
-
-# 原子写入 anthropic provider。部分 OpenClaw 版本（如 2026.3.x）的 schema 要求 provider 一次性带齐
-# baseUrl + models，逐字段 config set 会因中间态缺字段而整体校验失败（baseUrl/models: received undefined）。
-# 这里用一次 --json 原子写入建好完整 provider；整块替换也会顺带清掉旧的 Cookie/X-Adapter-* 等残留 header。
-# 用法：oc_write_anthropic <baseUrl> <apiKey> [apiKeyHeader] [anthropicVersion]
-oc_write_anthropic() {
-    local seed
-    seed="$(A_BASE_URL="$1" A_API_KEY="$2" A_HDR="${3:-}" A_VER="${4:-}" python3 -c '
-import json, os
-# api 必须显式写死：不写时 OpenClaw 2026.2.x 会把这个 provider 当成 openai-responses，
-# 请求打到 /responses，上游只报「does not support the responses interface」，而 gateway
-# 把它当正常回复塞进 choices[0].message.content → Web 对话静默显示「（无输出）」。
-p = {"baseUrl": os.environ["A_BASE_URL"], "apiKey": os.environ["A_API_KEY"],
-     "api": "anthropic-messages", "models": []}
-hdr = os.environ.get("A_HDR"); ver = os.environ.get("A_VER")
-if hdr or ver:
-    h = {}
-    if hdr: h[hdr] = os.environ["A_API_KEY"]
-    if ver: h["anthropic-version"] = ver
-    p["headers"] = h
-print(json.dumps(p))')"
-    # 2026.9.x 起，--json 整块写入若会删掉 provider 下已存在的子键会被直接拒绝
-    # （"Refusing to replace ...; it would remove existing entries: timeoutSeconds"）。
-    # 而 timeoutSeconds 正是本脚本后面自己设的 —— 于是首次安装能过、第二次重跑必失败，
-    # setup.sh 变成不可重入。这里的语义本来就是「有意整块替换」（顺带清掉旧的
-    # Cookie/X-Adapter-* 残留 header），所以显式声明 --replace；老版本没这个标志，
-    # 探测不到就沿用裸 --json（那些版本也不会拒绝替换）。
-    if oc_supports 'config set' '--replace'; then
-        oc_set '模型 provider（anthropic）' models.providers.anthropic "$seed" --json-replace '' high
-    else
-        oc_set '模型 provider（anthropic）' models.providers.anthropic "$seed" --json '' high
-    fi
-}
-
-# .env.example 里的 key 带的是占位符，所以「变量有值」≠「这个 key 能用」。
-# 认证判定一律走这里，别再各写各的 -n/-z：之前下面那段用 `-z ANTHROPIC_API_KEY`
-# 判「没配 Anthropic」，占位符行一留就永远不成立，整条 OpenAI 分支被跳过，
-# 最后只写了个指向不存在 provider 的 primary，对话直接报
-# "No route-compatible authentication source is configured for openai"。
-# 语义与 setup.ps1 的 Is-UsableKey 保持一致。
-usable_key() {
-    [ -n "${1:-}" ] || return 1
-    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
-        *replace_me*|*your-api-key*|*your_api_key*|*"your api key"*) return 1 ;;
-    esac
-    return 0
-}
-
-MODEL_CONFIGURED=false
-if [ "${LOCAL_API_CONFIGURED:-false}" = true ]; then
-    MODEL_CONFIGURED=true
-elif usable_key "${ANTHROPIC_API_KEY:-}"; then
-    MODEL_CONFIGURED=true
-elif usable_key "${EASEL_LLM_API_KEY:-}" && [ -n "${EASEL_LLM_BASE_URL:-}" ]; then
-    MODEL_CONFIGURED=true
-elif usable_key "${OPENAI_API_KEY:-}"; then
-    MODEL_CONFIGURED=true
-elif usable_key "${ANTHROPIC_AUTH_TOKEN:-}" && [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
-    MODEL_CONFIGURED=true
-elif usable_key "${OPENAI_MAAS_API_KEY:-}" && [ -n "${OPENAI_MAAS_ENDPOINT:-}" ]; then
-    MODEL_CONFIGURED=true
-fi
-
-# 模型 API Key 不再在终端里问，改为装完在浏览器里配。
-#
-# 为什么挪走：Web 端的「设置 → 模型配置」本来就更强（能拉取模型列表、做连通性
-# 自测、保存后自动同步 openclaw 配置并重启网关），而终端向导只能盲填，还要求用户
-# 在装机时就准备好 Key，否则这一步就卡住。顺带两个收益：
-#   - API Key 不再经过 shell 变量和 `>> .env` 追加（重跑会写出重复键）；
-#   - 安装过程变成全程非交互，CI 与自动化不需要再喂 stdin。
-if [ "$MODEL_CONFIGURED" = false ]; then
-    warn_collect '模型配置' '还没有可用的 API Key，对话功能尚不可用' \
-        'easel web → 设置 → 模型配置 → 填 Key → 保存' high
-fi
-
-DEFAULT_PRIMARY_MODEL="anthropic/claude-sonnet-4-6"
-STANDARD_LLM_CONFIGURED=false
-# 仅当真正写了 anthropic provider 时，才补设它的 provider 级超时（见下方 timeoutSeconds）；
-# 否则会给 OpenAI/MAAS 用户凭空造出一个只有 timeoutSeconds、缺 baseUrl/models 的残缺 anthropic provider。
-ANTHROPIC_PROVIDER_SYNCED=false
-# 下面 if 链里只要有一支写成了 provider 就算配好；仅 else（谁都没匹配上）会翻成 false。
-AUTH_CONFIGURED=true
-if usable_key "${ANTHROPIC_API_KEY:-}"; then
-    STANDARD_LLM_CONFIGURED=true
-elif usable_key "${EASEL_LLM_API_KEY:-}" && [ -n "${EASEL_LLM_BASE_URL:-}" ]; then
-    STANDARD_LLM_CONFIGURED=true
-elif usable_key "${OPENAI_API_KEY:-}"; then
-    STANDARD_LLM_CONFIGURED=true
-fi
-
-# 「只配了 OpenAI」才走这支（Anthropic/EASEL_LLM 优先级更高）。判据必须是 usable_key
-# 而非 -z，否则 .env.example 留下的占位符会一直把这支挡掉。
-# EASEL_LLM 要连 BASE_URL 一起判：只填了 key 没填 URL 时它哪条分支都用不上，
-# 不能让这种半拉配置把可用的 OPENAI 也一并挡死、最后落到「认证未配置」。
-if [ "${LOCAL_API_CONFIGURED:-false}" = true ]; then
-    # 整块替换，避免不完整 provider 与旧模型上的 codex runtime 覆盖。
-    LOCAL_API_PROVIDER_CONFIG=$(EASEL_DIRECT_API_BASE_URL="${EASEL_DIRECT_API_BASE_URL:-}" \
-        EASEL_DIRECT_API_MODEL="${EASEL_DIRECT_API_MODEL:-}" \
-        EASEL_DIRECT_API_KEY="${EASEL_DIRECT_API_KEY:-}" python3 - "$PROJECT_ROOT" <<'PYLOCAL'
-import json
-import os
-import sys
-
-sys.path.insert(0, sys.argv[1])
-from easel.direct_api import DirectAPIError, api_config
-
-try:
-    base, model, key = api_config(os.environ)
-except DirectAPIError as error:
-    raise SystemExit(str(error)) from None
-
-print(json.dumps({
-    "baseUrl": base,
-    "api": "openai-completions",
-    "apiKey": key or "local-gateway",
-    "authHeader": bool(key),
-    "agentRuntime": {"id": "openclaw"},
-    "request": {"allowPrivateNetwork": True},
-    "models": [{"id": model, "name": model, "agentRuntime": {"id": "openclaw"}}],
-}))
-PYLOCAL
-)
-    if oc_supports 'config set' '--replace'; then
-        oc_set '独立网关 provider' models.providers.local-api "$LOCAL_API_PROVIDER_CONFIG" --json-replace '' high
-    else
-        oc_set '独立网关 provider' models.providers.local-api "$LOCAL_API_PROVIDER_CONFIG" --json '' high
-    fi
-    LOCAL_API_MODEL=$(printf '%s' "$LOCAL_API_PROVIDER_CONFIG" | python3 -c \
-        'import json, sys; print(json.load(sys.stdin)["models"][0]["id"])')
-    DEFAULT_PRIMARY_MODEL="local-api/$LOCAL_API_MODEL"
-    CLAUDE_MODEL="$DEFAULT_PRIMARY_MODEL"
-    ok "独立网关已同步为 local-api，使用 OpenClaw 工具运行时"
-elif usable_key "${OPENAI_API_KEY:-}" && ! usable_key "${ANTHROPIC_API_KEY:-}" \
-   && ! { usable_key "${EASEL_LLM_API_KEY:-}" && [ -n "${EASEL_LLM_BASE_URL:-}" ]; }; then
-    OPENAI_MODEL="${OPENAI_MODEL:-gpt-4o}"
-    # 未声明 maxTokens 时 OpenClaw 会自行推导，部分 OpenAI 兼容网关据此拒绝请求
-    # （issue #26 P0-2）。默认值对齐默认模型 gpt-4o 的真实上限（128K 上下文 /
-    # 16384 最大输出，OpenAI 官方文档），不是随手照抄 Gemini 分支的 65535 ——
-    # 声称上限高于真实值，长输出请求照样会被下游网关拒；两个方向都可被 .env 覆盖。
-    OPENAI_CONTEXT_WINDOW="${OPENAI_CONTEXT_WINDOW:-128000}"
-    OPENAI_MAX_TOKENS="${OPENAI_MAX_TOKENS:-16384}"
-    oc_set 'OpenAI provider' models.providers.openai.api "openai-completions"
-    oc_set 'OpenAI provider' models.providers.openai.apiKey "$OPENAI_API_KEY"
-    oc_set 'OpenAI provider' models.providers.openai.baseUrl "${OPENAI_BASE_URL:-https://api.openai.com/v1}"
-    oc_set 'OpenAI provider' models.providers.openai.models \
-        "[{\"id\":\"$OPENAI_MODEL\",\"name\":\"OpenAI model\",\"reasoning\":true,\"input\":[\"text\",\"image\"],\"contextWindow\":$OPENAI_CONTEXT_WINDOW,\"maxTokens\":$OPENAI_MAX_TOKENS}]" \
-        --json
-    DEFAULT_PRIMARY_MODEL="openai/$OPENAI_MODEL"
-    CLAUDE_MODEL="$DEFAULT_PRIMARY_MODEL"
-    ok "OpenAI 服务认证已同步"
-elif [ "$STANDARD_LLM_CONFIGURED" = false ] && usable_key "${OPENAI_MAAS_API_KEY:-}"; then
-    OPENAI_PROVIDER="rednote-openai"
-    OPENAI_MODEL="${OPENAI_MAAS_MODEL:-gpt-5.5}"
-    OPENAI_PORT="${OPENAI_MAAS_ADAPTER_PORT:-18791}"
-    OPENAI_ENDPOINT="${OPENAI_MAAS_ENDPOINT:?OPENAI_MAAS_ENDPOINT is required}"
-    # A new custom provider must be written atomically or OpenClaw rejects the incomplete intermediate state.
-    OPENAI_PROVIDER_CONFIG=$(python3 - "$PROJECT_ROOT" "$OPENAI_PORT" "$OPENAI_MODEL" \
-        "$OPENAI_ENDPOINT" "$OPENAI_MAAS_API_KEY" "${OPENAI_MAAS_API_KEY_HEADER:-Authorization}" <<'PY'
-import json
-import sys
-
-root, port, model, endpoint, api_key, api_key_header = sys.argv[1:]
-print(json.dumps({
-    "baseUrl": f"http://127.0.0.1:{port}/v1",
-    "api": "openai-completions",
-    "apiKey": "local-adapter",
-    "timeoutSeconds": 600,
-    "request": {"allowPrivateNetwork": True},
-    "models": [{
-        "id": model,
-        "name": "OpenAI-compatible model",
-        "reasoning": True,
-        "input": ["text"],
-    }],
-    "localService": {
-        "command": "/usr/bin/python3",
-        "args": [f"{root}/scripts/openai_maas_adapter.py", "--port", port],
-        "cwd": root,
-        "healthUrl": f"http://127.0.0.1:{port}/health",
-        "idleStopMs": 0,
-        "env": {
-            "OPENAI_MAAS_API_KEY": api_key,
-            "OPENAI_MAAS_ENDPOINT": endpoint,
-            "OPENAI_MAAS_MODEL": model,
-            "OPENAI_MAAS_API_KEY_HEADER": api_key_header,
-        },
-    },
-}))
-PY
-)
-    oc_set 'OpenAI-compatible 本地适配器' models.providers."$OPENAI_PROVIDER" \
-        "$OPENAI_PROVIDER_CONFIG" --json
-    DEFAULT_PRIMARY_MODEL="$OPENAI_PROVIDER/$OPENAI_MODEL"
-    CLAUDE_MODEL="$DEFAULT_PRIMARY_MODEL"
-    ok "OpenAI-compatible 服务已通过本地适配器同步"
-elif [ "$STANDARD_LLM_CONFIGURED" = false ] && usable_key "${GEMINI_MAAS_API_KEY:-}"; then
-    GEMINI_PROVIDER="rednote-gemini"
-    GEMINI_MODEL="${GEMINI_MAAS_MODEL:-gemini-3.1-pro-preview}"
-    GEMINI_CONTEXT_WINDOW="${GEMINI_CONTEXT_WINDOW:-1048576}"
-    GEMINI_MAX_TOKENS="${GEMINI_MAX_TOKENS:-65535}"
-    if ! GEMINI_MODELS_CONFIG=$(GEMINI_MODEL="$GEMINI_MODEL" \
-        GEMINI_CONTEXT_WINDOW="$GEMINI_CONTEXT_WINDOW" GEMINI_MAX_TOKENS="$GEMINI_MAX_TOKENS" \
-        python3 - <<'PYGEMINI'
-import json
-import os
-import re
-import sys
-
-values = [os.environ[key] for key in ("GEMINI_CONTEXT_WINDOW", "GEMINI_MAX_TOKENS")]
-if any(not re.fullmatch(r"[0-9]{1,16}", value) for value in values):
-    sys.exit(1)
-window, tokens = map(int, values)
-if not 0 < tokens <= window <= 9007199254740991:
-    sys.exit(1)
-print(json.dumps([{"id": os.environ["GEMINI_MODEL"], "name": "Gemini-compatible model",
-                   "reasoning": True, "input": ["text", "image"],
-                   "contextWindow": window, "maxTokens": tokens}], separators=(",", ":")))
-PYGEMINI
-    ); then
-        echo "GEMINI_CONTEXT_WINDOW / GEMINI_MAX_TOKENS 必须为正整数，且输出上限不能超过上下文窗口。" >&2
-        exit 1
-    fi
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".baseUrl \
-        "http://127.0.0.1:${GEMINI_ADAPTER_PORT:-18790}/v1"
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".api "openai-completions"
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".apiKey "local-adapter"
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".models \
-        "$GEMINI_MODELS_CONFIG" \
-        --json
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".timeoutSeconds 600 --json
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".request.allowPrivateNetwork true --json
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".localService.command "/usr/bin/python3"
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".localService.args \
-        "[\"$PROJECT_ROOT/scripts/gemini_maas_adapter.py\",\"--port\",\"${GEMINI_ADAPTER_PORT:-18790}\"]" \
-        --json
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".localService.cwd "$PROJECT_ROOT"
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".localService.healthUrl \
-        "http://127.0.0.1:${GEMINI_ADAPTER_PORT:-18790}/health"
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".localService.idleStopMs 0 --json
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".localService.env.GEMINI_MAAS_API_KEY \
-        "$GEMINI_MAAS_API_KEY"
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".localService.env.GEMINI_MAAS_ENDPOINT \
-        "${GEMINI_MAAS_ENDPOINT:?GEMINI_MAAS_ENDPOINT is required}"
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".localService.env.GEMINI_MAAS_MODEL \
-        "$GEMINI_MODEL"
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".localService.env.GEMINI_THINKING_LEVEL \
-        "${GEMINI_THINKING_LEVEL:-HIGH}"
-    oc_set 'Gemini 本地适配器' models.providers."$GEMINI_PROVIDER".localService.env.GEMINI_INCLUDE_THOUGHTS \
-        "${GEMINI_INCLUDE_THOUGHTS:-true}"
-    DEFAULT_PRIMARY_MODEL="$GEMINI_PROVIDER/$GEMINI_MODEL"
-    CLAUDE_MODEL="$DEFAULT_PRIMARY_MODEL"
-    ok "Gemini-compatible 服务已通过本地适配器同步"
-elif usable_key "${EASEL_LLM_API_KEY:-}" && [ -n "${EASEL_LLM_BASE_URL:-}" ]; then
-    # 原子写入整块 provider（含 header 与 anthropic-version）；整块替换会顺带清掉旧的 CodeWiz 专用 header。
-    oc_write_anthropic "$EASEL_LLM_BASE_URL" "$EASEL_LLM_API_KEY" \
-        "${EASEL_LLM_API_KEY_HEADER:-api-key}" "${EASEL_LLM_ANTHROPIC_VERSION:-2023-06-01}"
-    ANTHROPIC_PROVIDER_SYNCED=true
-    ok "自定义 Anthropic 兼容 MaaS 认证已同步"
-elif usable_key "${ANTHROPIC_AUTH_TOKEN:-}" && [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
-    oc_write_anthropic "$ANTHROPIC_BASE_URL" "$ANTHROPIC_AUTH_TOKEN"
-    ANTHROPIC_PROVIDER_SYNCED=true
-    ok "Anthropic 兼容服务认证已同步"
-elif usable_key "${ANTHROPIC_API_KEY:-}"; then
-    # 官方 ANTHROPIC_API_KEY 可搭配 ANTHROPIC_BASE_URL 指向自定义代理/网关；未指定时显式指向官方端点，
-    # 否则请求会发往默认的 api.anthropic.com，代理网络下会直接超时。provider 由 oc_write_anthropic 原子写入。
-    oc_write_anthropic "${ANTHROPIC_BASE_URL:-https://api.anthropic.com}" "$ANTHROPIC_API_KEY"
-    ANTHROPIC_PROVIDER_SYNCED=true
-    if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
-        ok "API key + 自定义 Anthropic Base URL 已同步"
-    else
-        ok "API key 已同步"
-    fi
-else
-    AUTH_CONFIGURED=false
-    warn "认证未配置：.env 里没有可用的 API key（占位符 REPLACE_ME 不算）"
-    warn "  编辑 $PROJECT_ROOT/.env 填入真实 key 后，重新运行 bash setup.sh"
-fi
-
-# ---- 10. OpenClaw agent 模型 + 超时 ----
-# CLAUDE_MODEL 保留旧变量名以兼容现有环境，值必须是 OpenClaw 的 provider/model。
-# 不要填内部 proxy 映射名（如 claude-4.6-opus-google），否则 OpenClaw 不认识。
-if [ "$AUTH_CONFIGURED" = true ]; then
-    oc_set '主模型路由' agents.defaults.model.primary \
-        "${CLAUDE_MODEL:-$DEFAULT_PRIMARY_MODEL}" '' high
-else
-    # 上面一个 provider 都没写。这时还去写 primary 只会把 agent 指向一个不存在的
-    # provider（CLAUDE_MODEL 直接来自 .env），对话时报 "No route-compatible
-    # authentication source is configured for <provider>" —— 比「没配置」更难查。
-    # 保持不动：既不造假配置，也不覆盖用户上一次跑成功时留下的可用 primary。
-    warn "未写入 agents.defaults.model.primary；openclaw 中已有的模型设置保持不变"
-fi
-# 整个 agent run 的总时长上限。制作层任务（OpenClaw 自执行短剧/长稿/多镜）很久 → 给足。
-oc_set 'agent 总超时' agents.defaults.timeoutSeconds 7200
-# Easel 使用 profiles/<当前画像>/memory.md；关闭 OpenClaw 全局记忆索引，避免旧索引跨画像召回。
-# Easel 使用 profiles/<当前画像>/memory.md；向量记忆必须使用单独的 embedding API。
-# 否则 OpenClaw 会默认请求 text-embedding-3-small，很多聊天 MaaS 并不提供该模型。
-EMBEDDING_API_KEY="${EASEL_EMBEDDING_API_KEY:-${EASEL_EMBEDDINGS_API_KEY:-${OPENAI_EMBEDDING_API_KEY:-${EMBEDDING_API_KEY:-${EMBEDDINGS_API_KEY:-}}}}}"
-EMBEDDING_BASE_URL="${EASEL_EMBEDDING_BASE_URL:-${EASEL_EMBEDDINGS_BASE_URL:-${OPENAI_EMBEDDING_BASE_URL:-${EMBEDDING_BASE_URL:-${EMBEDDINGS_BASE_URL:-}}}}}"
-EMBEDDING_MODEL="${EASEL_EMBEDDING_MODEL:-${EASEL_EMBEDDINGS_MODEL:-${OPENAI_EMBEDDING_MODEL:-${EMBEDDING_MODEL:-${EMBEDDINGS_MODEL:-}}}}}"
-# 记忆检索配置的 schema 位置随 OpenClaw 版本变化：2026.9.x 起挪到顶层 memory.search.*，
-# 之前（<=2026.6.x）在 agents.defaults.memorySearch.*。两者互斥（各自把对方的 key 判为 Unrecognized）。
-# 用「先试新 key、失败再退老 key」自适应：第一条写入既是真实配置也是版本探测（失败输出静默）。
-if [ -n "$EMBEDDING_API_KEY" ] && [ -n "$EMBEDDING_BASE_URL" ] && [ -n "$EMBEDDING_MODEL" ]; then
-    # 先用 provider 这一条探出当前版本把记忆检索放在哪个前缀下，后续字段跟着它写。
-    if oc_try memory.search.provider openai-compatible; then
-        MEM_PREFIX="memory.search"                  # 新 schema（OpenClaw 2026.9.x+）
-        oc_set '向量记忆' memory.search.enabled true --json
-    elif oc_try agents.defaults.memorySearch.provider openai-compatible; then
-        MEM_PREFIX="agents.defaults.memorySearch"   # 老 schema（<=2026.6.x）
-    else
-        MEM_PREFIX=""
-        warn_collect '向量记忆' '当前 OpenClaw 不接受任何已知的 memory search 写法，已退回关键词检索'
-    fi
-    if [ -n "$MEM_PREFIX" ]; then
-        oc_set '向量记忆' "$MEM_PREFIX.model" "$EMBEDDING_MODEL"
-        oc_set '向量记忆' "$MEM_PREFIX.remote.baseUrl" "$EMBEDDING_BASE_URL"
-        oc_set '向量记忆' "$MEM_PREFIX.remote.apiKey" "$EMBEDDING_API_KEY"
-        ok "独立向量模型已配置（$MEM_PREFIX）：$EMBEDDING_MODEL"
-    fi
-else
-    # Deliberate FTS-only mode: never fall back to the chat endpoint for embeddings.
-    # 关闭向量检索的键随 OpenClaw 版本变过两次：2026.9.x+ 是 memory.search.enabled，
-    # 更早是 agents.defaults.memorySearch.enabled。原来的 memorySearch.provider=none 在
-    # 2026.2.x 上是无效枚举（只认 local/openai），报 Invalid input 并退出 1，配合
-    # set -euo pipefail 会直接中断整个安装 —— 「关闭」不能用 provider 表达。
-    # 末尾 || true 兜住未来再次变更 schema 的情况：关不掉也不该让安装失败。
-    oc_set_first '关闭向量记忆' false --json \
-        memory.search.enabled agents.defaults.memorySearch.enabled || true
-    if [ -n "$EMBEDDING_API_KEY$EMBEDDING_BASE_URL$EMBEDDING_MODEL" ]; then
-        warn "向量 API 配置不完整，已关闭向量检索；需要同时设置 EASEL_EMBEDDING_API_KEY、EASEL_EMBEDDING_BASE_URL、EASEL_EMBEDDING_MODEL"
-    else
-        info "未配置独立向量 API，使用关键词记忆检索（不会请求 text-embedding-3-small）"
-    fi
-fi
-# 单次 LLM 请求的「空闲超时」（等模型开始/继续产出 token 的最长时间）。内部网关对大上下文/带思考的
-# 请求首 token 可能较慢，不设会用默认较短值 → 报「model did not produce a response before the model
-# idle timeout」而中断整个 run。与 agents.defaults.timeoutSeconds 是两回事，provider 超时不能延长整个 run。
-# 尽力而为：老版本 OpenClaw（如 2026.3.x）的 provider schema 不认识 timeoutSeconds，会报 Unrecognized key
-# 并拒绝该次写入。这里吞掉这条噪音、绝不让它中断安装（|| true）；新版本 OpenClaw 才会真正把它调到 600s。
-# 想彻底拿到更长的 provider 超时，请 npm i -g openclaw@latest 升级到支持该字段的版本。
-if [ "$ANTHROPIC_PROVIDER_SYNCED" = true ]; then
-    # 老版本不认这个键属于预期内的降级，不值得记一条警告 —— 用 oc_try 静默尝试。
-    oc_try models.providers.anthropic.timeoutSeconds 600 || true
-fi
-oc_set 'gateway 基本配置' gateway.mode local
-oc_set 'gateway 基本配置' gateway.bind loopback
-oc_set 'gateway 基本配置' gateway.auth.mode none
-# 对话直连常驻网关（web/app.py 的 http 传输层）要用 OpenAI 兼容端点，而 openclaw 默认
-# 不挂这条路由（chatCompletions.enabled 默认 false），不开的话 POST /v1/chat/completions
-# 一律 404、只能退回每轮 spawn 客户端的老路径。端点只绑 loopback + auth.mode=none 的本机
-# 网关，不额外扩暴露面。旧版本没这个键时会报 Unrecognized key，吞掉即可（照常走 cli）。
-oc_try gateway.http.endpoints.chatCompletions.enabled true --json || true
-
-# Refuse to start with a config rejected by the installed OpenClaw version.
-# This catches schema changes early instead of producing opaque Gateway errors.
-# `config validate` 直到 2026.3 才有；2026.2.x 只有 get/set/unset，直接调会报
-# "too many arguments for 'config'" 并让安装在最后一步前功尽弃。老版本上跳过即可 ——
-# 上面每个 config set 都会各自校验，schema 问题照样会当场暴露。
-if oc config --help 2>&1 | grep -qE '^\s+validate\b'; then
-    # 降级而非中断：上面每个 config set 都已各自校验过，整体 validate 失败通常是更早
-    # 版本留下的陈旧键，属于可修而非致命 —— 让 doctor 去指引，别把安装卡死在这。
-    if oc config validate; then
-        ok "OpenClaw 配置校验通过"
-    else
-        warn_collect 'OpenClaw 配置校验' '整体校验未通过（多为旧版本遗留的配置键）' \
-            "openclaw --profile $PROFILE doctor --fix" high
-    fi
-else
-    warn "当前 OpenClaw（$("$OPENCLAW_BIN" --version 2>&1 | head -1)）不支持 config validate，跳过整体校验"
-fi
-
-# ---- 11. 启动 gateway ----
-step "8/8" "启动并验证" "配置校验 · Chromium · Gateway health"
-info "启动 Easel gateway..."
-# 降级而非中断：gateway 随时可以重启，没理由让一次十几分钟的安装在这最后一步作废。
-if ! run_step 'gateway start' bash "$PROJECT_ROOT/scripts/gateway.sh" start; then
-    warn_collect 'Gateway' '启动失败' 'bash scripts/gateway.sh start（日志：/tmp/easel-gateway.log）' high
-fi
-fi
-
+step "6/6" "安装并验证 Chromium" "浏览器登录与发布"
 # Playwright is a runtime dependency for browser login/publishing.
 if [ "$SETUP_MODE" = check ]; then
     # check 模式跳过了 pip 安装，playwright 模块自然不在。这里不能当成失败，否则
@@ -1164,26 +497,9 @@ fi
 
 write_install_report
 print_summary
-if [ "$SKIP_OPENCLAW" = true ]; then
-    echo -e "\n  ${CYAN}下一步：easel web → 设置 → Agent 底座 → 执行引擎${NC}"
-    echo -e "  ${DIM}选择检测到的 Codex / OpenCode 并保存，再新建对话；原生认证由对应 CLI 管理。${NC}"
-    echo -e "  ${DIM}新安装默认仅聊天模式，配置模型 API 后可聊天；不会自动执行文件或浏览器工具。${NC}"
-    echo -e "  ${DIM}以后需要 OpenClaw，可运行 bash setup.sh --openclaw，再在 Web 设置切换。${NC}"
-elif [ "${MODEL_CONFIGURED:-false}" = false ]; then
-    echo ""
-    echo -e "  ${YELLOW}下一步：在浏览器里配置模型${NC}"
-    if [ -x "$PROJECT_ROOT/.venv/bin/easel" ]; then
-        echo -e "    1. ${CYAN}source .venv/bin/activate && easel web${NC}"
-    else
-        echo -e "    1. ${CYAN}easel web${NC}"
-    fi
-    echo -e "    2. 打开 ${CYAN}http://localhost:7860${NC}"
-    echo -e "    3. 左下角${CYAN}设置${NC} → ${CYAN}模型配置${NC} → 填 API Key → 保存"
-    if [ "$CHAT_MODE" != api ]; then
-        echo -e "  ${DIM}保存后 Easel 会自动写好 OpenClaw 配置并重启网关，不用再跑 setup.sh。${NC}"
-    fi
-    echo -e "  ${DIM}也可以直接编辑 .env 填 key，然后运行 easel doctor 复检。${NC}"
-fi
+echo -e "\n  ${CYAN}下一步：easel web → 设置 → Agent 底座 → 执行引擎${NC}"
+echo -e "  ${DIM}选择 Codex / OpenCode / ACP / Pi 并保存，再新建对话；原生认证由对应 CLI 管理。${NC}"
+echo -e "  ${DIM}API 仅聊天模式通过模型 API 直连；请在 Web 设置填写模型 API 配置。${NC}"
 echo -e "\n  ${CYAN}开始使用：${NC}"
 if [ -x "$PROJECT_ROOT/.venv/bin/easel" ]; then
     echo -e "    ${CYAN}source .venv/bin/activate${NC}    # 先激活虚拟环境，easel 命令才可用"
@@ -1193,10 +509,4 @@ echo "    easel web                    # 启动 Web 工作台"
 echo "    easel chat                   # 终端对话"
 echo "    easel doctor                 # 检查环境"
 echo "    easel ping                   # 当前模式连通性"
-if [ "$CHAT_MODE" != "api" ]; then
-    echo -e "\n  ${DIM}Easel profile：~/.openclaw-${PROFILE}/${NC}"
-fi
 echo -e "  ${DIM}项目目录：$PROJECT_ROOT${NC}\n"
-if [ "$CHAT_MODE" != "api" ]; then
-    echo -e "  ${DIM}默认执行引擎：OpenClaw；Web 设置可切换到已安装的 Codex、OpenCode 或其它 ACP 引擎。${NC}"
-fi

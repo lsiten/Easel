@@ -52,7 +52,7 @@ export default function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
   const [apiDirect, setApiDirect] = useState(false);
-  const [agentRuntime, setAgentRuntime] = useState('openclaw');
+  const [agentRuntime, setAgentRuntime] = useState('');
   const [showRecommend, setShowRecommend] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -82,7 +82,7 @@ export default function App() {
   // 挂载时决定进哪个会话。规则：
   //  - 同一标签刷新（sessionStorage 记着本标签的会话）→ 直接续上（同标签不算冲突）。
   //  - 新开标签/窗口 → 若「上次活跃会话」正被另一个存活标签占用（跨标签 BroadcastChannel 探测），
-  //    则开一个新会话，避免两个窗口撞同一会话 → openclaw 并发 takeover 崩溃（后端还有 flock 兜底）。
+  //    则开一个新会话，避免两个窗口撞同一会话导致并发 takeover 崩溃（后端还有 flock 兜底）。
   //  - 否则续上上次会话（保留「关页重开续接」的体验）。
   const TAB_SESSION_KEY = 'easel_tab_session';
   useEffect(() => {
@@ -175,7 +175,7 @@ export default function App() {
         setPersonas(data.personas || []);
         setGatewayStatus(data.gateway ? 'connected' : 'disconnected');
         setApiDirect(data.transport === 'api');
-        setAgentRuntime(data.runtime || 'openclaw');
+        setAgentRuntime(data.runtime || '');
         const unconfigured = !!boot && boot.modelConfigured === false;
         if (unconfigured) {
           // 直接打开设置面板（它默认就停在「模型配置 · 对话」页）
@@ -284,7 +284,7 @@ export default function App() {
     });
     streamAcc.current[sessionId] = { content: '', thinking: '', steps: [], questions: [] };
     setStreams((prev) => ({ ...prev, [sessionId]: { content: '', thinking: '', activity: '', questions: [] } }));
-    // 打字机队列：流式事件按批到达（OpenClaw 攒批），前端按字符节奏显示，体验逐字浮现。
+    // 打字机队列：流式事件按批到达（后端攒批），前端按字符节奏显示，体验逐字浮现。
     typingBuf.current[sessionId] = '';
     startTypingPump(sessionId);
     streamCtl.current[sessionId] = streamChat(
@@ -296,7 +296,7 @@ export default function App() {
         ensureTypingPump(sessionId);
       },
       (sessionKey) => {
-        // done 不能立即 flush——token 和 done 几乎同时到达（OpenClaw 攒批），
+        // done 不能立即 flush——token 和 done 几乎同时到达（后端攒批），
         // 立即 flush 会把整包瞬间冲出，打字机白做。等队列吐完再落盘。
         const waitAndFinalize = () => {
           if (typingBuf.current[sessionId]) {
@@ -387,7 +387,7 @@ export default function App() {
     typingBuf.current[sessionId] = '';
     startTypingPump(sessionId);
     if (!turnId) {
-      void fetchLastTurn(sessionId).then((r) => {
+      void fetchLastTurn(sessionId, s?.persona).then((r) => {
         if (r.status === 'done') appendAssistant(sessionId, { role: 'assistant', content: r.text || '（无输出）' });
         clearStream(sessionId);
       }).catch(() => clearStream(sessionId));
@@ -441,7 +441,7 @@ export default function App() {
       () => {
         // The event log may disappear after a backend restart. Prefer the
         // completed per-session snapshot; otherwise terminate stale recovery.
-        void fetchLastTurn(sessionId, turnId).then((r) => {
+        void fetchLastTurn(sessionId, s?.persona, turnId).then((r) => {
           if (r.status === 'done') {
             appendAssistant(sessionId, { role: 'assistant', content: r.text || '（无输出）' });
           } else {
@@ -551,7 +551,7 @@ export default function App() {
   const handleStopStream = useCallback((sessionId: string) => {
     streamCtl.current[sessionId]?.abort();
     // 告诉后端**真正终止**这一轮 agent 并释放会话锁——否则后端进程还在跑、占着锁，下一句会被拦
-    void stopChat(sessionId).catch(() => { /* 后端可能已结束，忽略 */ });
+    void stopChat(sessionId, sessionsRef.current.find((x) => x.id === sessionId)?.persona).catch(() => { /* 后端可能已结束，忽略 */ });
     flushTyping(sessionId);   // 停止时立刻把队列余字吐完，保证已到内容不丢
     const a = streamAcc.current[sessionId];
     if (a && (a.content || a.thinking || a.steps.length)) {
@@ -628,14 +628,14 @@ export default function App() {
     const target = sessionsRef.current.find((s) => s.id === id);
     const wasRunning = Boolean(streamCtl.current[id]);
     const stopped = wasRunning
-      ? stopChat(id).catch(() => ({ stopped: false }))
+      ? stopChat(id, target?.persona).catch(() => ({ stopped: false }))
       : Promise.resolve({ stopped: false });
     streamCtl.current[id]?.abort();   // 删除正在流式的会话时中止其流
     clearStream(id);
     try { sessionStorage.removeItem(`easel_pending_turn:${id}`); } catch { /* ignore */ }
 
     if (target?.sessionKey) {
-      // Do not delete OpenClaw's session record while its agent is still
+      // Do not delete the session record while its agent is still
       // writing to it; the stop endpoint waits for backend cleanup first.
       void stopped.then(() => deleteRemoteSession(target.sessionKey as string)).catch(() => {});
     }
@@ -755,9 +755,9 @@ export default function App() {
       case 'skills':
         return <SkillPage persona={selectedPersona} />;
       case 'outputs':
-        return <OutputsPage jumpPath={outputsJump} onJumpHandled={clearOutputsJump} />;
+        return <OutputsPage jumpPath={outputsJump} onJumpHandled={clearOutputsJump} persona={selectedPersona} />;
       case 'accounts':
-        return <AccountsPage />;
+        return <AccountsPage persona={selectedPersona} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onUsePersona={handlePersonaChange} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       default:
@@ -851,7 +851,7 @@ export default function App() {
             setNeedModelSetup(false);
             void fetchStatus().then((data) => {
               setApiDirect(data.transport === 'api');
-              setAgentRuntime(data.runtime || 'openclaw');
+              setAgentRuntime(data.runtime || '');
               setGatewayStatus(data.gateway ? 'connected' : 'disconnected');
             }).catch(() => setGatewayStatus('disconnected'));
           }}

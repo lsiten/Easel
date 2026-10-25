@@ -5,13 +5,13 @@ import { answerQuestion } from '../lib/api';
 /**
  * ask_user 问答题卡片。
  *
- * OpenClaw 的 ask_user 一次可带 1-3 个问题（question.questions[]）。gateway 的
+ * ask_user 一次可带 1-3 个问题（question.questions[]）。后端的
  * question.resolve 要求 answers 里**每个问题都有答案**（单个缺失即报
  * QUESTION_INVALID_ANSWER: "question 'xxx' requires an answer"）。
  * 因此多问题时渲染全部题目，用户每问答完一项，全部选齐后自动提交一次。
  *
  * 多选：问题对象带 multiSelect: true 时，answers[qid] 可携带多个 label
- * （gateway 对 multiSelect=false 的多值直接报 "does not allow multiple answers"，
+ * （后端对 multiSelect=false 的多值直接报 "does not allow multiple answers"，
  * 前端只按数据渲染，不绕过校验）。
  */
 function QuestionCard({ question, onAnswered }: { question: ChatQuestion; onAnswered: () => void }) {

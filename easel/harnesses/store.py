@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .base import HarnessError
 
-IDS = ("api", "openclaw", "opencode", "codex", "acp", "pi")
+IDS = ("api", "opencode", "codex", "acp", "pi")
 
 
 def read_json(path: Path) -> dict:
@@ -40,15 +40,16 @@ def write_json(path: Path, data: dict) -> None:
 
 def settings(outputs: Path, env: dict[str, str]) -> dict:
     data = read_json(outputs / "_harness" / "config.json")
-    state_dir = Path(env.get("EASEL_OPENCLAW_STATE_DIR") or Path.home() / ".openclaw-easel")
-    legacy = "EASEL_CHAT_TRANSPORT" in env or (state_dir / "openclaw.json").is_file()
-    default = "openclaw" if legacy else "api"
+    default = "api"
     runtime = env.get("EASEL_AGENT_RUNTIME", data.get("runtime", default))
-    if not isinstance(runtime, str) or runtime.strip().lower() not in IDS:
+    if not isinstance(runtime, str):
         raise HarnessError("未知 Agent 底座，请在设置中选择已支持的底座")
     runtime = runtime.strip().lower()
-    if runtime == "openclaw" and env.get("EASEL_CHAT_TRANSPORT", "").strip().lower() == "api":
-        runtime = "api"
+    # 兼容遗留配置：runtime 为已移除的旧底座时落到仅聊天模式（api），不报错也不丢历史。
+    if runtime == "openclaw":
+        runtime = default
+    if runtime not in IDS:
+        raise HarnessError("未知 Agent 底座，请在设置中选择已支持的底座")
     models = data.get("models", {})
     if not isinstance(models, dict) or any(
             key not in IDS or not isinstance(value, str) or len(value) > 240

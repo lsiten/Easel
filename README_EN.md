@@ -24,7 +24,6 @@
 
 <p align="center">
   <a href="https://zju-real.github.io/Easel/"><img src="https://img.shields.io/badge/Easel-Project_Page-F05A3C?style=flat-square&logo=googlechrome&logoColor=white" alt="Easel Project Page"></a>
-  <img src="https://img.shields.io/badge/OpenClaw-powered-111827?style=flat-square" alt="Powered by OpenClaw">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
   <a href="docs/skill-function-mapping.md"><img src="https://img.shields.io/badge/Skills-113-0F9D8A?style=flat-square" alt="113 Skills"></a>
   <a href="https://github.com/ZJU-REAL/Easel/stargazers"><img src="https://img.shields.io/github/stars/ZJU-REAL/Easel?style=flat-square&color=F6C344" alt="GitHub Stars"></a>
@@ -41,7 +40,7 @@
 
 ## 🎨 What Is Easel?
 
-Easel is an open-source content workspace for social media creators. It connects an OpenClaw Agent, account profiles, content Skills, and real media tools, enabling the Agent to produce and archive content instead of merely explaining what to do, with direct or on-demand publishing when needed.
+Easel is an open-source content workspace for social media creators. It connects selectable Agent engines (Codex / OpenCode / ACP / Pi), account profiles, content Skills, and real media tools, enabling the Agent to produce and archive content instead of merely explaining what to do, with direct or on-demand publishing when needed. Chat-only mode (`api`, model API direct) is also available, without local tools or skills.
 
 Think of Easel as a content partner that remembers your positioning, audience, voice, platform constraints, preferences, and past performance. It stays with you from trend discovery through publishing, then carries what it learns into the next creation cycle.
 
@@ -57,12 +56,12 @@ EASEL_DIRECT_API_KEY=your-real-gateway-key
 
 Use a base URL including `/v1`, not the full `/chat/completions` URL. Leave the key empty for gateways without authentication.
 
-- `bash setup.sh` uses OpenClaw by default. A complete independent configuration creates the `local-api` provider with OpenClaw's tool runtime and permits requests to the configured private gateway. The model must support tool calling. Configure `.env` before installation; there is no terminal model-selection wizard.
-- `bash setup.sh --api` skips OpenClaw installation, skills synchronization, and Gateway startup. Alternatively, select **API direct** in the Web model settings, or set `EASEL_CHAT_TRANSPORT=api` manually.
+- Run `bash setup.sh`, then select **Chat-only mode** (`api`) in Web settings to use this independent model API configuration. There is no terminal model-selection wizard.
+- To execute local tools and skills, select an installed and authenticated Codex / OpenCode / ACP / Pi engine instead. Each native engine uses its own provider and authentication configuration; Easel does not copy these API credentials into it.
 - Direct mode supports streaming chat, separate multi-turn history, profiles, text/image attachments, stop, and reconnection. It cannot execute local tools, skills, or publishing. Start a new conversation after changing modes.
 - Direct configuration only reads `EASEL_DIRECT_API_*`; it never falls back to `OPENAI_*`. CLI `chat`, `ping`, and `doctor` recognize direct mode. `ping` verifies actual connectivity; a configured badge alone does not.
 
-These installer options apply to Linux/macOS `setup.sh`. Windows users can configure direct mode in `.env` or Web settings.
+Windows users can also configure chat-only mode in `.env` or Web settings.
 
 Easel promotional demo:
 
@@ -204,25 +203,25 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\.venv\Scripts\easel.exe web
 ```
 
-The Windows installer uses `winget` to install missing system tools when available, creates `.venv`, installs Python and frontend dependencies, builds the Web UI, and installs Playwright Chromium. Easel uses an isolated `easel` OpenClaw profile. Windows PowerShell 5.1 is supported. Native installation and the Web/CLI entry points are available; broader Windows compatibility across individual skills and browser publishing is still being improved.
+The Windows installer uses `winget` to install missing system tools when available, creates `.venv`, installs Python and frontend dependencies, builds the Web UI, and installs Playwright Chromium. Windows PowerShell 5.1 is supported. Native installation and the Web/CLI entry points are available; broader Windows compatibility across individual skills and browser publishing is still being improved.
 
-`bash setup.sh` is a rerunnable installer. It detects and reuses an existing local OpenClaw
-installation without touching `~/.openclaw/`; Easel uses its isolated `~/.openclaw-easel/` profile.
+`bash setup.sh` is a rerunnable installer for the Easel workspace and its dependencies.
+Install and authenticate your chosen native Agent CLI separately, or configure chat-only mode.
 
 **Configure your model API key in the browser — the installer no longer asks for it in the terminal.**
-After installing, run `easel web`; on first open it takes you straight to *Settings → Model config*.
-Enter your key and save, and Easel writes the OpenClaw configuration and restarts the gateway for you
-— no need to rerun `setup.sh`. The panel can also list a provider's available models and run a
-connectivity self-test, neither of which the old terminal prompt could do. Alternatively, copy
-`.env.example`, fill in a key, and run `easel doctor` to re-check.
+After installing, run `easel web` and choose an installed and authenticated Codex / OpenCode / ACP / Pi
+engine in Settings, or configure the API URL, model, and key for chat-only mode.
+Native engines retain their own CLI credentials. Alternatively, configure the independent
+`EASEL_DIRECT_API_*` settings in `.env` and run `easel doctor` to re-check.
+See [Agent harnesses](docs/agent-harnesses.md) for configuration and session behavior.
 
 The installer is fully non-interactive apart from one question (whether to create `.venv`, which takes
 its default when stdin is not a TTY), so it is safe for CI. Non-fatal problems — FFmpeg, Chromium,
-gateway startup, missing model config — are collected into a summary at the end and written to
+missing model config — are collected into a summary at the end and written to
 `outputs/_install/last-install.json` for `easel doctor` to repeat; the install itself still exits 0.
 Set `EASEL_SETUP_STRICT=1` to turn those warnings back into hard failures.
 
-Open `http://localhost:7860` for the Web workspace. Run `easel doctor` to check the environment and `easel ping` to verify the gateway and Agent connection.
+Open `http://localhost:7860` for the Web workspace. Run `easel doctor` to check the environment and `easel ping` to verify the selected engine or model API connection.
 
 When Easel runs on a server accessed through VSCode Remote SSH, forward server port `7860`
 in VSCode's Ports panel and open the displayed local forwarded address; the local port may differ.
@@ -238,29 +237,20 @@ python -m playwright install chromium
 
 ## ⚙️ Configuration
 
-The minimum configuration is a usable LLM in the project-root `.env` file:
+Native Agent engines use their own CLI model and authentication settings. For chat-only mode,
+configure the independent model API in Web settings or the project-root `.env` file:
 
 ```bash
-ANTHROPIC_API_KEY=your_api_key
-CLAUDE_MODEL=anthropic/claude-sonnet-4-6
+EASEL_DIRECT_API_BASE_URL=https://your-provider.example/v1
+EASEL_DIRECT_API_MODEL=your-model-id
+EASEL_DIRECT_API_KEY=your_api_key
 ```
 
 `.env.example` also documents optional video, music, voice, and Anthropic-compatible provider settings. Configure only the capabilities you use. Missing media-provider credentials do not prevent chat, planning, or text creation.
 
-Custom chat providers in Web Settings expose a “该模型会思考” (reasoning-capable) checkbox.
-Enabling it writes `reasoning: true`; OpenAI-compatible providers also offer a thinking format
-(OpenAI, DeepSeek, etc.) that must match the upstream API. Native Anthropic uses its own format.
-New rows default to off, while existing declarations are shown. Disabling reasoning writes
-`reasoning: false` and removes only reasoning-related compatibility keys, preserving other
-capabilities. Omitting `thinking` from the save API preserves existing declarations; enabling
-it preserves existing effort mappings rather than guessing supported effort levels.
-The format is stored as OpenClaw's `compat.thinkingFormat`; actual wire parameters depend
-on its version and model adapter. For example, OpenClaw 2026.9.8 may still send only
-`reasoning_effort` for generic custom models; this is not an arbitrary dialect converter.
-This declares capability, not verified upstream support, and does not override
-`EASEL_THINKING_LEVEL=off`. The switch is not available in direct API mode.
-For a current model explicitly marked `reasoning: false`, Web uses `--thinking off`
-when invoking the OpenClaw CLI rather than requesting an unsupported `medium` level.
+Chat-only mode uses the independent `EASEL_DIRECT_API_*` configuration. Native engines use
+their own CLI provider and authentication settings. Reasoning support and parameters depend
+on the selected engine and model; settings for one engine are not interchangeable with another.
 
 | Capability | Configuration | Additional dependency |
 |---|---|---|
@@ -281,9 +271,8 @@ The Publishing Center offers **Automatic publishing / Human-reviewed publishing*
 | `easel web [--port 7860]` | Start the Web workspace |
 | `easel chat` | Start a multi-turn terminal conversation and select an account profile |
 | `easel skill <name> -i "..." [-p <profile>]` | Run a Skill directly; input may also be a file path |
-| `easel doctor` | Check Python, Node.js, OpenClaw, and essential configuration |
-| `easel ping` | Check the gateway and Agent connection |
-| `easel gateway start\|stop\|restart\|status\|logs` | Manage the OpenClaw gateway |
+| `easel doctor` | Check Python, Node.js, the selected engine, and essential configuration |
+| `easel ping` | Check the selected engine or model API connectivity |
 
 ```bash
 easel skill quality-gate -i "Review this social media post"
@@ -312,11 +301,11 @@ Easel/
 ├── assets/                   Brand, README media, and imported assets
 ├── profiles/                 Account profiles
 ├── outputs/                  Content projects and final deliverables
-├── agents/                   Shared Agent workspace, harness configuration, and sync scripts
+├── agents/                   Shared Agent workspace and harness support files
 └── docs/                     Specifications, capability map, and architecture docs
 ```
 
-Easel uses an isolated `easel` OpenClaw profile and does not overwrite an existing OpenClaw setup. The Web workspace defaults to port `7860`; the gateway port is chosen by OpenClaw (non-default profiles get a hashed port — `easel` → `37289`, not `18789`) and is resolved automatically by Easel.
+The Web workspace defaults to port `7860`. Codex / OpenCode / ACP / Pi use their native protocols and CLI authentication; chat-only mode calls the model API directly. See [Agent harnesses](docs/agent-harnesses.md).
 
 ## 📑 Documentation
 
@@ -334,7 +323,7 @@ Ordered by priority — contributions welcome; feel free to claim or add items v
 - [ ] **1. Windows support** — Complete native Windows compatibility across installation, paths/encoding, and browser publishing.
 - [ ] **2. Simpler installation** — Lower the barrier to entry with fewer manual steps and a smoother one-click setup.
 - [ ] **3. Better in-app Agent UX** — Improve the Web workbench's chat interaction, loading logic, and streaming feedback.
-- [ ] **4. More Agent harnesses** — Support agent runtimes beyond OpenClaw, e.g. Claude Code, DeepSeek harness, Codex.
+- [ ] **4. More Agent harnesses** — Extend runtime support beyond Codex, OpenCode, ACP, and Pi.
 
 ## 🙏 Acknowledgments
 

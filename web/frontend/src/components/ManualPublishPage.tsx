@@ -13,6 +13,8 @@ const PLATFORMS = [
   { key: 'zhihu', label: '知乎', titleLimit: 0, bodyLimit: 5000, url: 'https://zhuanlan.zhihu.com/write', hint: '打开官方文章编辑器，粘贴正文后检查排版。' },
   { key: 'bilibili', label: 'B站', titleLimit: 80, bodyLimit: 2000, url: 'https://member.bilibili.com/', hint: '进入官方创作中心投稿，核对分区、简介和封面。' },
   { key: 'wechat-oa', label: '公众号', titleLimit: 64, bodyLimit: 20000, url: 'https://mp.weixin.qq.com/', hint: '在官方后台新建草稿，上传图片并检查手机版预览。' },
+  { key: 'csdn', label: 'CSDN', titleLimit: 60, bodyLimit: 50000, url: 'https://editor.csdn.net/md/?not_checkout=1', hint: '在 CSDN 创作编辑器粘贴 Markdown 正文，核对排版与发布。' },
+  { key: 'juejin', label: '掘金', titleLimit: 30, bodyLimit: 50000, url: 'https://juejin.cn/editor/drafts/new?v=2', hint: '在掘金创作编辑器粘贴正文，核对排版与发布。' },
 ];
 
 function sections(text: string): Record<string, string> {

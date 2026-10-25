@@ -69,7 +69,7 @@ markdown → styled PNG 卡片，用本机 Chrome。
 选项：`--style purple/xiaohongshu(默认)/mint/sunset/ocean/elegant/dark` · `--pagination auto(默认)/separator` · `--output-dir` · `--width`(1080) · `--height`(1440) · `--dpr`(2)。需 `puppeteer-core` + `marked`；Chrome 非标准位置设 `CHROME_PATH`。
 
 ### `redbook auth`
-为 OpenClaw/云/CI 管理保存的 cookie。
+为云/CI 环境管理保存的 cookie。
 ```bash
 redbook auth export                                  # 从本地浏览器导出到 ~/.redbook/cookies.json
 redbook auth save --cookie-string "a1=...; web_session=..."

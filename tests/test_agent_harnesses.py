@@ -71,11 +71,10 @@ def test_model_configuration_preview_does_not_switch_engine(sandbox, monkeypatch
 
     monkeypatch.setattr(web, "_model_channels", channels)
     before = (web.OUTPUTS_DIR / "_harness" / "config.json").read_bytes()
-    for runtime in ("api", "openclaw"):
-        response = sandbox.get("/api/settings/models", params={"runtime": runtime})
-        assert response.status_code == 200
-        assert response.json()["runtime"] == runtime
-    assert captured == ["api", "openclaw"]
+    response = sandbox.get("/api/settings/models", params={"runtime": "api"})
+    assert response.status_code == 200
+    assert response.json()["runtime"] == "api"
+    assert captured == ["api"]
     assert sandbox.get("/api/settings/models?runtime=codex").status_code == 400
     assert (web.OUTPUTS_DIR / "_harness" / "config.json").read_bytes() == before
 
@@ -660,29 +659,16 @@ def test_corrupt_settings_fail_closed(tmp_path, config):
 
 @pytest.mark.parametrize(("saved", "env", "expected"), [
     ({}, {}, "api"),
-    ({}, {"EASEL_CHAT_TRANSPORT": "http"}, "openclaw"),
-    ({}, {"EASEL_CHAT_TRANSPORT": "cli"}, "openclaw"),
-    ({}, {"EASEL_CHAT_TRANSPORT": "api"}, "api"),
-    ({"runtime": "openclaw"}, {}, "openclaw"),
-    ({"runtime": "openclaw"}, {"EASEL_CHAT_TRANSPORT": "api"}, "api"),
-    ({"runtime": "codex"}, {"EASEL_CHAT_TRANSPORT": "api"}, "codex"),
-    ({"runtime": "api"}, {"EASEL_CHAT_TRANSPORT": "http"}, "api"),
+    ({"runtime": "openclaw"}, {}, "api"),
+    ({}, {"EASEL_AGENT_RUNTIME": "openclaw"}, "api"),
+    ({}, {"EASEL_AGENT_RUNTIME": "openclaw", "EASEL_CHAT_TRANSPORT": "http"}, "api"),
+    ({"runtime": "codex"}, {}, "codex"),
     ({"runtime": "api"}, {"EASEL_AGENT_RUNTIME": "codex"}, "codex"),
 ])
 def test_engine_defaults_and_saved_configuration(tmp_path, monkeypatch, saved, env, expected):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     store.write_json(tmp_path / "outputs" / "_harness" / "config.json", saved)
     assert store.settings(tmp_path / "outputs", env)["runtime"] == expected
-
-
-def test_existing_openclaw_install_keeps_its_engine(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    state_dir = tmp_path / ".openclaw-easel"
-    state_dir.mkdir()
-    (state_dir / "openclaw.json").write_text("{}", encoding="utf-8")
-    assert store.settings(tmp_path / "outputs", {})["runtime"] == "openclaw"
-    assert store.settings(tmp_path / "outputs", {
-        "EASEL_OPENCLAW_STATE_DIR": str(tmp_path / "new-profile")})["runtime"] == "api"
 
 
 def test_binding_is_hashed_durable_and_cannot_change_owner(tmp_path):
@@ -753,16 +739,11 @@ def test_unix_native_opencode_is_not_invoked_with_node(tmp_path, monkeypatch):
     assert base_command("opencode") == [str(launcher)]
 
 
-@pytest.mark.parametrize("runtime", ["openclaw", "opencode", "codex", "acp"])
+@pytest.mark.parametrize("runtime", ["opencode", "codex", "acp"])
 def test_harness_inspection_handles_inaccessible_installations(monkeypatch, runtime):
     def inaccessible(*args):
         raise PermissionError("cannot inspect installation")
-    if runtime == "openclaw":
-        from easel import openclaw_cmd
-        resolver = Mock(side_effect=inaccessible)
-        monkeypatch.setattr(openclaw_cmd, "openclaw_base_cmd", resolver)
-    else:
-        monkeypatch.setattr(web.harnesses, "acp_command" if runtime == "acp" else "base_command", inaccessible)
+    monkeypatch.setattr(web.harnesses, "acp_command" if runtime == "acp" else "base_command", inaccessible)
     descriptor = web.harnesses.describe(runtime)
     assert descriptor["id"] == runtime
     assert descriptor["installed"] is False
@@ -785,7 +766,6 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "ENV_FILE", env)
     monkeypatch.setattr(web, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(web, "SESSIONS_DIR", tmp_path / "sessions")
-    monkeypatch.setattr(web, "OPENCLAW_SESSIONS_DIR", tmp_path / "openclaw-sessions")
     monkeypatch.setattr(web, "OUTPUTS_DIR", tmp_path / "outputs")
     for name in ("_session_locks", "_RUNNING_CHAT", "_HARNESS_QUESTIONS"):
         monkeypatch.setattr(web, name, {})
@@ -826,7 +806,7 @@ def test_web_config_guards_and_no_credential_mutation(sandbox, monkeypatch):
     monkeypatch.setattr(web.harnesses, "describe", lambda runtime: {"installed": False})
     assert sandbox.post("/api/settings/harness", json={"runtime": "codex"}).status_code == 409
     monkeypatch.setattr(web, "_HARNESS_TASKS", {"active"})
-    assert sandbox.post("/api/settings/harness", json={"runtime": "openclaw"}).status_code == 409
+    assert sandbox.post("/api/settings/harness", json={"runtime": "codex"}).status_code == 409
     web._HARNESS_TASKS.clear()
 
 
@@ -846,54 +826,13 @@ def test_switching_chat_only_preserves_other_engine_settings_and_credentials(san
     assert web.ENV_FILE.read_bytes() == original
     bootstrap = sandbox.get("/api/settings/bootstrap").json()
     assert bootstrap["modelConfigured"] is False
-    assert sandbox.post("/api/gateway/restart").json()["ok"] is True
-    assert sandbox.post("/api/settings/harness", json={"runtime": "openclaw"}).json()["runtime"] == "openclaw"
     monkeypatch.setattr(web.harnesses, "describe", lambda runtime: {"installed": True})
     response = sandbox.post("/api/settings/harness", json={"runtime": "codex", "model": "test-model"})
     assert response.json()["models"]["codex"] == "test-model"
     assert web.ENV_FILE.read_bytes() == original
 
 
-def test_legacy_chat_only_switch_to_openclaw_updates_only_transport(sandbox, monkeypatch):
-    monkeypatch.delenv("EASEL_CHAT_TRANSPORT", raising=False)
-    web.ENV_FILE.write_text("EASEL_CHAT_TRANSPORT=api\nEASEL_DIRECT_API_KEY=keep-secret\n", encoding="utf-8")
-    response = sandbox.post("/api/settings/harness", json={"runtime": "openclaw"})
-    assert response.status_code == 200
-    assert response.json()["runtime"] == "openclaw"
-    assert "EASEL_CHAT_TRANSPORT=http" in web.ENV_FILE.read_text()
-    assert "EASEL_DIRECT_API_KEY=keep-secret" in web.ENV_FILE.read_text()
-    assert response.json()["models"]["codex"] == "test-model"
-
-
-def test_legacy_connection_endpoint_respects_task_lock_and_preserves_settings(sandbox, monkeypatch):
-    monkeypatch.delenv("EASEL_CHAT_TRANSPORT", raising=False)
-    monkeypatch.setattr(web, "_HARNESS_TASKS", {"active"})
-    assert sandbox.post("/api/settings/chat/transport", json={"transport": "api"}).status_code == 409
-    web._HARNESS_TASKS.clear()
-    response = sandbox.post("/api/settings/chat/transport", json={"transport": "api"})
-    assert response.status_code == 200
-    config = web._harness_settings()
-    assert config["runtime"] == "api"
-    assert config["models"]["codex"] == "test-model"
-    assert sandbox.post("/api/settings/chat/transport", json={"transport": "openclaw"}).status_code == 200
-    assert web._harness_settings()["runtime"] == "openclaw"
-
-
-@pytest.mark.parametrize("prefix", ["", "web:"])
-def test_old_openclaw_history_is_not_silently_replaced(sandbox, prefix):
-    web.OPENCLAW_SESSIONS_DIR.mkdir()
-    (web.OPENCLAW_SESSIONS_DIR / f"{web._openclaw_session_id(prefix + 'old')}.jsonl").write_text("{}")
-    assert sandbox.post("/api/chat", json={"sessionId": "old", "message": "hello"}).status_code == 409
-    assert not store.binding(web.SESSIONS_DIR, "old")
-
-
-def test_old_gateway_settings_endpoints_do_not_run_for_native(sandbox):
-    assert sandbox.post("/api/settings/models/selftest", json={"channel": "chat"}).status_code == 409
-    assert sandbox.post("/api/chat/question/answer", json={"questionId": "old", "answers": {}}).status_code == 409
-    assert sandbox.post("/api/settings/models/save", json={"channel": " chat ", "rows": []}).status_code == 409
-
-
-def test_background_skill_runs_on_web_loop_without_openclaw(sandbox, monkeypatch):
+def test_background_skill_runs_on_web_loop(sandbox, monkeypatch):
     requests = []
 
     class Fake:

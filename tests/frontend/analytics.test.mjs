@@ -24,6 +24,7 @@ function setup() {
   const pending = [], storage = new Map(), exports = {};
   runInNewContext(outputText, {
     exports, Error,
+    persona: undefined,
     anaPending: { current: new Set() },
     setAnaSel: () => {},
     setAnaErrors: update => { errors = update(errors); },
@@ -80,6 +81,11 @@ test('analytics requests have platform-specific bounded deadlines', async () => 
   const exports = {}, calls = [];
   runInNewContext(compiled, {
     exports, encodeURIComponent,
+    appendPersona: (url, persona) => {
+      if (!persona) return url;
+      const sep = url.includes('?') ? '&' : '?';
+      return `${url}${sep}persona=${encodeURIComponent(persona)}`;
+    },
     AbortSignal: { timeout: duration => ({ duration }) },
     request: async (path, options) => { calls.push({ path, options }); return {}; },
   });

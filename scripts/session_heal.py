@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""session_heal.py — 清洗 OpenClaw 会话历史，去掉「无签名 thinking 块」和空消息，修复回放。
+"""session_heal.py — 清洗 Agent 会话历史，去掉「无签名 thinking 块」和空消息，修复回放。
 
-根因：OpenClaw 把 Claude 的 thinking 块存进会话历史（`agents/main/sessions/<id>.jsonl`）时
+根因：Agent 底座把 Claude 的 thinking 块存进会话历史（`agents/main/sessions/<id>.jsonl`）时
 **丢了 signature**；内网 Bedrock 网关回放时校验签名不通过 → 400 `Invalid signature in
 thinking block` → 前端报「Session history or replay state is invalid」。thinking 块对续接
 不是必须的，删掉即可让回放合法（不影响已产出的最终文本/工具结果）。
@@ -156,7 +156,7 @@ def _selftest() -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="清洗 OpenClaw 会话历史（去无签名 thinking 块 + 空消息）")
+    ap = argparse.ArgumentParser(description="清洗 Agent 会话历史（去无签名 thinking 块 + 空消息）")
     ap.add_argument("file", nargs="?", help="单个 history .jsonl 路径")
     ap.add_argument("--dir", help="sessions 目录")
     ap.add_argument("--session-id", help="只清该 session id（配合 --dir）")

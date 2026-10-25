@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@rolldown/binding-darwin-arm64": "^1.1.5",
     "@types/dompurify": "^3.0.5",
     "dompurify": "^3.4.12",
     "marked": "^18.0.6",

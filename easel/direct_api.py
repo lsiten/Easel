@@ -1,4 +1,4 @@
-"""OpenAI-compatible chat without an OpenClaw installation or Gateway."""
+"""OpenAI-compatible chat with direct model-API access (no external engine)."""
 from __future__ import annotations
 
 import hashlib

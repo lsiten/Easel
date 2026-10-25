@@ -8,6 +8,21 @@ from pathlib import Path
 WINDOWS = os.name == "nt"
 
 
+def _npmrc_prefix(path: Path) -> Path | None:
+    """从 .npmrc 读 prefix=（支持 #/; 注释与尾随空白）；文件不存在或未配置返回 None。"""
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            s = line.strip()
+            if s.startswith(("prefix=", "prefix =")):
+                val = s.split("=", 1)[1].strip().strip('"')
+                if val:
+                    p = Path(val).expanduser()
+                    return p.resolve() if p.is_absolute() else p
+    except OSError:
+        pass
+    return None
+
+
 def _version_directories(root: Path, pattern: str) -> list[Path]:
     versions = []
     try:
@@ -22,8 +37,6 @@ def _version_directories(root: Path, pattern: str) -> list[Path]:
 
 
 def _installation_directories(environment: dict[str, str], home: Path) -> list[Path]:
-    from easel.openclaw_cmd import _npmrc_prefix
-
     directories = []
     prefixes = []
     for variable in ("EASEL_NPM_GLOBAL_PREFIX", "npm_config_prefix", "NPM_CONFIG_PREFIX"):
@@ -75,7 +88,7 @@ def web_environment(environment: dict[str, str]) -> dict[str, str]:
     result = dict(environment)
     path_key = next((key for key in result if key.upper() == "PATH"), "PATH") if WINDOWS else "PATH"
     current_path = result.get(path_key, os.defpath)
-    missing = {command for command in ("openclaw", "opencode", "codex", "node")
+    missing = {command for command in ("opencode", "codex", "node")
                if shutil.which(command, path=current_path) is None}
     if not missing:
         return result

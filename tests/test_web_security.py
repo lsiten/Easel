@@ -33,33 +33,17 @@ ORIGINAL_ENV = (
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    """把 .env 与 openclaw.json 同步都换成沙箱，绝不碰用户真配置。"""
+    """把 .env 换成沙箱，绝不碰用户真配置。"""
     env_file = tmp_path / ".env"
     env_file.write_text(ORIGINAL_ENV, encoding="utf-8")
     monkeypatch.setattr(web, "ENV_FILE", env_file)
-    monkeypatch.setattr(web, "_openclaw_provider_creds",
-                        lambda: {"myproxy": ("https://good.example.com/v1", "sk-fake-custom")})
-    # openclaw.json 也必须隔离：_sync_openclaw_chat 直连 Path.home()/'.openclaw-easel'/openclaw.json，
-    # 不隔离就会把夹具值写进用户真配置（models[0].id / baseUrl / apiKey），跑完 pytest 主模型与
-    # provider 目录失配，对话报 Unknown model（issue #62）。重定向 home 根一次覆盖所有运行时路径。
+    # 重定向 home 根一次覆盖所有运行时路径，防止夹具值写进用户真配置。
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    oc_dir = tmp_path / ".openclaw-easel"
-    oc_dir.mkdir()
-    (oc_dir / "openclaw.json").write_text(json.dumps({
-        "models": {"providers": {"openai": {
-            "api": "openai-completions",
-            "apiKey": "sk-fake-existing",
-            "baseUrl": "https://api.openai.com/v1",
-            "models": [{"id": "gpt-4o"}],
-        }}},
-        "agents": {"defaults": {"model": {"primary": "openai/gpt-4o"}}},
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
     # local_write_guard 会把「非本机写请求」判 403。设置为本机来源。
     local = "http://127.0.0.1:7860"
     with TestClient(web.app, base_url=local, client=('127.0.0.1', 51234),
                     headers={'Origin': local}) as c:
         c.env_file = env_file          # 用例里用来断言「.env 一个字节都没变」
-        c.openclaw_cfg = oc_dir / "openclaw.json"   # 同理：真 openclaw.json 也不许被写
         yield c
 
 
@@ -82,7 +66,7 @@ def _assert_blocked(client, payload):
     {"slot": "openai", "key": "sk-a\rPATH=/tmp"},
 ])
 def test_env_newline_injection_rejected(client, row):
-    _assert_blocked(client, {"channel": "chat", "rows": [row]})
+    _assert_blocked(client, {"channel": "transcribe", "rows": [row]})
 
 
 @pytest.mark.parametrize("updates", [
@@ -119,7 +103,7 @@ def test_guard_env_values_rejects_shell_metachars(value):
 
 def test_env_shell_substitution_rejected_via_api(client):
     """走真接口也得拦住，且 .env 一个字节都不许变。"""
-    _assert_blocked(client, {"channel": "chat",
+    _assert_blocked(client, {"channel": "transcribe",
                              "rows": [{"slot": "openai", "model": "gpt-4o", "key": "sk-a$(id)"}]})
 
 
@@ -150,29 +134,13 @@ def test_both_env_writers_are_guarded():
 # ---- 换址窃 Key：改 Base URL + Key 留空（留空=沿用旧 Key）----
 
 @pytest.mark.parametrize("channel,row", [
-    ("chat", {"slot": "openai", "baseUrl": "https://evil.example.com/v1", "key": ""}),
+    ("transcribe", {"slot": "openai", "baseUrl": "https://evil.example.com/v1", "key": ""}),
     ("transcribe", {"slot": "siliconflow", "baseUrl": "https://evil.example.com/v1", "key": ""}),
-    # 自定义供应商压根不写 .env，只有 openclaw.json 那侧的闸能拦
-    ("chat", {"slot": "custom", "name": "myproxy", "model": "x",
-              "baseUrl": "https://evil.example.com/v1", "key": ""}),
 ])
 def test_rebase_without_new_key_rejected(client, channel, row):
     _assert_blocked(client, {"channel": channel, "rows": [row]})
 
 
-def test_local_gateway_user_is_not_locked_out(client, monkeypatch):
-    """这道闸不能把本地网关用户一起关在外面。
-
-    网关模式下 openclaw.json 存的 baseUrl 是 127.0.0.1:8890（真实上游在 easel-models.yaml），
-    面板显示/回传的却是上游地址 —— 两者天生不等，闸按「换址」判就会让网关用户连改个模型都
-    保存不了。而且 _sync_openclaw_chat 那边本来就不改网关的 baseUrl，不存在拿旧 Key 打新地址。
-    """
-    monkeypatch.setattr(web, "_openclaw_provider_creds",
-                        lambda: {"myproxy": ("http://127.0.0.1:8890/v1", "sk-fake-gw")})
-    resp = _save(client, {"channel": "chat",
-                          "rows": [{"slot": "custom", "name": "myproxy", "model": "gpt-5.5",
-                                    "baseUrl": "https://upstream.example.com/v1", "key": ""}]})
-    assert resp.status_code < 400, f"网关用户被误拦：{resp.status_code} {resp.text[:200]}"
 
 
 def test_local_gateway_helper():
@@ -191,7 +159,7 @@ def test_local_gateway_helper():
     "javascript:alert(1)",
 ])
 def test_base_url_validated_whole_string(client, bad):
-    _assert_blocked(client, {"channel": "chat",
+    _assert_blocked(client, {"channel": "transcribe",
                              "rows": [{"slot": "openai", "baseUrl": bad, "key": "sk-new"}]})
 
 
@@ -256,7 +224,7 @@ def test_fill_keeps_dir_intact():
 # ---- 正向：别把闸修成谁都过不去 ----
 
 def test_legit_save_still_works(client):
-    resp = _save(client, {"channel": "chat", "rows": [
+    resp = _save(client, {"channel": "transcribe", "rows": [
         {"slot": "openai", "model": "gpt-4o",
          "baseUrl": "https://new.example.com/v1", "key": "sk-fresh"}]})
     assert resp.status_code == 200, resp.text[:300]
@@ -267,137 +235,9 @@ def test_legit_save_still_works(client):
 
 def test_model_only_change_not_blocked(client):
     """地址没变、只改模型（Key 留空）是日常操作，不能被换址规则误伤。"""
-    resp = _save(client, {"channel": "chat", "rows": [
+    resp = _save(client, {"channel": "transcribe", "rows": [
         {"slot": "openai", "model": "gpt-4o-mini",
          "baseUrl": "https://api.openai.com/v1", "key": ""}]})
     assert resp.status_code == 200, resp.text[:300]
     assert web._read_env()["OPENAI_MODEL"] == "gpt-4o-mini"
 
-
-def test_save_never_writes_real_openclaw_config(client):
-    """回归（#62）：保存模型只能落在沙箱 openclaw.json 上。
-
-    _sync_openclaw_chat 会改写 provider 目录与 primary。一旦 home 没被隔离，pytest 就会把夹具值
-    写进用户真配置，跑完测试对话报 Unknown model。这里既断言 home 确实被重定向，又读回沙箱文件
-    断言写入结果——若哪天隔离失效（例如路径改成 import 期常量），两条断言都会响亮失败。
-    """
-    assert Path.home() != Path("~").expanduser(), "fixture 必须把 home 重定向到沙箱"
-    resp = _save(client, {"channel": "chat", "rows": [
-        {"slot": "openai", "model": "deepseek-flash",
-         "baseUrl": "https://api.deepseek.com", "key": "sk-fake-new"}]})
-    assert resp.status_code == 200, resp.text[:300]
-    data = json.loads(client.openclaw_cfg.read_text(encoding="utf-8"))
-    assert data["models"]["providers"]["openai"]["models"][0]["id"] == "deepseek-flash"
-
-
-# ---- #48 传输层：直连常驻网关提速，但绝不能把会话历史搞丢 ----
-
-def test_http_path_falls_back_without_httpx(monkeypatch):
-    """httpx 没装时必须判定端点不可用 → 回退 CLI，而不是每轮报连接失败。"""
-    import builtins
-    real_import = builtins.__import__
-
-    def _no_httpx(name, *a, **k):
-        if name == "httpx":
-            raise ImportError("no httpx")
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", _no_httpx)
-    assert web._gateway_http_ready(force=True) is False
-
-
-def test_ready_probe_hits_chat_completions_not_models():
-    """探针不能打 /v1/models：那个路径会被网关控制台 SPA 的 catch-all 接走，端点没开也返回
-    200（body 是 HTML 首页），于是只要网关活着就恒为 True —— 等于没探，每轮对话直接撞 404。
-
-    探针的 **端口** 同样不能写死：Easel 用 --profile easel，OpenClaw 对非默认 profile
-    分配的端口不是 18789（easel → 37289），写死就恒探不通、对话悄悄退回 CLI 冷启动路径。
-    所以 URL 一律走 easel/gateway_endpoint 解析。"""
-    import inspect
-    # 去掉 docstring 再比 —— 注释里本来就要写清为什么不能探 /v1/models
-    body = inspect.getsource(web._gateway_http_ready).split('"""')[-1]
-    assert "chat_completions_url()" in body
-    assert "127.0.0.1" not in body
-    assert "/v1/models" not in body
-
-    from easel.gateway_endpoint import chat_completions_url
-    assert chat_completions_url().endswith("/v1/chat/completions")
-
-
-@pytest.mark.parametrize("code,expected", [(400, True), (404, False), (500, False)])
-def test_ready_probe_reads_status_code(monkeypatch, code, expected):
-    """400（缺 messages）= 路由挂着；404 = chatCompletions.enabled 没开。"""
-    def _raise(*a, **k):
-        raise web.urllib.error.HTTPError("u", code, "x", None, None)
-
-    monkeypatch.setattr(web.urllib.request, "urlopen", _raise)
-    assert web._gateway_http_ready(force=True) is expected
-
-
-@pytest.fixture()
-def _tp(tmp_path, monkeypatch):
-    """把两个判定依赖的目录都挪进 tmp。"""
-    monkeypatch.setattr(web, "SESSIONS_DIR", tmp_path / "sess")
-    monkeypatch.setattr(web, "OPENCLAW_SESSIONS_DIR", tmp_path / "oc")
-    (tmp_path / "oc").mkdir()
-    monkeypatch.setattr(web, "CHAT_TRANSPORT", "http")
-    monkeypatch.setattr(web, "_gateway_http_ready", lambda *a, **k: True)
-    return tmp_path
-
-
-def test_existing_cli_session_never_switches_to_http(_tp):
-    """已有 CLI transcript 的会话必须继续走 cli。
-
-    两条路径写的是不同 transcript：CLI 用 `--session-id`（uuid5）钉死，而
-    /v1/chat/completions 压根不读 x-openclaw-session-id（openclaw 2026.6.11 实测：只有 MCP
-    端点消费它），网关自己挑文件名。中途换边 = agent 看不到任何历史（实测答"无历史"）。
-    """
-    sk = "web-existing"
-    (_tp / "oc" / f"{web._openclaw_session_id(sk)}.jsonl").write_text("{}", encoding="utf-8")
-    assert web._resolve_transport(sk) == "cli"
-
-
-def test_pinned_http_session_stays_http(_tp, monkeypatch):
-    """钉过 http 的会话即使探针此刻说不可用也不能改判 cli —— 网关那份 transcript 我们按
-    名字找不回来，改判就是静默丢历史。"""
-    sk = "web-pinned"
-    web._pin_transport(sk, "http")
-    monkeypatch.setattr(web, "_gateway_http_ready", lambda *a, **k: False)
-    assert web._resolve_transport(sk) == "http"
-
-
-def test_new_session_uses_http_when_endpoint_live(_tp):
-    assert web._resolve_transport("web-brand-new") == "http"
-
-
-def test_new_session_falls_back_when_endpoint_dead(_tp, monkeypatch):
-    monkeypatch.setattr(web, "_gateway_http_ready", lambda *a, **k: False)
-    assert web._resolve_transport("web-brand-new") == "cli"
-
-
-def test_transport_env_switch_forces_cli(_tp, monkeypatch):
-    monkeypatch.setattr(web, "CHAT_TRANSPORT", "cli")
-    assert web._resolve_transport("web-brand-new") == "cli"
-
-
-def test_pin_transport_never_pins_cli(_tp):
-    """cli 侧由 uuid5 transcript 文件自证，不该再落一份可能跟现实打架的状态。"""
-    web._pin_transport("web-x", "cli")
-    assert not web._transport_pin_file("web-x").exists()
-
-
-def test_http_mode_drops_raw_text_delta():
-    """HTTP 模式正文以 SSE 为准；raw 流里的 text_delta 必须丢弃，否则每个字进两次队列。"""
-    import inspect
-    src = inspect.getsource(web.api_chat_stream)
-    seg = src.split('et == "text_delta"')[1][:220]
-    assert "is_http" in seg, "HTTP 模式没有屏蔽 raw 流的正文，前端会看到重复内容"
-
-
-def test_http_mode_still_tails_raw_stream_for_thinking():
-    """openclaw 的 chat/completions 不回传任何 reasoning 增量（实测该实现里 thinking/reasoning
-    出现 0 次），思考只在共享 raw 流里。HTTP 模式不 tail 它，思考面板就永远是空的。"""
-    import inspect
-    src = inspect.getsource(web.api_chat_stream)
-    seg = src.split("stdout_fut = None")[1][:600]
-    assert seg.count("_tail") >= 2, "HTTP 分支没有启动 raw 流 tail，思考流会整个丢失"

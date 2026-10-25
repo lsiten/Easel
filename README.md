@@ -24,7 +24,6 @@
 
 <p align="center">
   <a href="https://zju-real.github.io/Easel/"><img src="https://img.shields.io/badge/Easel-Project_Page-F05A3C?style=flat-square&logo=googlechrome&logoColor=white" alt="Easel Project Page"></a>
-  <img src="https://img.shields.io/badge/OpenClaw-powered-111827?style=flat-square" alt="Powered by OpenClaw">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
   <a href="docs/skill-function-mapping.md"><img src="https://img.shields.io/badge/Skills-113-0F9D8A?style=flat-square" alt="113 Skills"></a>
   <a href="https://github.com/ZJU-REAL/Easel/stargazers"><img src="https://img.shields.io/github/stars/ZJU-REAL/Easel?style=flat-square&color=F6C344" alt="GitHub Stars"></a>
@@ -41,7 +40,7 @@
 
 ## 🎨 Easel 是什么
 
-Easel 是一个面向社交媒体创作者的开源内容工作台。它把 OpenClaw Agent、账号画像、内容技能和真实的媒体工具接在一起，让 Agent 不只回答“应该怎么做”，而是直接把内容做出来并归档，且可实现直接/按需发布。
+Easel 是一个面向社交媒体创作者的开源内容工作台。它把可选的 Agent 底座（Codex / OpenCode / ACP / Pi）、账号画像、内容技能和真实的媒体工具接在一起，让 Agent 不只回答“应该怎么做”，而是直接把内容做出来并归档，且可实现直接/按需发布。也可选择仅聊天模式（`api`，模型 API 直连），不执行本机工具或技能。
 
 你可以把它理解成一个会记住你的内容搭档：它了解账号定位、受众、风格、平台限制和历史表现，从热点发现一直陪你做到发布，再把结果带回下一次创作。
 
@@ -218,7 +217,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\setup.ps1
 ```
 
-Windows 安装器会优先通过 `winget` 自动安装缺失的 Python 3.10+、Node.js 24.16+（24.x）、26.1+（26.x）或 27+、Git 和 FFmpeg；25.x 与 26.0 不兼容。如果系统没有 `winget`，再使用官方安装器安装并加入 PATH。随后安装器会创建项目内 `.venv`，安装 Python/Node 依赖、前端生产包和 Playwright Chromium，并使用独立的 `easel` OpenClaw profile。安装完成后可运行 `.venv\Scripts\easel.exe doctor` 检查环境。
+Windows 安装器会优先通过 `winget` 自动安装缺失的 Python 3.10+、Node.js 24.16+（24.x）、26.1+（26.x）或 27+、Git 和 FFmpeg；25.x 与 26.0 不兼容。如果系统没有 `winget`，再使用官方安装器安装并加入 PATH。随后安装器会创建项目内 `.venv`，安装 Python/Node 依赖、前端生产包和 Playwright Chromium。安装完成后可运行 `.venv\Scripts\easel.exe doctor` 检查环境。
 
 安装器支持 Windows 自带的 PowerShell 5.1，安装后可直接运行 `.venv\Scripts\easel.exe web` 启动工作台。原生安装与 Web/CLI 入口已经提供；各技能及浏览器发布的 Windows 全链路兼容仍在持续完善。
 
@@ -226,20 +225,18 @@ Windows 安装器会优先通过 `winget` 自动安装缺失的 Python 3.10+、N
 
 1. 检查 Python、Python `venv`、Node.js 和 Git；FFmpeg 缺失时会尝试通过系统包管理器安装，装不上只会降级提示（视频/音频类技能不可用），不再中断安装。
 2. 询问是否创建或复用项目虚拟环境 `.venv/`；默认选择 `Y`。如果系统缺少 `venv`，会提示安装对应系统包（例如 Debian/Ubuntu 的 `python3-venv`）。
-3. 检查或安装 OpenClaw，并创建独立的 `easel` profile，不覆盖用户已有的 `~/.openclaw/`。
-4. 安装 Python、Web、媒体和浏览器发布依赖，构建 React Web 工作台并安装 Chromium。Python 依赖与前端构建失败会停止；Chromium 下载失败只降级提示（浏览器登录/发布不可用）。
-5. 同步 skills、校验 OpenClaw 配置并启动 gateway。
+3. 安装 Python、Web、媒体和浏览器发布依赖，构建 React Web 工作台并安装 Chromium。Python 依赖与前端构建失败会停止；Chromium 下载失败只降级提示（浏览器登录/发布不可用）。
 
-**模型 API Key 在浏览器里配，安装器不再在终端询问。** 装完运行 `easel web`，首次打开会直接停在「设置 → 模型配置」，填入 Key 保存即可 —— Easel 会自动写好 OpenClaw 配置并重启 gateway，不需要再跑一遍 `setup.sh`。相比终端向导，这里还能拉取可用模型列表、做连通性自测。也可以直接编辑 `.env` 填好 Key，再运行 `easel doctor` 复检。
+**模型 API Key 在浏览器里配，安装器不再在终端询问。** 装完运行 `easel web`，在设置中选择已安装并认证的 Codex / OpenCode / ACP / Pi，或配置仅聊天模式的模型 API。原生底座沿用各自 CLI 的认证，不需要把凭证复制到 Easel；仅聊天模式可在浏览器中保存 API 地址、模型与 Key，也可编辑 `.env` 后运行 `easel doctor` 复检。详见 [Agent 底座](docs/agent-harnesses.md)。
 
-安装器全程非交互（只有「是否创建 `.venv`」一问，非交互环境下按默认值），适合 CI 与自动化。非致命问题（FFmpeg、Chromium、gateway 启动、模型未配置等）会收集起来在结尾汇总，并写入 `outputs/_install/last-install.json` 供 `easel doctor` 复述，安装本身仍以 0 退出。若希望这些问题直接让安装失败，设 `EASEL_SETUP_STRICT=1`。
+安装器全程非交互（只有「是否创建 `.venv`」一问，非交互环境下按默认值），适合 CI 与自动化。非致命问题（FFmpeg、Chromium、模型未配置等）会收集起来在结尾汇总，并写入 `outputs/_install/last-install.json` 供 `easel doctor` 复述，安装本身仍以 0 退出。若希望这些问题直接让安装失败，设 `EASEL_SETUP_STRICT=1`。
 
 安装完成后，`easel` 命令安装在项目的 `.venv` 中。先激活虚拟环境再运行（每次新开终端都要先激活）：
 
 ```bash
 source .venv/bin/activate    # 激活后 easel 命令才可用（Windows：.venv\Scripts\activate）
 easel doctor                 # 检查运行环境
-easel ping                   # 实际测试 gateway 和 Agent
+easel ping                   # 实际测试所选底座或模型 API
 easel web                    # 启动 Web 工作台
 # 或：easel chat              # 启动终端对话
 ```
@@ -247,7 +244,7 @@ easel web                    # 启动 Web 工作台
 > 如果提示 `easel: command not found`，就是虚拟环境没激活。也可以不激活、直接用完整路径运行，例如 `.venv/bin/easel doctor`（Windows：`.venv\Scripts\easel.exe doctor`）。
 
 启动 Web 工作台后访问 `http://localhost:7860`。安装完成后可以运行 `easel doctor` 检查环境，
-运行 `easel ping` 检查 gateway 和 Agent 连通性。
+运行 `easel ping` 检查所选底座或模型 API 连通性。
 
 如果 Easel 运行在 VSCode Remote SSH 连接的服务器上，需要在 VSCode 的“端口”面板
 转发服务器端口 `7860`，再打开面板显示的本地转发地址（本地端口可能不同）。
@@ -265,58 +262,18 @@ python3 -m playwright install chromium
 
 ## ⚙️ 配置说明
 
-最小配置只需要在项目根目录 `.env` 中提供一个可用的 LLM：
+原生 Agent 底座沿用各自 CLI 的模型与认证配置。仅聊天模式在 Web 设置中配置，
+或在项目根目录 `.env` 中填写独立的模型 API：
 
 ```bash
-ANTHROPIC_API_KEY=你的_API_Key
-CLAUDE_MODEL=anthropic/claude-sonnet-4-6
+EASEL_DIRECT_API_BASE_URL=https://你的服务地址/v1
+EASEL_DIRECT_API_MODEL=你的模型名
+EASEL_DIRECT_API_KEY=你的_API_Key
 ```
 
-也可以使用 OpenAI 或 OpenAI-compatible 服务：
-
-```bash
-OPENAI_API_KEY=你的_API_Key
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o
-```
-
-如果聊天 API 不提供向量模型，请单独配置 Embedding API；否则 OpenClaw 会默认请求 `text-embedding-3-small`，可能得到“模型不可用”。不配置独立向量 API 时，Easel 会显式使用关键词记忆检索，不会反复请求聊天端点的 embedding 模型：
-
-```dotenv
-EASEL_EMBEDDING_API_KEY=你的向量_API_Key
-EASEL_EMBEDDING_BASE_URL=https://your-embedding-provider.example/v1
-EASEL_EMBEDDING_MODEL=你的向量模型名
-```
-
-修改向量 provider 或模型后，使用对应 profile 重建一次索引：
-
-```bash
-openclaw --profile easel memory index --force
-```
-
-或者使用其他 Anthropic-compatible 服务：
-
-```bash
-EASEL_LLM_API_KEY=你的_API_Key
-EASEL_LLM_BASE_URL=https://你的服务地址/v1
-CLAUDE_MODEL=你的模型名
-```
-
-安装器会把这些标准配置同步到 OpenClaw。OpenClaw 支持但 Easel 没有预设环境变量映射的其他 provider，
-可以按 OpenClaw 自身的 provider/auth 配置方式配置；Easel 不会覆盖这些自定义配置。
-
-在 Web 设置的聊天通道中，自定义供应商可勾选“该模型会思考”，保存后会写入模型的
-`reasoning: true`。OpenAI 兼容协议还可选择思考格式（OpenAI、DeepSeek 等），需与上游
-接口实际支持的格式一致；原生 Anthropic 协议使用其自身的思考格式，无需另选。
-新增行默认关闭，避免对非推理模型发送不支持的参数；已有声明会回显。取消勾选会写入
-`reasoning: false`，仅移除该模型的思考相关兼容项，不影响工具等其它能力声明。
-保存 API 不传 `thinking` 时保持原有声明；启用时保留已有努力档位映射，不推测上游支持的档位。
-思考格式会写入 OpenClaw 的 `compat.thinkingFormat`，实际发送哪些参数由其版本和模型适配器决定；
-例如 OpenClaw 2026.9.8 对普通自定义模型仍可能只发送 `reasoning_effort`，不是任意方言转换器。
-这只是能力声明，不保证网关支持推理，亦不覆盖 `EASEL_THINKING_LEVEL=off`；
-API 直连模式不提供此 OpenClaw 专用开关。
-对显式声明 `reasoning: false` 的当前模型，Web 调用 OpenClaw CLI 时会使用 `--thinking off`，
-避免禁用后仍请求不支持的 `medium` 档位。
+仅聊天模式使用独立的 `EASEL_DIRECT_API_*` 配置；原生底座的模型供应商与认证沿用各自 CLI 配置，
+不会因选择底座而复制上述凭证。推理能力与参数支持以所选底座和模型的实际能力为准，
+不能将某个底座的配置字段套用到其它底座。详见 [Agent 底座](docs/agent-harnesses.md)。
 
 `.env.example` 还列出了视频、音乐、语音等可选模型配置。只需要配置实际使用的能力，也可以在 Web
 工作台的“技能库”中填写；没有配置的媒体 Skill 不会影响聊天、策划和文本创作。常见可选项包括：
@@ -340,11 +297,10 @@ API 直连模式不提供此 OpenClaw 专用开关。
 | `easel web [--port 7860]` | 启动 Web 工作台 |
 | `easel chat` | 在终端开启多轮对话并选择账号画像 |
 | `easel skill <name> -i "..." [-p <画像>]` | 直接运行指定 Skill；输入也可以是文件路径 |
-| `easel doctor` | 检查 Python、Node.js、OpenClaw 和关键配置 |
-| `easel ping` | 检查 gateway 与 Agent 连通性 |
-| `easel gateway start\|stop\|restart\|status\|logs` | 管理 OpenClaw gateway |
+| `easel doctor` | 检查 Python、Node.js、所选底座和关键配置 |
+| `easel ping` | 检查所选底座或模型 API 连通性 |
 
-所有技能都通过 Easel 的 Agent 执行。Agent 会读取对应 `SKILL.md`，调用脚本和工具，并把产物保存到 `outputs/`。
+所有技能都通过 Easel 所选的原生 Agent 底座执行。Agent 会读取对应 `SKILL.md`，调用脚本和工具，并把产物保存到 `outputs/`；仅聊天模式不执行本机工具或技能。
 
 ```bash
 easel skill quality-gate -i "帮我检查这条小红书文案"
@@ -375,11 +331,11 @@ Easel/
 ├── assets/                   品牌、README 媒体与用户导入素材
 ├── profiles/                 账号画像（每个画像一个目录）
 ├── outputs/                  内容项目与最终产物
-├── agents/                   共享 Agent 工作区、底座配置与同步脚本
+├── agents/                   共享 Agent 工作区与底座支持文件
 └── docs/                     能力规范、能力地图与架构文档
 ```
 
-Easel 使用独立的 `easel` OpenClaw profile，不会覆盖你本机已有的 OpenClaw 配置。Web 默认运行在 `7860`；gateway 端口由 OpenClaw 决定（非默认 profile 会分配哈希端口，如 `easel` → `37289`，不是 `18789`），Easel 会自动解析，无需手配。
+Web 默认运行在 `7860`。Codex / OpenCode / ACP / Pi 通过各自原生协议接入，认证沿用本机 CLI 配置；仅聊天模式直接调用模型 API。详见 [Agent 底座](docs/agent-harnesses.md)。
 
 ## 📑 文档
 
@@ -397,7 +353,7 @@ Easel 使用独立的 `easel` OpenClaw profile，不会覆盖你本机已有的 
 - [ ] **1. 适配 Windows 系统** —— 完善原生 Windows 下安装、路径与编码、浏览器发布等全链路兼容。
 - [ ] **2. 安装简易化** —— 降低上手门槛，减少手动步骤，提供更顺滑的一键安装体验。
 - [ ] **3. 优化页面 Agent 交互** —— 改进 Web 工作台的对话交互、加载逻辑与流式反馈等体验细节。
-- [ ] **4. 适配更多 Agent Harness** —— 支持 OpenClaw 之外的更多 Agent 运行框架，例如 Claude Code、DeepSeek harness、Codex 等。
+- [ ] **4. 适配更多 Agent Harness** —— 在 Codex、OpenCode、ACP、Pi 之外继续扩展 Agent 运行框架支持。
 
 ## 🙏 致谢
 

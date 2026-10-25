@@ -120,10 +120,6 @@ def validate(path: Path) -> list[str]:
         errors.append(f"name {fields.get('name')!r} does not match expected {expected_name!r}")
 
     text = path.read_text(encoding="utf-8")
-    if "metadata" in fields and not re.search(
-        r"(?m)^metadata:\s*$\n(?:[ \t]+.*\n)*?[ \t]+openclaw:\s*$", text
-    ):
-        errors.append("metadata is allowed only as a metadata.openclaw runtime manifest")
     line_count = len(text.splitlines())
     if line_count > 200:
         errors.append(f"SKILL.md must stay within 200 lines, got {line_count}")
@@ -133,7 +129,7 @@ def validate(path: Path) -> list[str]:
             continue
         if not (path.parent / clean).resolve().exists():
             errors.append(f"broken relative Markdown link: {target}")
-    # Code-span references are common in OpenClaw Skills; validate those too.
+    # Code-span references are common in Skills; validate those too.
     inline_resources = set(re.findall(
         r"`((?:scripts|references)/[^`\s]+)`", text
     ))

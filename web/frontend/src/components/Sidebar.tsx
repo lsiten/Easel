@@ -71,8 +71,11 @@ export default function Sidebar({
     setRenamingId(null);
   };
 
-  const active = sessions.filter((s) => !s.archived && (s.messages.length > 0 || s.id === activeSessionId));
-  const archived = sessions.filter((s) => s.archived);
+  // 按画像隔离对话列表：只显示当前画像的会话（通用模式=空画像）；始终保留当前激活会话可见，
+  // 避免切画像瞬间列表空白。与后端 _eff_sk 的画像级 transcript 隔离对应。
+  const inPersona = (s: ChatSession) => (s.persona || '') === selectedPersona;
+  const active = sessions.filter((s) => !s.archived && (s.messages.length > 0 || s.id === activeSessionId) && (inPersona(s) || s.id === activeSessionId));
+  const archived = sessions.filter((s) => s.archived && (inPersona(s) || s.id === activeSessionId));
 
   const renderItem = (s: ChatSession, isArchived: boolean) => {
     if (renamingId === s.id) {
@@ -175,9 +178,9 @@ export default function Sidebar({
       <div className="sidebar-status">
         <span className={`status-dot ${gatewayStatus === 'connected' ? '' : 'offline'}`} />
         <span className="sidebar-status-text">{gatewayStatus === 'connected'
-          ? (apiDirect ? '仅聊天模式已配置' : agentRuntime !== 'openclaw' ? `${agentRuntime} CLI 已安装` : '网关已连接')
+          ? (apiDirect ? '仅聊天模式已配置' : `${agentRuntime} CLI 已安装`)
           : gatewayStatus === 'disconnected'
-            ? (apiDirect ? 'API 配置不完整' : agentRuntime !== 'openclaw' ? `${agentRuntime} CLI 未配置` : '网关离线')
+            ? (apiDirect ? 'API 配置不完整' : `${agentRuntime} CLI 未配置`)
             : '连接中…'}</span>
         <button className="settings-gear" onClick={onOpenSettings} title="设置（模型 · 环境 · 更多）">
           <IconGear size={13} /> 设置

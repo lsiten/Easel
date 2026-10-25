@@ -15,7 +15,7 @@ export interface ChatSession {
   messages: ChatMessage[];
   persona?: string;
   created: number;
-  sessionKey?: string;  // OpenClaw 的 session key，用于后端删除
+  sessionKey?: string;  // 会话 key，用于后端删除
   pendingTurnId?: string; // 进行中的可重连 job；浏览器重开后继续按 eventId 续流
   archived?: boolean;   // 归档：从 History 主列表移到「已归档」区
 }

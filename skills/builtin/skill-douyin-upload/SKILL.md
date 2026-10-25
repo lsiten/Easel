@@ -54,7 +54,7 @@ check（环境就绪？）
 要码有两种姿势，**先探测本部署支持哪种**：
 
 ```bash
-printenv EASEL_ASKUSER_CARDS   # "1"=支持选项卡片(OpenClaw 2026.9.x)；"0"/空=不支持(如 2026.6.11)
+printenv EASEL_ASKUSER_CARDS   # "1"=支持选项卡片；"0"/空=不支持
 ```
 
 - `=="1"` → 走 **A. 卡片模式**（同轮弹卡、当场拿码，体验最好）。

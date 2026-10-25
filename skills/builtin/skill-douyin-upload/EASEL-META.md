@@ -7,7 +7,7 @@
 | **来源仓库** | WJZ-P/douyin-upload-mcp-skill |
 | **GitHub 地址** | https://github.com/WJZ-P/douyin-upload-mcp-skill |
 | **Star 数** | ~100+ |
-| **功能描述** | 抖音视频/图文上传，OpenClaw适用 |
+| **功能描述** | 抖音视频/图文上传 |
 | **SKILL.md 行数** | 115 |
 | **文件总数** | 24 |
 | **自包含** | 需要MCP Server+抖音Cookie |

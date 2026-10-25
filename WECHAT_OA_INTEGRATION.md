@@ -12,7 +12,7 @@
 - **免 AppID/AppSecret、免 IP 白名单**，未认证号也能用；
 - 官方开发者 API（AppID/AppSecret + 出口 IP 白名单）保留为 `--official-api` 回退，前端 UI 默认隐藏。
 
-平台标识 `wechat-oa`，web 默认 `:7860`，OpenClaw gateway 端口由 OpenClaw 自行分配（`easel` profile → `37289`，非 `18789`），Easel 自动解析。
+平台标识 `wechat-oa`，Web 默认 `:7860`；Agent 执行由所选底座管理，接入方式见 [Agent 底座](docs/agent-harnesses.md)。
 
 ---
 
@@ -94,9 +94,6 @@
 ```bash
 # web（受限网络时按需 export EASEL_PROXY / https_proxy）
 easel web --port 7860
-
-# gateway
-bash scripts/gateway.sh restart
 ```
 
 **使用流程**：账号页「登录」扫码（管理员微信）→ 发布中心选公众号，填标题/正文/封面 → 发草稿箱 →

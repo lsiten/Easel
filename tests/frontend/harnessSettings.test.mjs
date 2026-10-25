@@ -23,7 +23,7 @@ test('settings defer environment probes and wait for the actual runtime before l
   assert.match(panel, /const \[harness, setHarness\] = useState\(''\)/);
   assert.match(panel, /if \(sec === 'env'\) void refreshEnv\(\)/);
   assert.match(panel, /if \(!harness\) return;/);
-  assert.match(panel, /if \(harness !== 'openclaw'\) return;/);
+  assert.match(panel, /selectedHarness === 'api'/);
 });
 
 test('sidebar keeps its settings button unwrapped beside a truncated status', () => {
@@ -39,7 +39,7 @@ test('sidebar keeps its settings button unwrapped beside a truncated status', ()
   assert.match(gear, /white-space:\s*nowrap/);
 });
 
-function setup({ runtime = 'openclaw', locked = false, installed = true, saveError = '', modelError = '',
+function setup({ runtime = 'acp', locked = false, installed = true, saveError = '', modelError = '',
   settingsErrors = [] } = {}) {
   const state = [];
   let cursor = 0;
@@ -55,9 +55,9 @@ function setup({ runtime = 'openclaw', locked = false, installed = true, saveErr
     models: { codex: 'codex-model', opencode: 'provider/model' },
     sandbox: 'workspace-write',
     locked,
-    agents: ['api', 'openclaw', 'opencode', 'codex', 'acp'].map(id => ({
+    agents: ['api', 'pi', 'opencode', 'codex', 'acp'].map(id => ({
       id, label: id === 'api' ? '仅聊天模式' : id,
-      installed: ['api', 'openclaw'].includes(id) || installed, install_hint: `install ${id}`,
+      installed: id === 'api' || installed, install_hint: `install ${id}`,
     })),
   };
   const component = runInNewContext(outputText, {
@@ -142,7 +142,7 @@ test('changing harness is local until save and retains its model override', asyn
   nodes(tree, 'settings-select')[0].props.onChange('codex');
   tree = view.render();
   assert.equal(nodes(tree, 'input')[0].props.value, 'codex-model');
-  assert.deepEqual(view.changes, ['openclaw']);
+  assert.deepEqual(view.changes, ['acp']);
   assert.equal(view.saves.length, 0);
   nodes(tree, 'settings-select').find(node => node.props.label === 'Codex 沙箱').props.onChange('read-only');
   nodes(tree, 'input')[0].props.onChange({ target: { value: 'custom-model' } });
@@ -151,7 +151,7 @@ test('changing harness is local until save and retains its model override', asyn
   assert.equal(nodes(view.render(), 'button')[0].props.disabled, true);
   await settle();
   assert.deepEqual(view.saves, [{ runtime: 'codex', model: 'custom-model', sandbox: 'read-only', codexAutoApprove: false }]);
-  assert.deepEqual(view.changes, ['openclaw', 'codex']);
+  assert.deepEqual(view.changes, ['acp', 'codex']);
   assert.match(text(view.render()), /已保存，请新建对话/);
 });
 
@@ -202,7 +202,7 @@ test('settings can retry a failed read without saving or silently changing the e
   tree = view.render();
   assert.equal(view.settingsRequests.length, 2);
   assert.equal(nodes(tree, 'settings-select')[0].props.disabled, false);
-  assert.deepEqual(view.changes, ['openclaw']);
+  assert.deepEqual(view.changes, ['acp']);
   assert.deepEqual(view.saves, []);
   assert.doesNotMatch(text(tree), /读取失败/);
 });
@@ -223,7 +223,7 @@ test('engine options retain missing harnesses with configuration previews and in
   view.render();
   await settle();
   assert.deepEqual(nodes(view.render(), 'settings-select')[0].props.options.map(option => option.value),
-    ['api', 'openclaw', 'opencode', 'codex', 'acp']);
+    ['api', 'pi', 'opencode', 'codex', 'acp']);
   const option = nodes(view.render(), 'settings-select')[0].props.options.find(item => item.value === 'opencode');
   assert.match(option.label, /未安装 \/ 未配置/);
   nodes(view.render(), 'settings-select')[0].props.onChange('opencode');
@@ -236,7 +236,7 @@ test('engine options retain missing harnesses with configuration previews and in
   missing.render();
   await settle();
   assert.deepEqual(nodes(missing.render(), 'settings-select')[0].props.options.map(option => option.value),
-    ['api', 'openclaw', 'opencode', 'codex', 'acp']);
+    ['api', 'pi', 'opencode', 'codex', 'acp']);
   assert.equal(nodes(missing.render(), 'button')[0].props.disabled, true);
 });
 test('failed harness save shows error without switching the active runtime', async () => {
@@ -247,7 +247,7 @@ test('failed harness save shows error without switching the active runtime', asy
   nodes(view.render(), 'button')[0].props.onClick();
   await settle();
   assert.match(text(view.render()), /保存失败：.*active task/);
-  assert.deepEqual(view.changes, ['openclaw']);
+  assert.deepEqual(view.changes, ['acp']);
   assert.equal(nodes(view.render(), 'button')[0].props.disabled, false);
 });
 
@@ -286,24 +286,13 @@ test('chat-only can be saved without any agent CLI and preserves the active engi
   let tree = view.render();
   assert.equal(nodes(tree, 'button')[0].props.disabled, false);
   assert.equal(nodes(tree, 'input').length, 0);
-  assert.deepEqual(view.changes, ['openclaw']);
+  assert.deepEqual(view.changes, ['acp']);
   nodes(tree, 'button')[0].props.onClick();
   await settle();
   tree = view.render();
-  assert.deepEqual(view.changes, ['openclaw', 'api']);
+  assert.deepEqual(view.changes, ['acp', 'api']);
   assert.equal(view.saves[0].runtime, 'api');
   assert.match(text(tree), /无需安装 Agent/);
-});
-
-test('OpenClaw selection previews its API configuration without changing the active engine', async () => {
-  const view = setup({ runtime: 'codex' });
-  view.render();
-  await settle();
-  nodes(view.render(), 'settings-select')[0].props.onChange('openclaw');
-  assert.deepEqual(view.selections, ['codex', 'openclaw']);
-  assert.deepEqual(view.changes, ['codex']);
-  assert.match(text(view.render()), /OpenClaw 的模型、API 地址和 Key 在下方配置/);
-  assert.match(text(view.render()), /当前为配置预览/);
 });
 
 for (const runtime of ['codex', 'opencode']) {

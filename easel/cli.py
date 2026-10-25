@@ -3,9 +3,9 @@
 用法：
     easel chat                              # 新会话（选画像后进入）
     easel doctor                            # 检查环境
-    easel gateway {start|stop|status}       # 管理 gateway
     easel ping                              # 连通性测试
     easel skill <name> -i "..." -p <画像>   # 运行 SKILL
+    easel web [--port 7860]                 # 启动 Web 工作台
 """
 
 from __future__ import annotations
@@ -19,10 +19,8 @@ import time
 from pathlib import Path
 
 from easel.commands.doctor import cmd_doctor
-from easel.commands.gateway import cmd_gateway
 from easel.commands.ping import cmd_ping
 from easel.commands.skill import cmd_skill
-from easel.openclaw_cmd import openclaw_base_cmd
 from easel.persona import list_personas as _list_personas
 from easel.persona import persona_prefix
 from easel.persona import chat_turn_message
@@ -35,7 +33,6 @@ from easel.harnesses.base import HarnessError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROFILES_DIR = PROJECT_ROOT / "profiles"
-PROFILE = "easel"
 
 
 def _proxy_env() -> dict[str, str]:
@@ -53,32 +50,6 @@ YELLOW = "\033[0;33m"
 RED = "\033[0;31m"
 DIM = "\033[0;90m"
 NC = "\033[0m"
-
-
-def _build_chat_cmd(session_key: str, message_prefix: str = "") -> list[str]:
-    """组装 `easel chat` 的 openclaw tui 命令行。
-
-    必须用 openclaw_base_cmd() 解析启动方式，不能写死字面量 "openclaw"：Windows 上
-    PATH 里的 openclaw 是 .cmd shim，CreateProcess 跑不了（见 easel/openclaw_cmd.py）。
-    必须用 tui 子命令——`chat`/`terminal` 是 tui 的别名，会强制本地模式
-    （openclaw dist/tui-cli-*.js: invokedSubcommand === "chat" → isLocal = true），
-    而 --local 要求独占 state 目录，与 Easel 自启的 gateway 冲突，只会打印
-    "A Gateway is running for this state directory" 后退出。
-    """
-    cmd = openclaw_base_cmd() + [
-        "--profile", PROFILE,
-        "tui",
-        "--session", session_key,
-        # chat 里可能直接发起制作层/跨层编排，给足制作层预算，避免长任务被 turn 超时掐断（O2）。
-        # 超时统一走 easel/timeouts.py（三入口单一真相源），毫秒 = TIMEOUT_CHAT * 1000。
-        "--timeout-ms", str(TIMEOUT_CHAT * 1000),
-    ]
-    # 画像作为初始消息内联注入（无全局 USER.md，避免并发竞态；与 web/skill 同源）。
-    # 说明：注入随 session 历史留存，超长会话被压缩后可能丢画像——换取「每个请求自包含」，
-    # 与 docs/prompt-stack.md 声明的架构一致。
-    if message_prefix:
-        cmd += ["--message", message_prefix]
-    return cmd
 
 
 def cmd_chat(_args) -> int:
@@ -132,37 +103,17 @@ def cmd_chat(_args) -> int:
 
     settings = read_settings()
     runtime = harnesses.settings(PROJECT_ROOT / "outputs", settings)["runtime"]
-    if runtime not in ("api", "openclaw"):
-        print(f"  Agent 底座：{runtime}（/exit 退出）")
-        native_id = ""
 
-        def remember(value):
-            nonlocal native_id
-            native_id = value
+    print(f"  {DIM}会话: {session_key}{NC}")
+    print(f"  {CYAN}Ctrl+C{NC} 退出")
+    print()
 
-        while True:
-            try:
-                message = input("你：").strip()
-                if message in ("/exit", "/quit"):
-                    return 0
-                if message:
-                    # timeout 与同命令的 openclaw TUI / web 路径对齐（TIMEOUT_CHAT=7200）：
-                    # chat 可能中途触发制作层任务，console_turn 默认 1800s 会把它掐断。
-                    _, native_id = asyncio.run(harnesses.console_turn(
-                        chat_turn_message(message, selected_persona), PROJECT_ROOT,
-                        {**settings, **_proxy_env()}, native_id, on_bind=remember,
-                        timeout=TIMEOUT_CHAT))
-                    print()
-            except (EOFError, KeyboardInterrupt):
-                print()
-                return 0
-            except (HarnessError, asyncio.TimeoutError) as error:
-                print(f"\nAgent 执行失败：{error or '请求超时'}")
     if runtime == "api":
         print("  API 直连模式（文字问答；/exit 退出）\n")
         system = SYSTEM_PROMPT
         if selected_persona:
             system += "\n\n当前画像：\n" + load_profile_text(selected_persona)
+
         async def reply(message):
             async for kind, text in stream_chat(
                     read_settings(), message, system=system,
@@ -170,6 +121,7 @@ def cmd_chat(_args) -> int:
                     timeout=TIMEOUT_CHAT):
                 if kind == "token":
                     print(text, end="", flush=True)
+
         while True:
             try:
                 message = input("你：").strip()
@@ -183,24 +135,35 @@ def cmd_chat(_args) -> int:
                 return 0
             except (DirectAPIError, asyncio.TimeoutError) as error:
                 print(f"\n❌ {error or 'API 请求超时'}")
+        return 0
 
-    print(f"  {DIM}会话: {session_key}{NC}")
-    print(f"  {DIM}切换历史会话: 对话中输入 /session{NC}")
-    print(f"  {CYAN}Ctrl+C{NC} 退出")
-    print()
+    # 其他 Agent 底座（Codex / OpenCode / ACP / Pi）：/exit 退出
+    print(f"  Agent 底座：{runtime}（/exit 退出）")
+    native_id = ""
 
-    prefix = persona_prefix(selected_persona)
-    try:
-        # openclaw_base_cmd() 在 openclaw 全装不上时抛 FileNotFoundError；
-        # subprocess.run 在可执行文件缺失时同样抛 FileNotFoundError。两者都提示安装。
-        cmd = _build_chat_cmd(session_key, prefix)
-        result = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=_proxy_env())
-    except FileNotFoundError:
-        print(f"{RED}未找到 openclaw{NC} — 请先安装：npm i -g openclaw，"
-              f"或运行 `python -m easel doctor` 检查环境。", file=sys.stderr)
-        return 1
+    def remember(value):
+        nonlocal native_id
+        native_id = value
 
-    return result.returncode
+    while True:
+        try:
+            message = input("你：").strip()
+            if message in ("/exit", "/quit"):
+                return 0
+            if message:
+                # 超时统一走 easel/timeouts.py（TIMEOUT_CHAT）：chat 可能中途触发
+                # 制作层任务，默认 1800s 会把它掐断，故按 TIMEOUT_CHAT 给足预算。
+                _, native_id = asyncio.run(harnesses.console_turn(
+                    chat_turn_message(message, selected_persona), PROJECT_ROOT,
+                    {**settings, **_proxy_env()}, native_id, on_bind=remember,
+                    timeout=TIMEOUT_CHAT))
+                print()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        except (HarnessError, asyncio.TimeoutError) as error:
+            print(f"\nAgent 执行失败：{error or '请求超时'}")
+    return 0
 
 
 def cmd_web(args) -> int:
@@ -239,12 +202,6 @@ def main(argv: list[str] | None = None) -> int:
     # doctor
     p_doctor = sub.add_parser("doctor", help="检查环境")
     p_doctor.set_defaults(func=cmd_doctor)
-
-    # gateway
-    p_gw = sub.add_parser("gateway", help="管理 OpenClaw gateway")
-    p_gw.add_argument("action", choices=["start", "stop", "restart", "status", "logs"],
-                       default="status", nargs="?")
-    p_gw.set_defaults(func=cmd_gateway)
 
     # ping
     p_ping = sub.add_parser("ping", help="连通性测试")
