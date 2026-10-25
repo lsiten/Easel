@@ -401,3 +401,212 @@ def test_logged_out_result_never_records_snapshot(monkeypatch, capsys):
     assert account_stats.cmd_fetch(args) == 0
     assert json.loads(capsys.readouterr().out)["loggedIn"] is False
     record.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# 掘金（juejin）归因抓取：纯函数映射 + 本人主页解析 + 登录态优雅降级
+# --------------------------------------------------------------------------- #
+def test_juejin_overview_maps_public_profile_pairs_and_aggregates_posts():
+    raw = {
+        "pairs": {"赞": 384, "关注了": 21, "关注者": 2918, "收藏集": 1, "加入于": 2019},
+        "more": {"文章": 264, "沸点": 120},
+        "notes": [{"title": "x", "url": "/post/1", "stat": ""}],
+        "nickname": "ErpanOmer",
+    }
+    ov = account_stats._juejin_overview(raw)
+    assert ov["followers"] == 2918
+    assert ov["likes"] == 384
+    assert ov["following"] == 21
+    assert ov["posts"] == 384  # 264 + 120 聚合
+    assert ov["nickname"] == "ErpanOmer"
+    assert ov["notes"] == raw["notes"]
+
+
+def test_juejin_overview_never_fabricates_on_missing():
+    assert account_stats._juejin_overview({}) == {
+        "followers": None, "likes": None, "following": None, "posts": None,
+        "nickname": "", "notes": [],
+    }
+    # 只有 more（无 pairs）时 posts 有值、概览仍保持空（不伪造）
+    only_posts = account_stats._juejin_overview({"more": {"文章": 5}})
+    assert only_posts["posts"] == 5
+    assert only_posts["followers"] is None
+
+
+def test_juejin_overview_parses_units_and_ignores_non_metric_labels():
+    # "加入于" 是日期、"收藏集"/"关注标签" 是数量，但都不属于 followers/likes/following
+    raw = {"pairs": {"关注者": "3.2万", "赞": "1,024", "关注了": 0,
+                     "加入于": "2019-04-08", "收藏集": 1, "关注标签": 31}, "more": {}}
+    ov = account_stats._juejin_overview(raw)
+    assert ov["followers"] == 32000
+    assert ov["likes"] == 1024
+    assert ov["following"] == 0
+    assert ov["posts"] is None
+
+
+def test_juejin_overview_tolerates_unparsable_pair_values():
+    # 数字被展示成占位符/乱码时不抛错、也不伪造（parse_num 返回 None）
+    raw = {"pairs": {"关注者": "-", "赞": "", "关注了": "关注"}, "more": {}}
+    ov = account_stats._juejin_overview(raw)
+    assert ov["followers"] is None
+    assert ov["likes"] is None
+    assert ov["following"] is None
+
+
+def _avatar_menu_page(href):
+    # 模拟新版：.avatar-wrapper 存在（登录态）→ 点击弹出菜单 → a:has-text("我的主页") 指向 href
+    myhome = SimpleNamespace(get_attribute=lambda name: href)
+    avatar = SimpleNamespace(click=Mock())
+    def qs(sel):
+        if sel == ".avatar-wrapper":
+            return avatar
+        if sel in ('a:has-text("我的主页")', '.dropdown-item:has-text("我的主页")'):
+            return myhome
+        return None
+    return SimpleNamespace(query_selector=qs, wait_for_timeout=Mock())
+
+
+def test_juejin_profile_url_reads_myhome_from_dropdown(monkeypatch):
+    # 新版：点击头像弹出菜单取「我的主页」→ 本人 /user/{id}（绝对 href）
+    page = _avatar_menu_page("https://juejin.cn/user/123")
+    assert account_stats._juejin_profile_url(page) == "https://juejin.cn/user/123"
+
+
+def test_juejin_profile_url_joins_relative_href_with_origin(monkeypatch):
+    # 相对 href 拼 https://juejin.cn 前缀
+    page = _avatar_menu_page("/user/123")
+    assert account_stats._juejin_profile_url(page) == "https://juejin.cn/user/123"
+
+
+def test_juejin_profile_url_returns_none_when_no_user_link():
+    # 登录态（.avatar-wrapper 存在）但菜单里没有 /user/ 链接 → None，上层据此降级
+    el = SimpleNamespace(get_attribute=lambda name: "/notifications")
+    avatar = SimpleNamespace(click=Mock())
+    def qs(sel):
+        if sel == ".avatar-wrapper":
+            return avatar
+        if sel in ('a:has-text("我的主页")', '.dropdown-item:has-text("我的主页")'):
+            return el  # 非 /user/ 链接
+        return None
+    page = SimpleNamespace(query_selector=qs, wait_for_timeout=Mock())
+    assert account_stats._juejin_profile_url(page) is None
+
+
+def _juejin_page(raw, *, avatar=True):
+    return SimpleNamespace(
+        goto=Mock(),
+        wait_for_selector=Mock(),
+        wait_for_timeout=Mock(),
+        evaluate=Mock(return_value=raw),
+        query_selector=lambda sel: SimpleNamespace() if (avatar and sel == ".avatar-wrapper") else None,
+    )
+
+
+def _empty_result():
+    return {"nickname": "", "followers": None, "likes": None, "following": None,
+            "posts": None, "metrics": [], "notes": [], "logged_in": True}
+
+
+def test_scrape_juejin_maps_live_pairs_into_result(monkeypatch):
+    raw = {"pairs": {"赞": 384, "关注了": 21, "关注者": 2918},
+          "more": {"文章": 264, "沸点": 120},
+          "notes": [{"title": "x", "url": "/post/1", "stat": ""}], "nickname": "ErpanOmer"}
+    page = _juejin_page(raw)
+    monkeypatch.setattr(account_stats, "_login_wall", lambda p: False)
+    monkeypatch.setattr(account_stats, "_juejin_profile_url", lambda p: "https://juejin.cn/user/1")
+    out = account_stats._scrape_juejin(object(), page, _empty_result())
+    assert out["logged_in"] is True
+    assert out["followers"] == 2918
+    assert out["likes"] == 384
+    assert out["following"] == 21
+    assert out["posts"] == 384
+    assert out["nickname"] == "ErpanOmer"
+    assert out["notes"] == raw["notes"]
+
+
+def test_scrape_juejin_logged_out_returns_no_data(monkeypatch):
+    page = _juejin_page({}, avatar=False)
+    monkeypatch.setattr(account_stats, "_login_wall", lambda p: False)
+    out = account_stats._scrape_juejin(object(), page, _empty_result())
+    assert out["logged_in"] is False
+    assert out["followers"] is None
+    page.evaluate.assert_not_called()
+
+
+def test_scrape_juejin_login_wall_degrades_without_evaluate(monkeypatch):
+    page = _juejin_page({})
+    monkeypatch.setattr(account_stats, "_login_wall", lambda p: True)
+    out = account_stats._scrape_juejin(object(), page, _empty_result())
+    assert out["logged_in"] is False
+    assert out["followers"] is None
+    page.evaluate.assert_not_called()
+
+
+def test_scrape_juejin_empty_evaluate_keeps_result_blank(monkeypatch):
+    page = _juejin_page({})
+    monkeypatch.setattr(account_stats, "_login_wall", lambda p: False)
+    monkeypatch.setattr(account_stats, "_juejin_profile_url", lambda p: "https://juejin.cn/user/1")
+    out = account_stats._scrape_juejin(object(), page, _empty_result())
+    # 登录态但主页无数据：保持空值、不伪造、不抛错
+    assert out["logged_in"] is True
+    assert out["followers"] is None
+    assert out["likes"] is None
+
+
+# --------------------------------------------------------------------------- #
+# WAF/403/404 非本人数据页检测（csdn 等 headless 全量 WAF → 优雅降级）
+# --------------------------------------------------------------------------- #
+def test_looks_blocked_detects_waf_and_missing_content():
+    from types import SimpleNamespace
+    def _mk(title, body):
+        return SimpleNamespace(title=lambda: title, inner_text=lambda *a, **k: body,
+                               url="https://blog.csdn.net/Lsiten")
+    assert account_stats._looks_blocked(_mk("Forbidden | WAF", "Forbidden")) is True
+    assert account_stats._looks_blocked(_mk("404", "")) is True
+    assert account_stats._looks_blocked(_mk("", "内容不存在")) is True
+    assert account_stats._looks_blocked(_mk("", "你想找的内容离你而去了")) is True
+    # 正常页（无 WAF/404 标记）→ False
+    assert account_stats._looks_blocked(_mk("水獭比特 - 博客", "水獭比特的博客文章列表")) is False
+    # 无 body / 空页 → 不误判（返回 False）
+    assert account_stats._looks_blocked(_mk("水獭比特", "")) is False
+
+
+def test_scrape_juejin_logged_in_uses_myhome_from_avatar(monkeypatch):
+    # 主修复：登录态 → 点击头像取本人「我的主页」→ 导航过去抓；配置主页只作兜底、不直连
+    page = _juejin_page({"pairs": {"关注者": 3, "赞": 30, "关注了": 23},
+                         "more": {"文章": 30}, "notes": [], "nickname": "水獭比特"})
+    calls = []
+    def _goto(url, **k):
+        calls.append(url)
+    page.goto = _goto
+    monkeypatch.setattr(account_stats, "_login_wall", lambda p: False)
+    monkeypatch.setattr(account_stats, "_looks_blocked", lambda p: False)
+    # 自动解析取到本人主页 → 走登录态本人主页，不走配置主页
+    monkeypatch.setattr(account_stats, "_juejin_profile_url",
+                        lambda p: "https://juejin.cn/user/LOGGEDIN")
+    out = account_stats._scrape_juejin(object(), page, _empty_result(),
+                                       "https://juejin.cn/user/CONFIGURED")
+    assert "https://juejin.cn/user/LOGGEDIN" in calls          # 按登录态归因
+    assert "https://juejin.cn/user/CONFIGURED" not in calls    # 不直连配置主页
+    assert out["followers"] == 3 and out["likes"] == 30 and out["following"] == 23
+    assert out["posts"] == 30
+    assert out["nickname"] == "水獭比特"
+
+
+def test_scrape_juejin_falls_back_to_configured_profile_url(monkeypatch):
+    # 登录态已确认但菜单取不到「我的主页」→ 最后兜底才用配置主页
+    page = _juejin_page({"pairs": {"关注者": 3, "赞": 30, "关注了": 23},
+                         "more": {"文章": 30}, "notes": [], "nickname": "水獭比特"})
+    calls = []
+    def _goto(url, **k):
+        calls.append(url)
+    page.goto = _goto
+    monkeypatch.setattr(account_stats, "_login_wall", lambda p: False)
+    monkeypatch.setattr(account_stats, "_looks_blocked", lambda p: False)
+    monkeypatch.setattr(account_stats, "_juejin_profile_url", lambda p: None)  # 菜单取不到
+    out = account_stats._scrape_juejin(object(), page, _empty_result(),
+                                       "https://juejin.cn/user/CONFIGURED")
+    assert "https://juejin.cn/user/CONFIGURED" in calls      # 兜底走配置主页
+    assert out["followers"] == 3 and out["likes"] == 30
+    assert out["posts"] == 30
+    assert out["nickname"] == "水獭比特"

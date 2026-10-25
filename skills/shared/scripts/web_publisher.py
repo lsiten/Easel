@@ -270,12 +270,15 @@ PLATFORMS: dict[str, dict] = {
         "publish_url": "https://editor.csdn.net/md/?not_checkout=1",
         "whoami_url": "https://www.csdn.net/",
         "profile": "CsdnProfile",
-        # 已登录判定：顶栏 .toolbar-btn-login-new 仅登录态出现（未登录是 .toolbar-btn-login，含「登录」按钮）。
-        # 真机 2026-10 校准：.csdn-profile-nickName 恒显「--」（含未登录）→ 不可作 login_check/me_name；
-        # 真实头像在 a.hasAvatar（src 尾含用户名，如 ..._<用户名>.jpg），故只取头像不取昵称。
-        "login_check": ".toolbar-btn-login-new",
+        # 已登录判定（2026-10 真机「登录/未登录」双态对照校准）：
+        #  · .toolbar-btn-login-new 是顶栏容器，登录/未登录「两种态都在」→ 不能作 login_check
+        #    （旧 bug：未登录时它也命中 → 误判已登录，退出登录后 whoami 重新把它写回 success 标记）。
+        #  · 仅登录态才出现 a.hasAvatar（头像 src 尾含用户名，如 i-avatar.csdnimg.cn/..._<用户名>.jpg）→ 作 login_check。
+        #  · 未登录时 a.toolbar-btn-loginfun（登录按钮）可见、a.hasAvatar 不存在 → 作 logged_out_selector。
+        #  · .csdn-profile-nickName 恒显「--」（含未登录）→ 不取 me_name；只取 a.hasAvatar 头像。
+        "login_check": "a.hasAvatar",
         "login_strict": True,
-        "logged_out_selector": ".toolbar-btn-login:not(.toolbar-btn-login-new), button:has-text('登录'), button:has-text('登录/注册')",
+        "logged_out_selector": "a.toolbar-btn-loginfun",
         "login_qr_selector": "[class*='qrcode' i], [class*='scan' i], img[src*='qrcode' i], img[src*='scan' i], canvas",
         "qr_loaded": "[class*='qrcode' i] img, [class*='qrcode' i] canvas, canvas",
         "me_avatar_selector": "a.hasAvatar img, .toolbar-btn-login-new img",
@@ -289,9 +292,10 @@ PLATFORMS: dict[str, dict] = {
         ],
         # 发布成功后离开创作编辑器（editor.csdn.net/md → 文章页/首页）——避免「点了发布=成功」假阳性
         "publish_success": {"url_not_contains": "editor.csdn.net/md"},
-        "selector_caveat": "CSDN 顶栏 .toolbar-btn-login-new 仅登录态出现（已真机校准，作 login_check）。"
-                           "未登录时 passport.csdn.net 显示扫码登录页，但登录态下访问被重定向回 www.csdn.net，"
-                           "二维码/登录页选择器未能真机校准，login_qr_selector 为通用兜底，首次登录需人工核对二维码。"
+        "selector_caveat": "CSDN 登录态判定已真机双态校准（2026-10）：登录态 a.hasAvatar 可见、未登录 a.toolbar-btn-loginfun 可见；"
+                           "旧 .toolbar-btn-login-new 为顶栏容器登录/未登录都在，作 login_check 会假阳性（已修正）。"
+                           "未登录时 passport.csdn.net 显示扫码登录页，登录态下访问被重定向回 www.csdn.net，"
+                           "login_qr_selector 为通用兜底，首次登录需人工核对二维码。"
                            ".csdn-profile-nickName 恒显「--」→ 未取 me_name（真名在头像 URL/个人主页），仅取 a.hasAvatar 头像。"
                            "发布走 editor.csdn.net/md（mp.csdn.net/edit 跳转至此）：标题 .article-bar__title--input、"
                            "正文 pre.editor__inner(contenteditable)、发布 button.btn-publish；发布后离开 /md/ 判成功。"

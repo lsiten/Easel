@@ -138,3 +138,56 @@ def test_subprocess_timeout_stops_browser_tree(monkeypatch):
         killer.assert_called_once_with(123456, signal.SIGKILL)
     process.kill.assert_called_once()
     assert process.communicate.call_count == 2
+
+
+@pytest.mark.parametrize("platform", ["csdn", "juejin"])
+def test_newly_adapted_platforms_are_fetchable_not_404(monkeypatch, platform):
+    # csdn/juejin 已进入 ANALYTICS_PLATFORMS（归因层适配门）：api_analytics 不再 404，
+    # 而是像其它平台一样进入 _fetch_analytics（csdn/juejin 走 account_stats 通用抓取路径）。
+    async def scenario():
+        async def fetch(platform, persona=""):
+            return {"platform": platform, "loggedIn": False}
+        monkeypatch.setattr(web, "_fetch_analytics", fetch)
+        out = await web.api_analytics(platform)
+        assert out == {"platform": platform, "loggedIn": False}
+    asyncio.run(scenario())
+
+
+def test_newly_adapted_platforms_are_in_analytics_set():
+    assert {"csdn", "juejin"} <= set(web.ANALYTICS_PLATFORMS)
+    # 列表接口同样按画像过滤，csdn/juejin 已在 LOGIN_RUNNERS，会被列出
+    for pf in ("csdn", "juejin"):
+        assert pf in web.LOGIN_RUNNERS
+        assert pf in web.ANALYTICS_PLATFORMS
+
+
+def test_graceful_degradation_warning_is_not_502(monkeypatch):
+    # CSDN 被 WAF 拦截：loggedIn=True 但全空 + warning → 不 502，返回结果让前端显示空/—+提示，
+    # 绝不把 WAF 页里的非本人数据（账号管理规范/版权申诉）当成本人数据。
+    monkeypatch.setattr(web, "_run_analytics_command", lambda *args: subprocess.CompletedProcess(
+        [], 0, json.dumps({
+            "platform": "csdn", "loggedIn": True, "followers": None, "likes": None,
+            "following": None, "posts": None, "metrics": [], "notes": [],
+            "warning": "数据页被平台拦截（WAF/403/404），已跳过，未显示非本人数据",
+        }), ""))
+    out = asyncio.run(web._fetch_analytics("csdn"))
+    assert out["loggedIn"] is True
+    assert out["warning"].startswith("数据页被平台拦截")
+    assert all(out.get(k) is None for k in ("followers", "likes", "following", "posts"))
+
+
+def test_platform_profile_url_from_persona_is_passed_to_fetch(monkeypatch):
+    # 主修复：csdn/juejin 应把画像 platforms.md 里配好的「本人主页」透传给 account_stats（--profile-url），
+    # 直连本人主页、绕过会误抓推荐作者的自动解析。
+    captured = {}
+    def _runner(cmd, env, timeout):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess([], 0, json.dumps({
+            "platform": "csdn", "loggedIn": False, "followers": None, "likes": None,
+            "following": None, "posts": None, "metrics": [], "notes": [],
+        }), "")
+    monkeypatch.setattr(web, "_run_analytics_command", _runner)
+    out = asyncio.run(web._fetch_analytics("csdn", "水獭比特"))
+    assert out["loggedIn"] is False
+    assert "--profile-url" in captured["cmd"]
+    assert "https://blog.csdn.net/Lsiten" in captured["cmd"]

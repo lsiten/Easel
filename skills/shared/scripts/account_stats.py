@@ -85,6 +85,33 @@ PLATFORMS: dict[str, dict] = {
         "metrics": ["净增关注", "新增播放", "新增评论"],
         "note_url_re": r"channels\.weixin\.qq\.com/platform/post|/finder/",
     },
+    "csdn": {
+        "name": "CSDN", "profile": "CsdnProfile",
+        # 创作中心概览 my.csdn.net/main/ 有 WAF（headless 命中 403 跳 blog.csdn.net）；文章列表
+        # my.csdn.net/main/my-article 不被 WAF 拦（未登录 404、登录显示本人文章）→ 数据页取文章列表，
+        # 概览(粉丝/获赞)尽力解析、取不到则空——优雅降级，绝不伪造数字。
+        "url": "https://my.csdn.net/main/my-article", "default_proxy": True,
+        # 数据页被 Cloudflare/WAF 按「无头浏览器」特征拦（headless 命中 403）；真机验证：
+        # 真实 Chrome 通道 + headed 可绕过（headless 即便带 channel 仍 403），故强制这两项。
+        "channel": "chrome", "force_headed": True,
+        "overview_dir": "after",
+        "overview": {"followers": ["粉丝", "粉丝数"], "likes": ["获赞", "获赞数", "点赞"], "following": ["关注", "关注数"]},
+        "metrics": ["阅读", "阅读总量", "点赞", "评论", "收藏"],
+        # 登录态判定：顶栏 a.hasAvatar 仅登录出现（web_publisher 真机双态校准），未登录是 a.toolbar-btn-loginfun
+        "login_ok_selector": "a.hasAvatar",
+        "login_qr_selector": "[class*='qrcode' i], [class*='scan' i], img[src*='qrcode' i], canvas",
+        "note_url_re": r"blog\.csdn\.net/.*?/article/details/\d+",
+    },
+    "juejin": {
+        "name": "掘金", "profile": "JuejinProfile",
+        # 掘金本人数据在个人主页 /user/{id}（非首页）；登录态顶栏 .avatar-wrapper 仅本人可见，
+        # 其内 <a> href 指向本人主页 → _scrape_juejin 先解析本人主页再抓（通用路径抓首页取不到本人数据）。
+        "url": "https://juejin.cn/", "default_proxy": True,
+        "overview_dir": "after",
+        "overview": {"followers": ["关注者", "粉丝", "粉丝数"], "likes": ["赞", "获赞", "获赞数"], "following": ["关注了", "关注"]},
+        "metrics": [],
+        "note_url_re": r"juejin\.cn/post/\d+",
+    },
 }
 
 LAUNCH_ARGS = [
@@ -384,6 +411,29 @@ def _login_wall(page) -> bool:
         return False
 
 
+def _looks_blocked(page) -> bool:
+    """WAF/403/404/「内容不存在」等非本人数据页：返回 True 表示该页不可作为数据源。
+    主要用于 csdn（headless 全量 WAF）等：命中即优雅降级——绝不把 WAF 页里混进来的
+    推荐/页脚链接（账号管理规范 / 版权申诉 / 推荐作者）当成本人数据展示。"""
+    try:
+        title = (page.title() or "").lower()
+        if any(k in title for k in ("forbidden", "waf", "403", "404")):
+            return True
+    except Exception:
+        pass
+    try:
+        text = page.inner_text("body", timeout=1500) or ""
+    except Exception:
+        text = ""
+    low = text.lower()
+    if "forbidden" in low or "waf" in low:
+        return True
+    for marker in ("内容不存在", "你想找的内容离你而去了", "页面不存在", "访问的页面不存在", "啊哦"):
+        if marker in text:
+            return True
+    return False
+
+
 def _xhs_session(context) -> tuple[dict | None, bool]:
     from xhs_publish import CREATOR_ACCOUNT_URL, CREATOR_HOME_URL, EXPLORE_URL, _initial_state, _state_account
 
@@ -602,7 +652,7 @@ def _scrape_xhs(context, page, result: dict) -> dict:
     return result
 
 
-def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) -> dict:
+def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None, profile_url: str | None = None) -> dict:
     from playwright.sync_api import sync_playwright
     cfg = PLATFORMS[platform]
     r = {"nickname": "", "followers": None, "likes": None, "following": None,
@@ -625,7 +675,12 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
                 _clear_stale_chrome_locks(profile)
                 ctx = _xhs_launch(p, headed, base, proxy, login_assets=False)
             else:
-                kwargs = dict(headless=not headed, locale="zh-CN", args=LAUNCH_ARGS)
+                # 部分平台（CSDN）数据页被 WAF 按无头特征拦 403：用真实 Chrome 通道 + 强制 headed
+                # 绕过（真机验证 headless 仍 403、headed 正常取到本人数据）。channel 需真实 Chrome 已装。
+                want_headed = headed or bool(cfg.get("force_headed"))
+                kwargs = dict(headless=not want_headed, locale="zh-CN", args=LAUNCH_ARGS)
+                if cfg.get("channel"):
+                    kwargs["channel"] = cfg["channel"]
                 if proxy:
                     kwargs["proxy"] = {"server": proxy}
                 ctx = p.chromium.launch_persistent_context(str(profile), **kwargs)
@@ -633,13 +688,22 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None) ->
             try:
                 if platform == "xiaohongshu":
                     return _scrape_xhs(ctx, page, r)
+                if platform == "juejin":
+                    return _scrape_juejin(ctx, page, r, profile_url)
+                if platform == "csdn":
+                    return _scrape_csdn(ctx, page, r, profile_url)
                 try:
-                    page.goto(cfg["url"], wait_until="commit", timeout=12000)
+                    page.goto(profile_url or cfg["url"], wait_until="commit", timeout=12000)
                 except Exception:
                     if not _has_body(page):
                         raise
                 if _login_wall(page):
                     r["logged_in"] = False
+                    return r
+                if _looks_blocked(page):
+                    # WAF/403/404：该页非本人数据，优雅降级——绝不把 WAF 页里的
+                    # 推荐/页脚链接（账号管理规范 / 版权申诉 / 推荐作者）当成本人数据展示
+                    r["warning"] = "数据页被平台拦截（WAF/403/404），已跳过，未显示非本人数据"
                     return r
                 ov, d = cfg["overview"], cfg.get("overview_dir", "after")
                 mets = cfg.get("metrics", [])
@@ -745,6 +809,280 @@ def _poll_stable(page, sig, max_ms: int = 10000, step: int = 400) -> list[str]:
             break
         page.wait_for_timeout(min(step, remaining))
     return lines
+
+
+def _juejin_profile_url(page) -> str | None:
+    """掘金登录态归因：点击顶栏 .avatar-wrapper 弹出下拉菜单，取「我的主页」→本人 /user/{id} 主页。
+    新版掘金顶栏不再把本人主页做成 .avatar-wrapper 内的 <a>（旧选择器会误抓 feed 推荐作者，
+    正是「账号信息不对」的根因）；改点击头像弹出菜单读「我的主页」，确保是登录本人主页。
+    未登录/取不到返回 None（上层据此优雅降级）。"""
+    # .avatar-wrapper 仅登录态出现；未登录无本人主页
+    if page.query_selector(".avatar-wrapper") is None:
+        return None
+    # 点击头像弹出下拉菜单
+    try:
+        aw = page.query_selector(".avatar-wrapper")
+        if aw:
+            aw.click()
+            page.wait_for_timeout(1200)
+    except Exception:
+        pass
+    # 主：下拉里「我的主页」链接（无歧义指向登录本人）
+    for sel in ('a:has-text("我的主页")', '.dropdown-item:has-text("我的主页")'):
+        try:
+            el = page.query_selector(sel)
+        except Exception:
+            el = None
+        if el is not None:
+            try:
+                href = el.get_attribute("href") or ""
+            except Exception:
+                href = ""
+            if "/user/" in href:
+                return href if href.startswith("http") else "https://juejin.cn" + href
+    # 兜底：用户名卡片里的 /user/ 链接
+    try:
+        el = page.query_selector('.user-card a[href*="/user/"], .user-info a[href*="/user/"]')
+    except Exception:
+        el = None
+    if el is not None:
+        try:
+            href = el.get_attribute("href") or ""
+        except Exception:
+            href = ""
+        if "/user/" in href:
+            return href if href.startswith("http") else "https://juejin.cn" + href
+    return None
+
+
+_JUEJIN_STATS_JS = r"""() => {
+  const parse = (t) => {
+    t = (t || '').replace(/,/g, '').replace(/\s/g, '').trim();
+    const m = t.match(/^([\d.]+)\s*([万亿wWkK千]?)/);
+    if (!m) return null;
+    const mult = {'': 1, '万': 1e4, '亿': 1e8, 'w': 1e4, 'W': 1e4, 'k': 1e3, 'K': 1e3, '千': 1e3};
+    return Math.round(parseFloat(m[1]) * (mult[m[2]] || 1));
+  };
+  // 掘金主页：每个 .item-count 向上找同容器的 .item-title，配成 {标签: 数字}（关注者/赞/关注了…）
+  const pairs = {};
+  for (const c of document.querySelectorAll('.item-count')) {
+    const val = parse(c.innerText);
+    if (val === null) continue;
+    let titleEl = null, el = c.parentElement;
+    while (el) {
+      const t = el.querySelector && el.querySelector('.item-title');
+      if (t) { titleEl = t; break; }
+      el = el.parentElement;
+    }
+    if (!titleEl) {
+      let s = c.previousElementSibling;
+      while (s) {
+        if (s.classList && s.classList.contains('item-title')) { titleEl = s; break; }
+        s = s.previousElementSibling;
+      }
+    }
+    if (titleEl) {
+      const tt = (titleEl.innerText || '').trim();
+      if (tt) pairs[tt] = val;
+    }
+  }
+  // more-panel 聚合：文章 N / 沸点 N（href 与文案标签错位，按文案取）
+  const more = {};
+  for (const a of document.querySelectorAll('.more-panel .more-item')) {
+    const m = (a.innerText || '').trim().match(/^(.+?)\s*([\d,]+)$/);
+    if (m) more[m[1].trim()] = parse(m[2]);
+  }
+  // 最新内容链接（去重）：标题只取 .post-item-title h3，
+  // 避免把 .post-item-excerpt 预览/图片塞进标题（真机校验 DOM：a[href*="/post/"] > .post-item-title > h3 = 标题）
+  const notes = [];
+  const seen = new Set();
+  for (const a of document.querySelectorAll('a[href*="/post/"]')) {
+    const href = a.getAttribute('href') || '';
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    let title = '';
+    const h3 = a.querySelector('.post-item-title h3');
+    if (h3) title = (h3.innerText || '').trim();
+    if (!title) {
+      // 兜底：去掉 .post-item-excerpt 预览，只留标题
+      const clone = a.cloneNode(true);
+      clone.querySelectorAll('.post-item-excerpt').forEach((e) => e.remove());
+      title = (clone.innerText || '').trim();
+    }
+    notes.push({title: title.slice(0, 60) || '(无标题)', url: href, stat: ''});
+  }
+  const nickEl = document.querySelector('.user-name, .name, .user-nick, .name-link');
+  const nickname = (nickEl ? (nickEl.innerText || '').trim() : '').slice(0, 40);
+  return {pairs: pairs, more: more, notes: notes.slice(0, 8), nickname: nickname};
+}"""
+
+
+def _juejin_overview(raw: dict) -> dict:
+    """把掘金主页 DOM 抽取结果映射成 followers/likes/following/posts（纯函数，可离线测）。
+    followers=关注者、following=关注了、likes=赞（聚合）；posts=文章+沸点+专栏聚合。
+    任何一项取不到返回 None——绝不伪造数字。"""
+    pairs = raw.get("pairs") or {}
+    more = raw.get("more") or {}
+
+    def pick(labels):
+        for lb in labels:
+            v = pairs.get(lb)
+            if isinstance(v, (int, float)) and v >= 0:
+                return int(v)
+            v2 = parse_num(v)
+            if v2 is not None:
+                return v2
+        return None
+
+    followers = pick(["关注者", "粉丝", "粉丝数"])
+    following = pick(["关注了", "关注"])
+    likes = pick(["赞", "获赞", "获赞数"])
+    posts = 0
+    for lb in ("文章", "沸点", "专栏"):
+        v = parse_num(more.get(lb))
+        if v is not None:
+            posts += v
+    posts = posts or None
+    return {
+        "followers": followers, "likes": likes, "following": following,
+        "posts": posts, "nickname": raw.get("nickname", ""),
+        "notes": raw.get("notes", []),
+    }
+
+
+def _scrape_juejin(ctx, page, result: dict, profile_url: str | None = None) -> dict:
+    """掘金归因抓取：按【登录态】取本人数据。流程：
+      - 抓首页 juejin.cn，确认登录态（.avatar-wrapper 仅登录态出现）；
+      - 点击顶栏头像弹出菜单，取「我的主页」→本人 /user/{id} 主页，导航过去抓概览/聚合/最新内容；
+      - 这是「账号信息不对」的主修复：按登录本人归因，不再硬编码配置主页、不再误抓 feed 推荐作者；
+      - profile_url（配置主页）仅作最后兜底：登录态已确认但菜单取不到链接时才用；
+      - 取不到/被拦则空，不伪造。"""
+    cfg = PLATFORMS["juejin"]
+    r = result
+    # 按【登录态】取本人数据：抓首页 juejin.cn，确认登录态后点击头像取本人「我的主页」。
+    try:
+        page.goto(cfg["url"], wait_until="commit", timeout=12000)
+    except Exception:
+        if not _has_body(page):
+            raise
+    if _login_wall(page):
+        r["logged_in"] = False
+        return r
+    # 登录态判定：.avatar-wrapper 仅登录态出现（web_publisher 真机双态校准）
+    try:
+        logged = page.query_selector(".avatar-wrapper") is not None
+    except Exception:
+        logged = True
+    if not logged:
+        r["logged_in"] = False
+        return r
+    # 按登录态归因：点击头像取本人「我的主页」；配置主页仅作菜单取不到时的最后兜底
+    auto = _juejin_profile_url(page)
+    if not auto and profile_url:
+        auto = profile_url
+    if auto:
+        try:
+            page.goto(auto, wait_until="commit", timeout=12000)
+        except Exception:
+            if not _has_body(page):
+                pass
+    try:
+        page.wait_for_selector(".item-count, .more-panel, .user-info", timeout=8000)
+    except Exception:
+        pass
+    try:
+        page.wait_for_timeout(1200)
+    except Exception:
+        pass
+    if _looks_blocked(page):
+        r["warning"] = "掘金主页被拦截，已跳过，未显示非本人数据"
+        r["logged_in"] = False
+        return r
+    try:
+        raw = page.evaluate(_JUEJIN_STATS_JS)
+    except Exception:
+        raw = {}
+    if not isinstance(raw, dict):
+        return r
+    overview = _juejin_overview(raw)
+    for key in ("followers", "likes", "following", "posts", "nickname"):
+        val = overview.get(key)
+        if val is not None:
+            r[key] = val
+    if isinstance(overview.get("notes"), list):
+        r["notes"] = overview["notes"]
+    return r
+
+
+def _csdn_nickname(lines: list[str]) -> str:
+    """CSDN 博客主页昵称在「码龄」上方最近一行（数字在上、标签在下的布局里，
+    通用 extract_nickname 会误取标签簇上方的「原创」等标签，故专用解析）。"""
+    for i, ln in enumerate(lines):
+        if "码龄" in ln:
+            for k in range(i - 1, max(-1, i - 3), -1):
+                c = lines[k]
+                if parse_num(c) is None and c not in _NAV_WORDS and 1 < len(c) <= 40 and not c.endswith("数"):
+                    return c
+            break
+    return ""
+
+
+def _scrape_csdn(ctx, page, result: dict, profile_url: str | None = None) -> dict:
+    """CSDN 归因抓取：按【登录态】取本人数据。
+      数据页被 Cloudflare/WAF 按无头特征拦（headless 命中 403），account_stats 用真实 Chrome 通道 +
+      强制 headed 绕过（见 PLATFORMS["csdn"] 的 channel/force_headed）。
+      本人数据在博客主页 blog.csdn.net/{username}（web 层经 _platform_profile_url 传入 profile_url）；
+      布局为「数字在上、标签在下」（9862/总访问量、28/原创、0/粉丝、3/关注），获赞在「获得N次点赞」，
+      昵称在「码龄」上方——与创作中心 my-article 页不同，故用专用解析而非通用 overview 方向。
+      被拦/取不到则空，绝不把 WAF 页或非本人数据当成本人数据。"""
+    cfg = PLATFORMS["csdn"]
+    r = result
+    try:
+        page.goto(profile_url or cfg["url"], wait_until="commit", timeout=12000)
+    except Exception:
+        if not _has_body(page):
+            raise
+    if _login_wall(page):
+        r["logged_in"] = False
+        return r
+    if _looks_blocked(page):
+        r["warning"] = "数据页被平台拦截（WAF/403/404），已跳过，未显示非本人数据"
+        return r
+    r["logged_in"] = _platform_logged_in(page, cfg)
+    if not r["logged_in"]:
+        return r
+    # 稳定性轮询：粉丝数连续两次一致才走（避开占位 0→真实值异步坑）
+    def _sig(L):
+        fo = num_by_label(L, cfg["overview"].get("followers", []), "before")
+        return None if fo is None else (fo,)
+    lines = _poll_stable(page, _sig, 10000)
+    # 数字在上、标签在下 → before 方向
+    r["followers"] = num_by_label(lines, cfg["overview"]["followers"], "before")
+    r["following"] = num_by_label(lines, cfg["overview"].get("following", []), "before")
+    r["posts"] = num_by_label(lines, ["原创", "文章"], "before")
+    # 获赞在「获得N次点赞」式文案里（博客主页概览块没有独立「获赞」标签）
+    m = re.search(r"获得\s*([\d,]+)\s*次点赞", "\n".join(lines))
+    if m:
+        r["likes"] = parse_num(m.group(1))
+    nick = _csdn_nickname(lines)
+    if nick:
+        r["nickname"] = nick
+    # 最新内容：best-effort 抓文章链接，只保留本人文章（过滤系统/他人文章）
+    notes = _scrape_notes("csdn", page, cfg)
+    user = ""
+    if profile_url:
+        try:
+            from urllib.parse import urlparse
+            parts = [x for x in urlparse(profile_url).path.split("/") if x]
+            user = parts[0] if parts else ""
+        except Exception:
+            user = ""
+    if user:
+        filtered = [n for n in notes if "/" + user + "/" in (n.get("url") or "")]
+        if filtered:
+            notes = filtered
+    r["notes"] = notes
+    return r
 
 
 _XHS_UNPUBLISHED_TITLES = {"", "无笔记标题", "无标题", "(无标题)"}
@@ -1077,7 +1415,7 @@ def cmd_fetch(a) -> int:
         _die(f"需要 playwright：{e}", 3)
     disable = True if a.no_proxy else (False if a.proxy else None)
     try:
-        s = _scrape(a.platform, a.headed, a.profile_base, _proxy(a.platform, a.proxy, disable))
+        s = _scrape(a.platform, a.headed, a.profile_base, _proxy(a.platform, a.proxy, disable), getattr(a, "profile_url", None))
     except Exception as error:
         _die(str(error))
 
@@ -1211,6 +1549,7 @@ def main() -> int:
     pf = sub.add_parser("fetch", help="抓某平台账号数据 → JSON")
     pf.add_argument("--platform", required=True, help=f"平台：{', '.join(PLATFORMS)}")
     pf.add_argument("--profile-base", help="登录态根目录（默认 ~/.easel-browser-profiles）")
+    pf.add_argument("--profile-url", help="画像配置的个人主页 URL（掘金/CSDN 直连本人主页，绕过会误抓推荐作者的自动解析）")
     pf.add_argument("--proxy", help="外网代理（默认按平台：xhs 直连、其它走 env）")
     pf.add_argument("--no-proxy", action="store_true", help="强制直连")
     pf.add_argument("--headed", action="store_true", help="有头模式（首次校准）")

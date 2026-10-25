@@ -4043,7 +4043,7 @@ async def api_logout(platform: str, persona: str = ''):
 
 # 归因层：可抓创作数据的平台（多数走 Playwright 登录态；bilibili 用 biliup cookies 不起浏览器、
 # wechat-oa 走 mp 后台会话 Playwright 拦截数据 XHR）
-ANALYTICS_PLATFORMS = {"xiaohongshu", "douyin", "kuaishou", "zhihu", "weixin-channels", "bilibili", "wechat-oa"}
+ANALYTICS_PLATFORMS = {"xiaohongshu", "douyin", "kuaishou", "zhihu", "weixin-channels", "bilibili", "wechat-oa", "csdn", "juejin"}
 _analytics_inflight: dict[str, asyncio.Task] = {}
 
 
@@ -4086,6 +4086,34 @@ async def api_analytics_platforms(persona: str = ''):
     ]
 
 
+def _platform_profile_url(platform: str, persona: str) -> str | None:
+    """从画像 platforms.md 解析该平台配置的「主页：<URL>」，供 account_stats 直连本人主页。
+    csdn→'## CSDN' 段、juejin→'## 掘金' 段；取不到返回 None（上层走自动解析/默认页）。
+    这是「账号信息不对」的主修复：用画像里配好的本人主页，而非误抓推荐作者。"""
+    if not persona:
+        return None
+    name = {"csdn": "CSDN", "juejin": "掘金"}.get(platform)
+    if not name:
+        return None
+    try:
+        text = load_profile_text(persona)
+    except Exception:
+        text = ""
+    if not text:
+        return None
+    m = re.search(rf"##\s*{re.escape(name)}\s*\n(.*?)(?=\n##\s|\Z)", text, re.S)
+    block = m.group(1) if m else text
+    for line in block.splitlines():
+        if "主页" in line:
+            u = re.search(r"<\s*(https?://\S+?)\s*>", line)
+            if u:
+                return u.group(1)
+            u2 = re.search(r"(https?://\S+)", line)
+            if u2:
+                return u2.group(1)
+    return None
+
+
 @app.get("/api/analytics/{platform}")
 async def api_analytics(platform: str, persona: str = ''):
     """抓取某平台（当前画像）已登录账号的创作数据，同(画像,平台)并发刷新共享一次有时限的任务。"""
@@ -4124,6 +4152,10 @@ async def _fetch_analytics(platform: str, persona: str = ''):
         # 代理策略由 account_stats.py 按平台自定（xhs 直连、其它走 env），后端照常传 _proxy_env
         cmd = [sys.executable, str(SHARED_SCRIPTS / "account_stats.py"), "fetch",
                "--platform", platform, "--profile-base", profile_base]
+        # 掘金/CSDN：用画像 platforms.md 里配好的本人主页直连，绕过会误抓推荐作者的自动解析
+        purl = _platform_profile_url(platform, persona)
+        if purl:
+            cmd += ["--profile-url", purl]
     ana_env = _proxy_env()
     ana_env.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     try:
@@ -4142,9 +4174,12 @@ async def _fetch_analytics(platform: str, persona: str = ''):
                 continue
             if proc.returncode or result.get("error"):
                 raise HTTPException(502, str(result.get("error") or "平台数据抓取失败")[:240])
+            # warning 非空表示「已优雅降级」（如 CSDN 被 WAF 拦截）：不 502，返回结果让前端显示空/—+提示，
+            # 绝不把 WAF 页里的非本人数据当成本人数据。
             if (result.get("loggedIn") is True
                     and all(result.get(key) is None for key in ("followers", "likes", "following", "posts"))
-                    and not result.get("metrics") and not result.get("notes")):
+                    and not result.get("metrics") and not result.get("notes")
+                    and not result.get("warning")):
                 raise HTTPException(502, "账号已登录，但平台未返回可用数据；请检查网络或平台维护状态后重试")
             return result
     detail = (proc.stderr or "").strip().splitlines()[-1:] or ["未取到数据"]
