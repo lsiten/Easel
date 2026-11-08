@@ -15,7 +15,7 @@ description: 同步 ZJU-REAL/Easel 上游到 lsiten/Easel，逐项比较并融�
 | 推送目标 | `https://github.com/lsiten/Easel.git`，`lsiten/main` |
 | OpenFilm 子模块 | `subprojects/openfilm`，`https://github.com/lsiten/openfilm.git` |
 
-`origin` 是历史上游别名，不依靠它判断推送目标。执行前用 `git remote -v` 核实地址；缺少 `upstream` / `lsiten` 时才添加上述远端，现有地址不符时先查明原因，不静默覆盖。
+`origin` 在历史 checkout 中指向官方上游，新克隆可能指向 fork；不依靠它的名称判断推送目标。执行前用 `git remote -v` 核实地址；缺少 `upstream` / `lsiten` 时才添加上述远端，现有地址不符时先查明原因，不静默覆盖。
 在本仓库根执行；代码定位遵循根 `AGENTS.md`。维护 Skill 位于 `.agents/skills/`，不同于面向内容创作的 `skills/builtin/`。
 
 ## 先建立比较基线
@@ -24,7 +24,7 @@ description: 同步 ZJU-REAL/Easel 上游到 lsiten/Easel，逐项比较并融�
 2. 脏工作区先判断是否属于本次任务。已授权提交时，先审阅并提交相关改动；否则保持原样并说明阻塞。不得自动 stash、覆盖文件或丢弃用户改动。
 3. `git fetch upstream` 和 `git fetch lsiten`；读取双方新增提交、版本要求、迁移说明与 CI。若 fork 远端领先本地，也必须纳入比较，不能覆盖远端。
 4. 找到 `git merge-base HEAD upstream/main`，分别阅读共同祖先到本地、到上游的差异。浅克隆找不到共同祖先时，先对相关远端逐步 deepen，必要时 unshallow；不得用 `--allow-unrelated-histories` 绕过。
-5. 记录起始 HEAD、上游 SHA、fork 远端 SHA；在改变已提交历史前创建不重名的 `codex/pre-sync-时间戳` 本地备份分支。默认在当前工作分支合并，不切换、重置或重写共享主分支。
+5. 记录起始 HEAD、上游 SHA、fork 远端 SHA；在改变已提交历史前创建不重名的 `codex/pre-sync-时间戳` 本地备份分支。默认在当前工作分支合并；若 HEAD 游离，先从当前 SHA 创建 `codex/sync-easel-时间戳` 工作分支。不得通过切回旧的 main 让当前集成结果回退，不重置或重写共享主分支。
 
 ## 逐项融合双方改进
 
