@@ -1,5 +1,10 @@
 # Easel 项目约定
 
+## 上游同步
+
+- 同步或合并官方 Easel 更新时，先读取 [.agents/skills/easel-upstream-sync/SKILL.md](.agents/skills/easel-upstream-sync/SKILL.md)，逐项融合双方有效改进。
+- 涉及 OpenFilm 更新时，读取子项目的 [.agents/skills/openfilm-upstream-sync/SKILL.md](subprojects/openfilm/.agents/skills/openfilm-upstream-sync/SKILL.md)；先提交并推送子项目，再更新父仓库 gitlink，子模块地址保留为 `lsiten/openfilm`。
+
 ## 浏览器操作
 
 - 需要登录态、页面交互、JS 渲染、截图或网页发布时，先检查本机是否安装 Ego（`ego-browser` 命令或 Ego 应用）；已安装则优先使用 `ego-browser`，未安装时使用 Chrome。
