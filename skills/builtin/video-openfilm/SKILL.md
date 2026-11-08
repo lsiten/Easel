@@ -1,6 +1,6 @@
 ---
 name: video-openfilm
-description: "Easel 默认视频制作与合成引擎。做视频、参考视频创作、静图动效、口播、实拍混剪、动态图形、HTML 视频和镜头编排，默认由 OpenFilm 组织时间线、声音、字幕和画面，交付可编辑项目及 Studio 预览。素材可来自用户素材库、stock-footage、ai-image-gen、ai-video-gen 或 OpenFilm 媒体库。用户明确要求导出、发布、出片、下载或 MP4 时渲染成片。用户已指定专用制作流程时保留其选择。"
+description: "Easel 默认视频制作与合成引擎。当用户需要做视频、参考视频创作、静图动效、口播、实拍混剪、动态图形、HTML 视频和镜头编排时使用，由 OpenFilm 组织时间线、声音、字幕和画面，交付可编辑项目及 Studio 预览。素材可来自用户素材库、stock-footage、ai-image-gen、ai-video-gen 或 OpenFilm 媒体库。用户要求导出、发布、出片、下载或 MP4 时渲染成片；已指定专用制作流程时保留其选择。"
 layer: produce
 ---
 

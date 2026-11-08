@@ -7,11 +7,16 @@ import re
 import shlex
 import ast
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+if __package__:
+    from .validate_document_paths import documents
+else:
+    from validate_document_paths import documents
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = ROOT / "skills" / "builtin"
 FENCE_RE = re.compile(r"```(?:bash|sh|shell)\s*\n(.*?)```", re.S)
 OPTION_RE = re.compile(r"(?<!\S)(--[a-zA-Z][a-zA-Z0-9-]*|-[a-zA-Z])")
 
@@ -52,13 +57,59 @@ def resolve_script(doc: Path, token: str) -> Path | None:
     return doc.parent / candidate
 
 
-def cli_schema(script: Path) -> tuple[set[str], set[str]]:
-    """Collect argparse options and subcommand names without importing the script."""
+@dataclass(frozen=True, slots=True)
+class CliSchema:
+    options: frozenset[str] = frozenset()
+    forwarding: frozenset[str] = frozenset()
+
+
+def forwarding_subcommands(tree: ast.Module) -> frozenset[str]:
+    """Identify subparsers that intentionally accept unknown downstream options."""
+    nodes = list(ast.walk(tree))
+    if not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+               and node.func.attr == "parse_known_args" for node in nodes):
+        return frozenset()
+    loop_names: dict[str, set[str]] = {}
+    for node in nodes:
+        if (isinstance(node, ast.For) and isinstance(node.target, ast.Name)
+                and isinstance(node.iter, (ast.Tuple, ast.List))):
+            loop_names[node.target.id] = {
+                item.value for item in node.iter.elts
+                if isinstance(item, ast.Constant) and isinstance(item.value, str)
+            }
+    parsers: dict[str, set[str]] = {}
+    for node in nodes:
+        if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == "add_parser" and node.value.args):
+            continue
+        argument = node.value.args[0]
+        names: set[str] = set()
+        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+            names.add(argument.value)
+        elif isinstance(argument, ast.Name):
+            names.update(loop_names.get(argument.id, ()))
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                parsers.setdefault(target.id, set()).update(names)
+    forwarding: set[str] = set()
+    for node in nodes:
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add_argument" and isinstance(node.func.value, ast.Name)):
+            continue
+        if any(keyword.arg == "nargs" and isinstance(keyword.value, ast.Attribute)
+               and keyword.value.attr == "REMAINDER" for keyword in node.keywords):
+            forwarding.update(parsers.get(node.func.value.id, ()))
+    return frozenset(forwarding)
+
+
+def cli_schema(script: Path) -> CliSchema:
+    """Collect wrapper options and forwarding commands without importing the script."""
     try:
         tree = ast.parse(script.read_text(encoding="utf-8"))
     except (OSError, SyntaxError):
-        return set(), set()
-    options, subcommands = set(), set()
+        return CliSchema()
+    options: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue
@@ -67,21 +118,14 @@ def cli_schema(script: Path) -> tuple[set[str], set[str]]:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str) \
                         and arg.value.startswith("-"):
                     options.add(arg.value)
-        elif node.func.attr == "add_parser" and node.args:
-            arg = node.args[0]
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                subcommands.add(arg.value)
-    return options, subcommands
+    return CliSchema(frozenset(options), forwarding_subcommands(tree))
 
 
 def main() -> int:
     failures = []
     checked = 0
-    docs = sorted(SKILLS.rglob("*.md")) + sorted((ROOT / "agents").rglob("*.md")) \
-        + sorted((ROOT / "skills" / "shared").rglob("*.md")) \
-        + sorted(ROOT.glob("*.md")) + sorted((ROOT / "docs").rglob("*.md"))
-    cache: dict[Path, tuple[set[str], set[str]]] = {}
-    for doc in docs:
+    cache: dict[Path, CliSchema] = {}
+    for doc in documents(ROOT):
         for line, invocation in commands(doc):
             script = resolve_script(doc, invocation[0])
             if script is None:
@@ -92,11 +136,12 @@ def main() -> int:
             args = invocation[1:]
             if script not in cache:
                 cache[script] = cli_schema(script)
-            supported, subcommands = cache[script]
+            schema = cache[script]
             checked += 1
             checked_line = line.split(" -- ", 1)[0]
             used = set(OPTION_RE.findall(checked_line)) - {"--help"}
-            unknown = sorted(used - supported) if supported else []
+            forwards = bool(args) and args[0] in schema.forwarding
+            unknown = sorted(used - schema.options) if schema.options and not forwards else []
             if unknown:
                 failures.append((doc, line, "unknown options: " + ", ".join(unknown)))
 

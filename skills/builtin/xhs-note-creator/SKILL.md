@@ -146,10 +146,7 @@ python skills/builtin/card-design/scripts/card_audit.py audit -f "outputs/主题
 发布前必须**先把「真实发布效果」做出来、先自检**——没问题才交付用户确认，确认无误才真发：
 
 ```bash
-# ① 生成小红书图文预览（还原真实小红书图文展示交互：竖图轮播/左右滑动 + 计数/点点、
-#    标题、caption 正文、蓝色话题、作者行、点赞/收藏/评论/转发互动条）。
-#    预览是单个 .html 文件，App「产物/输出」页用可交互 iframe 直接渲染——用户点开即见
-#    真实发布后读者看到的样子（所见即所得），零前端改动。
+# ① 生成含竖图轮播、标题、正文、话题、作者及互动条的单文件 HTML 预览，在 App 产物页交互查看。
 python3 skills/shared/scripts/xhs_preview.py preview outputs/主题名
 
 # ② 基于预览自检（渲染预览截图 + 内容/视觉/合规/去AI味 确定性检查 → 报告 + verdict）

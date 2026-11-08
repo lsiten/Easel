@@ -1,6 +1,6 @@
 ---
 name: pixabay-music
-description: "从 Pixabay 免费音乐库抓取现成的 BGM / 配乐 / 音效 / 背景音乐（Ego 浏览器 + CDN 直链下载），供视频制作、短视频取用。免登录、免 API key、免版税（no-copyright）。当用户说“取音乐”“找 BGM”“配乐”“背景音乐”“Pixabay 音乐”“找一首钢琴曲/钢琴/鼓点/lo-fi/温馨/激昂”“给视频配段音乐”“抓段音效”时使用。与 ai-music 的区别：ai-music 用 AI 生成原创音乐，本 SKILL 是从 Pixabay 免费库抓现成音乐；与 openfilm get music-search 的区别：那是内置精选 CC0 库，本 SKILL 按关键词海量搜索 Pixabay。"
+description: "从 Pixabay 音乐库按关键词查找现成 BGM、配乐与音效，通过 Ego 浏览器和 CDN 下载，供视频制作取用，无需登录或 API key。当用户说找 BGM、配背景音乐、取 Pixabay 音乐、找钢琴或 lo-fi 曲、给视频配乐、抓音效时使用。原创音乐生成用 ai-music；OpenFilm 内置精选库用 music-search。本技能搜索 Pixabay，取用前核实本次素材的许可。"
 layer: produce
 ---
 

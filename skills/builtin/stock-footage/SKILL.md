@@ -1,6 +1,6 @@
 ---
 name: stock-footage
-description: "从 Pixabay / Pexels 免费视频库抓取**现成实拍 / 空镜 / B-roll（真实动态画面）**，供视频制作取用——当某段分镜需要'真实运动'而非把静图用 Ken Burns 冒充动态时用它。Ego 浏览器 + CDN 直链下载，免登录、免 API key、免版税（可商用、无需署名）。当用户说 找空镜、找实拍、找 B-roll、找一段画面、取现成视频、真实动态、这段要动起来的画面、stock footage、素材片段 时使用。与 ai-video-gen 的区别：那是 AI 生成视频（要 provider/key），本 SKILL 从免费库抓现成实拍（免 key）；与 pixabay-music 同结构（同 Ego+CDN 机制），区别是取视频画面不是音乐；与 ai-image-gen+Ken Burns 的区别：那是静图缓动，本 SKILL 给真动态画面。"
+description: "从 Pixabay / Pexels 视频库查找现成实拍、空镜与 B-roll，为视频分镜提供真实动态画面，通过 Ego 浏览器和 CDN 下载，无需登录或 API key。当用户说找空镜、找实拍、找 B-roll、取现成视频、需要真实运动、stock footage 或素材片段时使用。AI 生成片段用 ai-video-gen，静图缓动用 ai-image-gen 加 Ken Burns，音乐用 pixabay-music；取用前核实本次素材许可。"
 layer: produce
 ---
 
