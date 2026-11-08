@@ -5,6 +5,7 @@ import atexit
 import hashlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -116,6 +117,58 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
             process.wait()
 
 
+def _reap_stale_ego(profile: Path, server: str) -> None:
+    """Best-effort: terminate a lingering Ego that still owns this profile.
+
+    A login/whoami worker that is killed leaves its Ego child orphaned; the
+    child keeps the user-data-dir and blocks a fresh launch, so the new Ego
+    exits immediately and no CDP port ever appears. The space id is derived
+    from the profile-path hash (never hardcoded) and the directory is
+    recreated on demand, so reaping a stuck instance and taking a fresh
+    space is always safe.
+    """
+    data_dir = str(profile)
+    name = f"easel-{server}"
+    try:
+        listing = subprocess.run(["ps", "-Ao", "pid=,command="],
+                                 capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return
+    self_pid = os.getpid()
+    for line in listing.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) < 2:
+            continue
+        pid, command = parts[0], parts[1]
+        if pid == self_pid:
+            continue
+        if f"--user-data-dir={data_dir}" not in command and f"--ego-server-name={name}" not in command:
+            continue
+        _terminate(pid)
+
+
+def _terminate(pid: str) -> None:
+    """SIGTERM a stuck Ego, escalating to SIGKILL if it lingers."""
+    try:
+        pid_int = int(pid)
+    except ValueError:
+        return
+    try:
+        os.kill(pid_int, signal.SIGTERM)
+    except OSError:
+        return
+    for _ in range(20):
+        try:
+            os.kill(pid_int, 0)
+        except OSError:
+            return
+        time.sleep(0.1)
+    try:
+        os.kill(pid_int, signal.SIGKILL)
+    except OSError:
+        pass
+
+
 def _ego_context(playwright: Playwright, profile: Path,
                  options: EgoOptions) -> BrowserContext:
     """Own an isolated Ego process; Ego supports TCP CDP rather than PW pipes."""
@@ -136,38 +189,60 @@ def _ego_context(playwright: Playwright, profile: Path,
         except OSError as error:
             raise BrowserUnavailable("该平台的 Ego 账号目录正在使用，请等待当前操作结束") from error
         port_file = profile / "DevToolsActivePort"
-        port_file.unlink(missing_ok=True)
         server = hashlib.sha256(str(profile).encode()).hexdigest()[:16]
-        args = [options["executable_path"], *options.get("args", []),
-                f"--user-data-dir={profile}", "--remote-debugging-address=127.0.0.1",
-                "--remote-debugging-port=0", f"--ego-server-name=easel-{server}",
-                "--no-first-run", "--no-default-browser-check"]
-        if options.get("headless", True):
-            args.append("--headless=new")
-        if locale := options.get("locale"):
-            args.extend([f"--lang={locale}", f"--accept-lang={locale}"])
-        if proxy := options.get("proxy"):
-            if proxy.get("username") or proxy.get("password"):
-                raise BrowserUnavailable("Ego 的持久化连接暂不支持带认证的代理，请使用本机无认证代理")
-            args.append(f"--proxy-server={proxy['server']}")
-            if bypass := proxy.get("bypass"):
-                args.append(f"--proxy-bypass-list={bypass}")
-        process = subprocess.Popen([*args, "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        cleanup.callback(_stop, process)
-        # Several legacy commands exit via SystemExit before closing their context.
-        def stop_on_exit() -> None:
-            _stop(process)
-        atexit.register(stop_on_exit)
-        cleanup.callback(atexit.unregister, stop_on_exit)
-        deadline = time.monotonic() + 15
+        # 带认证的代理不支持，直接报错，不进入重试。
+        if (proxy := options.get("proxy")) and (proxy.get("username") or proxy.get("password")):
+            raise BrowserUnavailable("Ego 的持久化连接暂不支持带认证的代理，请使用本机无认证代理")
+
+        def build_args() -> list[str]:
+            args = [options["executable_path"], *options.get("args", []),
+                    f"--user-data-dir={profile}", "--remote-debugging-address=127.0.0.1",
+                    "--remote-debugging-port=0", f"--ego-server-name=easel-{server}",
+                    "--no-first-run", "--no-default-browser-check"]
+            if options.get("headless", True):
+                args.append("--headless=new")
+            if locale := options.get("locale"):
+                args.extend([f"--lang={locale}", f"--accept-lang={locale}"])
+            if proxy := options.get("proxy"):
+                args.append(f"--proxy-server={proxy['server']}")
+                if bypass := proxy.get("bypass"):
+                    args.append(f"--proxy-bypass-list={bypass}")
+            return args
+
+        def launch_and_wait() -> str:
+            port_file.unlink(missing_ok=True)
+            process = subprocess.Popen([*build_args(), "about:blank"],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            cleanup.callback(_stop, process)
+            # Several legacy commands exit via SystemExit before closing their context.
+            def stop_on_exit() -> None:
+                _stop(process)
+            atexit.register(stop_on_exit)
+            cleanup.callback(atexit.unregister, stop_on_exit)
+            deadline = time.monotonic() + 15
+            endpoint = ""
+            while process.poll() is None and time.monotonic() < deadline:
+                if port_file.is_file():
+                    lines = port_file.read_text(encoding="utf-8").splitlines()
+                    if len(lines) >= 2 and lines[0].isdigit() and lines[1].startswith("/devtools/browser/"):
+                        endpoint = f"ws://127.0.0.1:{int(lines[0])}{lines[1]}"
+                        break
+                time.sleep(0.05)
+            if not endpoint:
+                _stop(process)
+                raise BrowserUnavailable("Ego 启动失败或连接超时；请检查 Ego 安装与账号目录，没有切换到 Chrome")
+            return endpoint
+
         endpoint = ""
-        while process.poll() is None and time.monotonic() < deadline:
-            if port_file.is_file():
-                lines = port_file.read_text(encoding="utf-8").splitlines()
-                if len(lines) >= 2 and lines[0].isdigit() and lines[1].startswith("/devtools/browser/"):
-                    endpoint = f"ws://127.0.0.1:{int(lines[0])}{lines[1]}"
-                    break
-            time.sleep(0.05)
+        for attempt in range(2):
+            try:
+                endpoint = launch_and_wait()
+            except BrowserUnavailable:
+                # 没能拿到端口：多半是同画像的旧 Ego 进程仍占着账号目录，新实例直接退出。
+                # 空间 id 由目录路径哈希派生、目录会按需重建，清理旧实例后重试一次即可拿到干净空间。
+                _reap_stale_ego(profile, server)
+                continue
+            break
         if not endpoint:
             raise BrowserUnavailable("Ego 启动失败或连接超时；请检查 Ego 安装与账号目录，没有切换到 Chrome")
         connection = playwright.chromium.connect_over_cdp(endpoint, timeout=15000)

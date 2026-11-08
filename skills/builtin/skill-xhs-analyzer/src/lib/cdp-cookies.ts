@@ -107,6 +107,25 @@ async function getDebuggerWebSocketUrl(): Promise<string | null> {
   }
 }
 
+/**
+ * Poll for the CDP WebSocket endpoint. launchChromeHeadless only guarantees
+ * that /json/version is reachable, but the webSocketDebuggerUrl field (and the
+ * DevTools port itself) can lag on a slow or contended start. Polling here
+ * mirrors the retry safety net used by the Ego path so a slow endpoint
+ * recovers instead of giving up after a single 3s shot.
+ */
+async function pollDebuggerWebSocketUrl(
+  log: CdpLogger,
+  maxAttempts = 8
+): Promise<string | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const url = await getDebuggerWebSocketUrl();
+    if (url) return url;
+    await sleep(500);
+  }
+  return null;
+}
+
 async function getCookiesFromCdp(wsUrl: string): Promise<CdpCookie[]> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(wsUrl);
@@ -281,6 +300,39 @@ function cleanupTempDir(dir: string, log: CdpLogger): void {
   }
 }
 
+/**
+ * Launch Chrome headless and obtain its CDP WebSocket URL. Returns null if the
+ * launch fails or the DevTools endpoint never comes up, so the caller can fall
+ * back to a temporary profile copy. The temp copy is always safe: this module
+ * targets the user's MAIN Chrome profile (getChromeUserDataDir), so it must
+ * never reap the live browser — only the child we spawned here is ever killed.
+ */
+async function attemptLaunch(
+  chromeBinary: string,
+  userDataDir: string,
+  profile: string | undefined,
+  log: CdpLogger
+): Promise<{ process: ChildProcess; wsUrl: string } | null> {
+  try {
+    const child = await launchChromeHeadless(
+      chromeBinary,
+      userDataDir,
+      profile,
+      log
+    );
+    const wsUrl = await pollDebuggerWebSocketUrl(log);
+    if (!wsUrl) {
+      log("Could not obtain Chrome DevTools WebSocket URL after launch.");
+      child.kill();
+      return null;
+    }
+    return { process: child, wsUrl };
+  } catch (err) {
+    log(err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -330,42 +382,41 @@ export async function extractCookiesViaCdp(options?: {
     }
     log("User data dir: " + userDataDir);
 
-    try {
-      launchedProcess = await launchChromeHeadless(
-        chromeBinary,
-        userDataDir,
-        options?.profile,
-        log
-      );
-      wsUrl = await getDebuggerWebSocketUrl();
-    } catch (err) {
-      log(err instanceof Error ? err.message : String(err));
+    // Try launching Chrome headless against the main profile.
+    let attempt = await attemptLaunch(
+      chromeBinary,
+      userDataDir,
+      options?.profile,
+      log
+    );
 
-      // Profile lock detected — retry with a temp copy of the profile
-      const isProfileLock =
-        err instanceof Error && err.message.includes("Chrome exited immediately");
+    if (attempt) {
+      launchedProcess = attempt.process;
+      wsUrl = attempt.wsUrl;
+    } else {
+      // The launch failed or the DevTools endpoint never came up. This is the
+      // classic profile-lock / lingering-instance case — the same failure the
+      // Ego path now reaps + retries. Fall back to a temporary copy of the
+      // profile, which is safe because it never touches the live Chrome
+      // (getChromeUserDataDir points at the user's MAIN profile, so we must
+      // not reap it).
+      log("");
+      log("Retrying with a temporary copy of the Chrome profile...");
+      const profileName = options?.profile || "Default";
+      tempDir = copyProfileToTempDir(userDataDir, profileName, log);
 
-      if (isProfileLock) {
-        log("");
-        log("Retrying with a temporary copy of the Chrome profile...");
-        const profileName = options?.profile || "Default";
-        tempDir = copyProfileToTempDir(userDataDir, profileName, log);
-
-        if (tempDir) {
-          try {
-            launchedProcess = await launchChromeHeadless(
-              chromeBinary,
-              tempDir,
-              profileName,
-              log
-            );
-            wsUrl = await getDebuggerWebSocketUrl();
-          } catch (retryErr) {
-            log(retryErr instanceof Error ? retryErr.message : String(retryErr));
-            cleanupTempDir(tempDir, log);
-            return null;
-          }
+      if (tempDir) {
+        attempt = await attemptLaunch(
+          chromeBinary,
+          tempDir,
+          profileName,
+          log
+        );
+        if (attempt) {
+          launchedProcess = attempt.process;
+          wsUrl = attempt.wsUrl;
         } else {
+          cleanupTempDir(tempDir, log);
           return null;
         }
       } else {

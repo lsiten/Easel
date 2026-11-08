@@ -157,13 +157,70 @@ def test_failed_ego_process_releases_lock_without_starting_chrome(installed, tmp
     process = Mock()
     process.poll.return_value = 1
     monkeypatch.setattr(browser.subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(browser, "_reap_stale_ego", Mock())
     profile = str(tmp_path / "platform")
-    # When / Then: retry also reaches startup, proving the failed attempt released its lock.
+    # When / Then: the reap-on-failure path re-tries each call, proving the failed attempt released its lock.
     for _ in range(2):
         with pytest.raises(browser.BrowserUnavailable):
             browser.launch_persistent_context(playwright, profile, {"headless": True})
-    assert browser.subprocess.Popen.call_count == 2
+    # 2 external calls x 2 internal attempts (launch + reap-then-retry) == 4 launches.
+    assert browser.subprocess.Popen.call_count == 4
     native_launch.assert_not_called()
+
+
+def test_stale_ego_instance_is_reaped_then_retry_recovers(installed, tmp_path, monkeypatch):
+    # Given: a lingering Ego holds the profile, so the first launch can't emit a CDP port.
+    installed("ego")
+    profile = tmp_path / "platform"
+    attempts = {"n": 0}
+
+    def start(args, **kwargs):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            failed = Mock()
+            failed.poll.return_value = 1  # Ego exits at once: the profile is held by an old instance
+            return failed
+        (profile / "Ego" / "DevToolsActivePort").write_text("12345\n/devtools/browser/owned", encoding="utf-8")
+        ok = Mock()
+        ok.poll.return_value = None
+        return ok
+
+    monkeypatch.setattr(browser.subprocess, "Popen", Mock(side_effect=start))
+    monkeypatch.setattr(browser, "_reap_stale_ego", Mock())
+    connect = Mock(return_value=SimpleNamespace(new_context=Mock(
+        return_value=SimpleNamespace(close=Mock(), storage_state=Mock())), close=Mock()))
+    playwright = SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=connect))
+    # When
+    browser.launch_persistent_context(playwright, str(profile), {"headless": True})
+    # Then: the first failure reaped the stale instance and the retry connected exactly once.
+    assert attempts["n"] == 2
+    assert connect.call_count == 1
+    assert browser._reap_stale_ego.call_count == 1
+
+
+def test_space_id_is_derived_from_profile_path_hash_not_hardcoded(installed, tmp_path, monkeypatch):
+    # Given
+    installed("ego")
+    profile = tmp_path / "platform"
+    process = Mock()
+    process.poll.return_value = None
+    monkeypatch.setattr(browser, "_reap_stale_ego", Mock())
+
+    def start(args, **kwargs):
+        (profile / "Ego" / "DevToolsActivePort").write_text("12345\n/devtools/browser/owned", encoding="utf-8")
+        return process
+
+    monkeypatch.setattr(browser.subprocess, "Popen", Mock(side_effect=start))
+    connect = Mock(return_value=SimpleNamespace(new_context=Mock(
+        return_value=SimpleNamespace(close=Mock(), storage_state=Mock())), close=Mock()))
+    playwright = SimpleNamespace(chromium=SimpleNamespace(connect_over_cdp=connect))
+    # When
+    browser.launch_persistent_context(playwright, str(profile), {"headless": True})
+    # Then: the space id is a hash of the resolved profile path, never a hardcoded literal.
+    import hashlib
+    args = browser.subprocess.Popen.call_args.args[0]
+    server = hashlib.sha256(str((profile / "Ego").resolve()).encode()).hexdigest()[:16]
+    assert f"--ego-server-name=easel-{server}" in args
 
 
 def test_ego_connects_only_to_its_profile_and_close_reaps_process(installed, tmp_path, monkeypatch):
