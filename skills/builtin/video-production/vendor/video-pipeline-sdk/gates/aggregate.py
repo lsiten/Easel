@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""七件门聚合 -> gate-report.md + gate-report.json（支持 verify / render 双相与报告合并）
+"""九件门聚合 -> gate-report.md + gate-report.json（支持 verify / render 双相与报告合并）
 
 配置：<run-dir>/gates.json
   {"gates": [

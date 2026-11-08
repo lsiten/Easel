@@ -141,12 +141,42 @@ python skills/builtin/card-design/scripts/card_audit.py audit -f "outputs/主题
 
 任一非 0 退出 → 修改后重跑，直到通过。不交付未校验的产物。
 
+### Step 9 — 发布前预览 + 自检门禁（强制，发布前最后一道门）
+
+发布前必须**先把「真实发布效果」做出来、先自检**——没问题才交付用户确认，确认无误才真发：
+
+```bash
+# ① 生成小红书图文预览（还原真实小红书图文展示交互：竖图轮播/左右滑动 + 计数/点点、
+#    标题、caption 正文、蓝色话题、作者行、点赞/收藏/评论/转发互动条）。
+#    预览是单个 .html 文件，App「产物/输出」页用可交互 iframe 直接渲染——用户点开即见
+#    真实发布后读者看到的样子（所见即所得），零前端改动。
+python3 skills/shared/scripts/xhs_preview.py preview outputs/主题名
+
+# ② 基于预览自检（渲染预览截图 + 内容/视觉/合规/去AI味 确定性检查 → 报告 + verdict）
+python3 skills/shared/scripts/xhs_preview.py check outputs/主题名
+```
+
+**门禁规则（`check` 的 verdict，逐条处理）**：
+- `PASS` → 把预览交付用户确认；用户确认无误 → 才进 [skill-xhs-publisher](../skill-xhs-publisher/SKILL.md) 真发。
+- `WARN`（长度/去AI味瑕疵，列出但不阻断）→ 逐条评估，能改就改后重跑；确认确可接受才放行。
+- `FAIL`（缺渲染图 / 单卡溢出 / 正文引流 / 绝对化用语 / 卡片非 3:4）→ 必须返工：
+  - 视觉类 → 回 [card-xiaohongshu](../card-xiaohongshu/SKILL.md) 按「欠填修正阶梯」重渲；
+  - 文案类 → 回 [text-polisher](../text-polisher/SKILL.md) 去AI味 / 本 SKILL Step 6 改 caption、hashtag；
+  - 引流 / 绝对化 → 删除正文引流与绝对化用语（小红书禁）。
+  改完 **重渲卡片 → 重生成预览 → 重跑 `check`**，直到 `PASS`。
+- `BLOCK`（内容安全闸门命中，如密钥/内部信息，退出码 7）→ 一律拦下，脱敏后重发。
+
+> 预览**不是**最终发布产物，是「发布前让用户看到真实效果、并据此自检」的门禁视图。
+> 真正发布只发生在 **Step 8 校验 + 本 Step 9 自检全 PASS、且用户确认预览无误**之后。
+> 详情见 [references/preview-gate.md](references/preview-gate.md)。
+
 ## 不要做的事
 
 - 不写 H1；标题只放 `meta.json.title`
 - 不在正文末尾写参考来源
 - 不在 `.md` 里留 `【插入图片】` 占位符
-- 不跳过 Step 4（去 AI 化）和 Step 8（validate）
+- 不跳过 Step 4（去 AI 化）、Step 8（validate）和 Step 9（发布前预览 + 自检）
+- 未 `PASS`（或未过 WARN 复核）不发布、不交付；预览未 `PASS` 前不真发、不导出
 - 不手算目录名，一律走 `normalize_slug.py`
 
 ## Profile 感知
@@ -158,6 +188,7 @@ python skills/builtin/card-design/scripts/card_audit.py audit -f "outputs/主题
 
 - Python 3.8+、Pillow（必需，真实照片卡路径）
 - playwright + chromium（`html_card` 路径渲染卡片，走 card-xiaohongshu；首次 `pip install playwright && playwright install chromium`）
+- `xhs_preview.py`（发布前预览 + 自检：`preview` 只需读 meta+卡图；`check` 需 playwright 渲染预览截图做视觉复核）
 
 ## 参考资料
 
@@ -168,4 +199,5 @@ python skills/builtin/card-design/scripts/card_audit.py audit -f "outputs/主题
 - `references/material-intake.md` — 素材处理流程
 - `references/image-sourcing.md` — 图片来源处理
 - `references/meta-schema.md` — 元数据字段定义
+- `references/preview-gate.md` — 发布前预览 + 自检门禁（Step 9）
 - `references/output-spec.md` — 输出目录规范

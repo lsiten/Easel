@@ -19,7 +19,7 @@ h1{font-size:21px;font-weight:600;letter-spacing:.5px}
 .opt .mk{width:18px;height:18px;border:1.5px solid #b9c2cc;border-radius:6px;flex:none;margin-top:1px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;font-family:system-ui}
 .opt.radio .mk{border-radius:50%}
 .opt.on .mk{background:var(--celadon);border-color:var(--celadon)}
-.opt.on .mk::after{content:'✓'}
+.opt.on .mk::after{content:'';width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);margin-top:-2px}
 .opt .txt{font-size:14.5px;line-height:1.5;font-family:system-ui}
 .opt .txt small{display:block;color:var(--sub);font-size:12px;margin-top:3px}
 .opt img{width:74px;height:44px;object-fit:cover;border-radius:8px;border:1px solid var(--line);flex:none}
@@ -34,6 +34,7 @@ button{border:0;border-radius:12px;padding:10px 22px;font-size:14px;font-family:
 button:hover{filter:brightness(1.06)}
 button:disabled{opacity:.45;cursor:default}
 .done{color:var(--ok);font-weight:600;font-family:system-ui;font-size:13.5px;display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:12px}
+.done::before{content:'';flex:none;width:6px;height:11px;border:solid var(--ok);border-width:0 2px 2px 0;transform:rotate(45deg);margin-top:-3px}
 .foot{color:var(--sub);font-size:12px;text-align:center;margin-top:26px;font-family:system-ui}
 </style></head><body><div class="wrap">
 <h1>视频产线 · 问询卡面</h1>
@@ -94,7 +95,7 @@ function render(q){
     const ok=(await r.json().catch(()=>({ok:false}))).ok;
     if(ok){
       bt.style.display='none';
-      const d=document.createElement('div');d.className='done';d.textContent='✓ 已提交，落盘 answers/'+q.id+'.json';
+      const d=document.createElement('div');d.className='done';d.textContent='已提交，落盘 answers/'+q.id+'.json';
       el.querySelector('.actions').replaceWith(d);
     }else{bt.disabled=false;bt.textContent='提交失败，重试';}
   };

@@ -58,6 +58,7 @@ layer: publish
 check（环境就绪？）
   → 未登录 → login（有头扫码，一次即可）
   → plan（dry-run 预检：标题长度/媒体路径/步骤）— 给用户确认最终标题、正文、图片/视频
+  → 发布前预览 + 自检门禁（图文：`xhs_preview.py check <note_dir>`，必须 `PASS`/`WARN`复核通过；见下）
   → 发布前人设检查（见下）
   → publish / publish-video --exec（首次建议加 --headed 校验选择器，OK 后 headless 复跑）
   → 成功校验（脚本内置：URL 离开 /publish/publish 才算成功）
@@ -82,12 +83,25 @@ python skills/builtin/skill-publish-log/scripts/log.py record --platform 小红�
 ## 必做约束
 
 - 发布前必须让用户确认最终标题、正文、图片/视频（先跑 `plan` 展示）。
+- **发布前预览 + 自检门禁（图文必做）**：先 `python3 skills/shared/scripts/xhs_preview.py preview <note_dir>` 生成还原真实小红书图文展示的 `xhs_preview.html`（App 产物页可交互渲染），再 `xhs_preview.py check <note_dir>` 自检；`FAIL`/`BLOCK` 一律返工/拦下，`WARN` 复核、`PASS` 且用户确认预览无误，才 `--exec` 真发。
+  预览＝发布前「所见即所得」门禁视图，非最终产物；不导出 MP4（那是视频链路）。
 - 图文发布必须有图片，视频发布必须有视频；图片与视频不可混用（二选一）。
 - 标题 ≤ 20 全角字（脚本 `calc_title_length` 按小红书口径校验，超限直接拦下）。
 - 文件路径必须为**绝对路径**（脚本会解析并校验存在）。
 - 首次发布或疑似平台改版：先加 `--headed` 观察，校验通过再 headless 批量。
 - 发布页结构异常时，改 `xhs_publish.py` 顶部的 **`SELECTORS` 字典**（选择器单点集中维护，
   每条标注了参考源），不要散改流程。
+
+## 发布前预览 + 自检门禁（图文，发布前必过）
+
+```bash
+# 生成预览（还原真实小红书图文展示：竖图轮播/滑动 + 标题 + caption + 话题 + 作者 + 互动条）
+python3 skills/shared/scripts/xhs_preview.py preview outputs/主题名
+# 自检：渲染预览截图 + 内容/视觉/合规/去AI味；PASS 才 --exec 真发
+python3 skills/shared/scripts/xhs_preview.py check outputs/主题名
+```
+
+详见 [xhs-note-creator/references/preview-gate.md](../xhs-note-creator/references/preview-gate.md)。
 
 ## 命令样例
 

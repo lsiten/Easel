@@ -69,6 +69,17 @@ layer: publish
 - 其他组合 → 整体 ⚠️ 需修改
 - 输出 Top 3 优先修改建议
 
+## 小红书图文：发布前预览 + 自检门禁
+
+小红书图文（图文卡 + caption + 话题）发布前，除本关卡的合规/质量两道把关外，**必须再过一道「基于真实发布效果预览」的自检**（把真实展示先做出来、先看到、再自检）：
+
+```bash
+python3 skills/shared/scripts/xhs_preview.py preview outputs/主题名   # 生成 xhs_preview.html（App 可交互渲染）
+python3 skills/shared/scripts/xhs_preview.py check   outputs/主题名   # 渲染预览截图 + 内容/视觉/合规/去AI味 自检
+```
+
+`FAIL`/`BLOCK` 返工/拦下，`WARN` 复核、`PASS` 且用户确认预览无误才发布。详见 [xhs-note-creator/references/preview-gate.md](../xhs-note-creator/references/preview-gate.md)。
+
 ## Profile 感知
 
 - **有 Profile**：读取 platform 加载平台规则、检查风格适配

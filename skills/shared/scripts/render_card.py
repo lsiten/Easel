@@ -44,18 +44,43 @@ def _env_proxy() -> str | None:
     return None
 
 
+def _emoji_preflight(html_text: str, fail: bool) -> bool:
+    """渲染前对 HTML 源码做确定性「禁 emoji」检测。默认只告警，--fail-on-emoji 才 FAIL。"""
+    try:
+        from check_no_emoji import scan_text
+    except Exception:  # noqa: BLE001
+        return False
+    hits = scan_text(html_text)
+    if not hits:
+        return False
+    sample = ", ".join(f"{ch} U+{ord(ch):04X}" for _ln, ch in hits[:8])
+    more = f" 等{len(hits)}个" if len(hits) > 8 else f"（共{len(hits)}个）"
+    msg = f"⚠ 卡片源码检出 emoji 图标：{sample}{more} —— 换线性图标(SVG)/纯排版（见 card-design/icons-library.html）。"
+    if fail:
+        print("[FAIL] " + msg, file=sys.stderr)
+        return True
+    print("[WARN] " + msg, file=sys.stderr)
+    return False
+
+
 async def _render(args) -> int:
+    html_path = Path(args.html).resolve()
+    if not html_path.is_file():
+        print(f"ERROR: HTML 文件不存在: {html_path}", file=sys.stderr)
+        return 2
+    try:
+        html_text = html_path.read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        html_text = ""
+    if _emoji_preflight(html_text, getattr(args, "fail_on_emoji", False)):
+        return 2
+
     try:
         from playwright.async_api import async_playwright
     except ImportError:
         print("ERROR: 未安装 playwright。请运行：pip install playwright && playwright install chromium",
               file=sys.stderr)
         return 3
-
-    html_path = Path(args.html).resolve()
-    if not html_path.is_file():
-        print(f"ERROR: HTML 文件不存在: {html_path}", file=sys.stderr)
-        return 2
 
     fmt = args.format
     proxy = args.proxy or _env_proxy()
@@ -182,6 +207,8 @@ def main() -> int:
     ap.add_argument("--wait", type=int, default=1200, help="渲染等待毫秒（默认 1200，等字体）")
     ap.add_argument("--nav-timeout", type=int, default=20000, help="页面加载超时毫秒（默认 20000，超时也继续）")
     ap.add_argument("--proxy", help="外网代理（默认读 https_proxy/http_proxy 环境变量，供 CDN/字体加载）")
+    ap.add_argument("--fail-on-emoji", action="store_true",
+                    help="渲染前先跑「禁 emoji」门禁，检出 emoji 即 FAIL（exit 2）")
     ap.add_argument("--selftest", action="store_true", help="运行渲染自检")
     args = ap.parse_args()
 

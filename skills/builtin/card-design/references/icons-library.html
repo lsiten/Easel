@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>card-design · 线性图标库（替代 emoji）</title>
+<style>
+:root{--ink:#1f2933;--sub:#6b7280;--line:#e8e2d8;--accent:#158f9a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"PingFang SC","Noto Sans SC","Microsoft YaHei",system-ui,serif;color:var(--ink);
+ background:#faf7f2;padding:32px 22px;line-height:1.6}
+h1{font-size:20px;font-weight:600;letter-spacing:.4px}
+h2{font-size:14px;font-weight:600;color:var(--accent);margin:26px 0 10px;letter-spacing:.06em}
+p.lead{color:var(--sub);font-size:13px;margin:6px 0 18px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.i{display:flex;flex-direction:column;align-items:center;gap:6px;border:1px solid var(--line);
+ border-radius:10px;padding:14px 8px;background:#fff}
+.i svg{width:28px;height:28px;color:var(--ink)}
+.i .nm{font-size:11px;color:var(--sub)}
+.i .zh{font-size:12px;font-weight:600}
+code{background:#f1ede4;padding:1px 5px;border-radius:5px;font-size:11.5px;color:#8a5a00}
+table{border-collapse:collapse;width:100%;margin-top:8px;font-size:12.5px}
+th,td{border:1px solid var(--line);padding:6px 9px;text-align:left}
+th{background:#f1ede4;font-weight:600}
+.note{font-size:12px;color:var(--sub);margin-top:6px}
+.hl{color:var(--accent);font-weight:600}
+</style></head><body>
+<h1>card-design · 线性图标库（替代 emoji）</h1>
+<p class="lead">规则（<code>anti-ai-slop.md</code> P0）：<b>禁 emoji 当图标</b>。需要图标时，从本库取一个
+ Lucide 线性图标（stroke 1.5、24 网格、<code>currentColor</code>、无 fill），或纯排版——
+ <span class="hl">绝不</span>用 emoji。每处最多 1 个图标，颜色只用 accent / 灰 / 墨。</p>
+<p class="lead">用法：把下方 <code>&lt;svg&gt;…&lt;/svg&gt;</code> 整段复制进卡片 HTML，
+ <code>width/height</code> 按需要改（24/32/48），<code>color</code> 用 CSS 控制
+ （<code>color:var(--accent)</code> 即描边色）；描边粗细 <code>stroke-width="1.5"</code> 固定。</p>
+
+<h2>常用图标（语义 → 线性图标）</h2>
+<div class="grid">
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span class="zh">写方案/写</span><span class="nm">edit</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg><span class="zh">改文案/字</span><span class="nm">type</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg><span class="zh">搭页面/版</span><span class="nm">layout-grid</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg><span class="zh">完成/勾</span><span class="nm">check</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg><span class="zh">下一步/箭</span><span class="nm">arrow-right</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><span class="zh">信息/提示</span><span class="nm">info</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><span class="zh">警示/注意</span><span class="nm">alert-triangle</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.581a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"/></svg><span class="zh">灵感/亮点</span><span class="nm">sparkles</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/></svg><span class="zh">文档/方案</span><span class="nm">file-text</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg><span class="zh">清单/板</span><span class="nm">clipboard</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .8 1.6l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg><span class="zh">效率/省</span><span class="nm">zap</span></div>
+<div class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.68a.5.5 0 0 0-.86 0l-9.9 15a.5.5 0 0 0 .43.75h19.78a.5.5 0 0 0 .43-.75z"/><path d="M12 2v20"/></svg><span class="zh">对比/分</span><span class="nm">layers</span></div>
+</div>
+
+<h2>双栏 / 对比卡 · 配色与图标位（对齐 OpenMontage 做法）</h2>
+<p class="lead">「禾城」这类双栏卡的问题不是缺图标，是<b>用 emoji 当图标 + flex 居中</b>。
+ 正解：等宽双栏 + 一条 2px 分隔线 + 每栏顶部一条 48×4 色条（色=立场色，不渐变）+ 图标用上面 SVG。</p>
+<table>
+<tr><th>语义（你的词）</th><th>用这个图标</th><th>别用</th></tr>
+<tr><td>写方案 / 写</td><td><code>edit</code></td><td>铅笔符号</td></tr>
+<tr><td>改文案 / 改</td><td><code>type</code></td><td>便签符号</td></tr>
+<tr><td>搭页面 / 排版</td><td><code>layout-grid</code></td><td>砖块符号</td></tr>
+<tr><td>完成 / 做到</td><td><code>check</code></td><td>彩色对勾</td></tr>
+<tr><td>下一步 / 推进</td><td><code>arrow-right</code></td><td>右箭头(纯文字即可)</td></tr>
+<tr><td>省重复 / 效率</td><td><code>zap</code></td><td>闪电符号</td></tr>
+<tr><td>提示 / 注意</td><td><code>info</code> / <code>alert-triangle</code></td><td>信息/警告符号</td></tr>
+<tr><td>亮点 / 关键</td><td><code>sparkles</code></td><td>星星/灯泡符号</td></tr>
+</table>
+<p class="note">没有对应图标就<b>纯排版</b>（色条 / 序号 / 发丝线），宁可不用图标也不上 emoji。
+ 勾用 <code>check</code> 图标，或用 CSS 描边画的勾（<code>::after</code> 里旋转 border 画勾 / 内联 check 的 SVG 描边），绝不用彩色对勾符号。</p>
+
+<h2>渲染前必跑（确定性门禁）</h2>
+<p class="lead">卡片 HTML 写好后、出图前，跑一遍「禁 emoji」门禁；检出 emoji 即 FAIL，换图标重渲。
+ 已内置进 <code>render_card.py --fail-on-emoji</code>（渲染前自动跑）；也可单独跑：</p>
+<p class="lead"><code>python skills/shared/scripts/check_no_emoji.py --html outputs/主题名/card.html</code></p>
+<p class="lead">同时跑密度门禁 <code>card_audit.py</code>（死空白/填满）。两个都 PASS 才交付。</p>
+</body></html>

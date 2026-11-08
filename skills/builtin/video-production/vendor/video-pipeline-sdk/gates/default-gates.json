@@ -37,6 +37,12 @@
       "cmd": "{python} gates/check_dup.py --scenes \"{run_dir}/artifacts/scenes.json\""
     },
     {
+      "id": "no-emoji",
+      "title": "卡片/帧源码无 emoji 图标（线性 SVG / 纯排版替代）",
+      "phase": "verify",
+      "cmd": "{python} gates/check_no_emoji.py --dir {run_dir}/workdir"
+    },
+    {
       "id": "final-exists",
       "title": "成片已生成",
       "phase": "render",

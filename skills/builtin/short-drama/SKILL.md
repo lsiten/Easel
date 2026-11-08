@@ -8,7 +8,7 @@ layer: produce
 ---
 
 # AI 短剧制作（横屏/竖屏微短剧，多集）
-> **配置检查路径铁律**：整条流水线开始前先 `cd` 到运行时说明给出的 Easel 项目根，确认 `.env` 与 `skills/shared/scripts/` 存在。生图、视频、配音配置必须从这里运行注册表/`check`；不得在任何执行引擎的 workspace 或共享脚本副本中检查，不得用 `env` / `printenv` 判定缺少 `IMG_BASE_URL`、`VOICE_BASE_URL` 或 Key。发现缺项先核对 `pwd`，回项目根并显式传 `--env-file .env` 重查。
+> **配置检查路径铁律**：整条流水线开始前先 `cd` 到运行时说明给出的 Easel 项目根，确认 `skills/shared/scripts/` 存在并检查项目 `.env`。生图、视频、配音配置必须从这里运行注册表/`check`；不得在任何执行引擎的 workspace 或共享脚本副本中检查，不得用 `env` / `printenv` 判定缺少 `IMG_BASE_URL`、`VOICE_BASE_URL` 或 Key。发现缺项先核对 `pwd`，回项目根并显式传 `--env-file .env` 重查。系统生图配置缺项或 `.env` 不存在时，按 [ai-image-gen](../ai-image-gen/SKILL.md) 检查并使用底座生图工具；这不替代视频、配音各自的配置检查。
 ## ⛔ 三条铁律（最容易翻车，动手前先记死）
 
 1. **每镜必须「图生视频」成动态片段——绝不能拿静态图冒充。** 关键帧图(frame)只是 I2V 的**首帧**，必须再用 **ai-video-gen `image2video`** 驱动成会动的 `clip`。跳过这步 = 一堆静态图配音，垃圾。合成前 `storyboard` 会**硬拦**只有 frame 没 clip 的镜头。

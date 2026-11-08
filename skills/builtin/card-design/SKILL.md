@@ -22,17 +22,21 @@ layer: produce
 2. **锁定该风格的 spec**：`styles.md` 里选中风格给了**字体(family+字重)+配色(hex)+版式性格+装饰**——**严格照它**，整套卡片全程只用这一套，不自由发挥、不换色。（配色细节另见 `palettes.md`）
 3. **定字体层级**：按 `typography.md`——「**字越大越细**」（字体已装 Noto Sans/Serif CJK 全字重，大标题用 Thin/Light）。手机端正文 ≥28px。
 4. **套骨架**：从 `card-recipes.md` 选卡型骨架(封面/账本/管线/对比/矩阵/数据/金句)，按其**最小密度线**填内容。
-5. **渲染后自检**（硬门禁）：
+5. **渲染前/后双门禁**（两条都跑，全 PASS 才交付）：
    ```bash
+   # 门禁 A · 禁 emoji（出图前拦截；render_card.py --fail-on-emoji 会跑同一条）
+   python skills/shared/scripts/check_no_emoji.py --html outputs/主题名/<card>.html
+   # 门禁 B · 填满/密度
    python skills/builtin/card-design/scripts/card_audit.py audit -f outputs/主题名/card_*.png
    ```
-   任何 FAIL(死空白/跨度不足/头重脚轻)→ 按 `layout-laws.md`「欠填修正阶梯」补内容或换骨架**重渲**，全 PASS 再交付。
+   - **A 命中 emoji** → 换 `references/icons-library.html` 的线性图标/纯排版后重渲（一个都不留，宁可不画图标）。
+   - **B FAIL(死空白/跨度不足/头重脚轻)** → 按 `layout-laws.md`「欠填修正阶梯」补内容或换骨架**重渲**。
 
 ## 铁律速查（详见 references）
 
 - **填满**:内容覆盖 ≥75% 画高;任何**无理由**空白带 >15% 画高 = 失败。内容少就**扩内容/换省高骨架/换 1:1 画幅**,**绝不**用 `flex:1` 把内容顶成垂直居中、**绝不**加装饰 blob 填空。→ `layout-laws.md`
 - **字越大越细**:大标题 w200-500,小字才用粗体。全用 700 粗黑体 = 廉价 banner。→ `typography.md`
-- **禁 emoji 当图标**:用线性图标(Lucide,stroke 1.5,棱角款)或纯排版。→ `anti-ai-slop.md`
+- **禁 emoji 当图标(P0 硬门禁)**:需要图标就取 `references/icons-library.html` 的 Lucide 线性图标(stroke 1.5 / 24 网格 / `currentColor` / 无 fill)或纯排版;渲染前必跑 `check_no_emoji.py`,检出即 FAIL 重渲。→ `anti-ai-slop.md`
 - **禁蓝紫科技渐变**(头号 AI tell)、禁 `bg-clip-text` 渐变字、禁玻璃拟态、禁"居中一切"。→ `anti-ai-slop.md`
 - **正文永远不用纯黑**,用深灰/深墨(#6B6560 / #0a1f3d 等)。
 - 瑞士立场:**零圆角、零阴影、禁渐变**,靠色块+发丝线+网格。杂志立场:小圆角、仅截图给极柔阴影、必须有背景氛围层(极淡纸纹/墨晕)。
@@ -44,6 +48,7 @@ layer: produce
 - `typography.md` — 中文字体层级、"越大越细"、最小字号死线、中英混排(Noto Sans/Serif CJK 全字重)。
 - `layout-laws.md` — 填满画幅法则、4带密度自检、欠填/溢出修正阶梯(治死空白)。
 - `anti-ai-slop.md` — AI 廉价感 P0/P1/P2 反例清单 + 高杠杆去 AI 味动作。
+- `icons-library.html` — **替代 emoji 的线性图标库**（Lucide 风格 + 语义→图标映射，复制进卡片 HTML）+ `check_no_emoji.py` 门禁用法。
 - `card-recipes.md` — 按卡型/品类的骨架 + 每种的最小密度线。
 
 ## Profile 感知

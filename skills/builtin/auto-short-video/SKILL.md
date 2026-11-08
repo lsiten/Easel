@@ -16,6 +16,7 @@ layer: produce
 - 主题 / 文案（必填）
 - 可选：目标时长、风格、是否要配音/字幕/BGM、配图用 AI 生图还是用户素材
 - **画幅确认硬门**：用户或上游任务未明确横版/竖版（或 16:9/9:16/具体分辨率）时，制作/付费调用前必须追问并等确认；不得从平台、Profile 或默认值静默推断，已明确则不重复问
+- **意图门（brief 模糊时）**：用户只给一句模糊主题（"帮我做个视频""做个关于 X 的"）且未明确 目的/受众/平台/调性/参考/期望/约束 时，先经 [creative-intake](../creative-intake/SKILL.md) 补齐（自然对话，不是问卷），再开跑；brief 已清晰或用户已确认方案则不重复问
 
 ## 输出
 
@@ -30,6 +31,17 @@ layer: produce
    - 要动态 → [ai-video-gen](../ai-video-gen/SKILL.md) text2video/image2video
    - 用户自带素材 → 用 [image-editing](../image-editing/SKILL.md) `pad` 到已确认画幅
    - 都没有 → 按已确认画幅选图卡（竖版用 card-xiaohongshu/poster-hero，横版用 card-quote）再 pad，避免画幅错配。
+
+   **逐段 motion 判定（参考驱动必做）**：参考一条视频做"类似的"时（经 [video-reference-analyst](../video-reference-analyst/SKILL.md)），
+   按逐段 `motion_type` 决定每段用什么——**不要整条一律用图或一律用视频**：
+   - `motion_clip`（真动态：物体/人在动）→ 该段**优先 [stock-footage](../stock-footage/SKILL.md) 抓现成实拍/空镜（真实动态、免 key、免版税）**，搜不到或不匹配（<3 分）才降级 [ai-video-gen](../ai-video-gen/SKILL.md) 图生/文生视频
+   - `animated_still`（静图 + Ken Burns/缩放）→ 该段用 [ai-image-gen](../ai-image-gen/SKILL.md) 出图 + assemble 的 `ken-burns`
+   - `static_image`（纯静图）→ 该段出图 + 静帧/补边
+   把判定写进 storyboard 各镜的 `motion` 字段；参考里是混合就逐段标清，别用静图冒充动态、也别用视频冒充静图。
+
+   **Sample-first（参考驱动先出样片）**：参考驱动时先做 10-15s 样片（钩子 + 1 个中段镜头），
+   展示给用户（`<video src="/api/media/...">`）+ 样片成本 vs 全片预估成本，过审再跑全片；
+   从一句话主题无中生有、用户已确认方案时可跳过样片直接出片。
 
 3. **配音**：[tts-voiceover](../tts-voiceover/SKILL.md) 把文案合成口播（同时出 SRT）。**配了 `VOICE_PROVIDER` 默认走闭源好嗓子**（有情感、像真人），没 key 才退 edge（机械）——想要口播不"生硬"务必配闭源 key。不需要配音才跳过。
 
@@ -77,6 +89,7 @@ layer: produce
 ## 编排原则
 
 - **零件可缺**：缺图像/视频/TTS API key 的环节自动降级（图卡兜底 / 跳过配音），不阻断整体，并如实告知用户降级了什么。
+- **真动态优先现成实拍**：`motion_clip` 段先走 [stock-footage](../stock-footage/SKILL.md)（免 key 实拍/空镜），搜不到或不匹配才降级 [ai-video-gen](../ai-video-gen/SKILL.md)——别把静图 Ken Burns 冒充动态。
 - **先出 Plan**：涉及多个付费 API（生图/生视频/生乐）时，先向用户说明将调用哪些、大致耗时/花费，确认后再跑。
 - **中间产物留档**：分镜图、配音、字幕和 storyboard 都写进 `outputs/主题名/assets/`，方便单独替换后重新合成。
 

@@ -93,7 +93,7 @@ export const FxPanel3D: React.FC = () => {
               <span style={{ marginLeft: 'auto', fontSize: 18, padding: '4px 14px', borderRadius: 999, border: '1px solid rgba(255,179,71,0.6)', color: '#ffb347' }}>v0.2</span>
             </div>
             <div style={{ height: 1, background: 'linear-gradient(90deg, rgba(77,201,246,0.8), rgba(77,201,246,0))', margin: '16px 0 18px' }} />
-            {[['PERSPECTIVE', '✓'], ['THICKNESS', '✓'], ['SHADOW', '✓']].map((r, i) => (
+            {[['PERSPECTIVE', '√'], ['THICKNESS', '√'], ['SHADOW', '√']].map((r, i) => (
               <div
                 key={i}
                 style={{

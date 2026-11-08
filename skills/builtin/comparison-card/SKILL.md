@@ -80,7 +80,8 @@ layer: produce
 3. 填充数据到模板
 4. **应用 card-design 选定风格的配色/字体**（锁 spec，全表一致；不自造配色）
 5. 设置卡片尺寸（`size` 参数）
-6. 如果 `winner` 为 true，用视觉标记（高亮/皇冠图标）标注胜出项
+6. 如果 `winner` 为 true，用 card-design 强调色高亮（不用皇冠 emoji）
+7. **图标一律取 [card-design/icons-library.html](../card-design/references/icons-library.html)** 的线性 SVG（复制 `<svg>` 进模板），**绝不**用 emoji；没有对应图标就纯排版
 
 ### Step 4 — 视觉优化
 
@@ -89,6 +90,7 @@ layer: produce
 - 胜出项用 card-design 选定风格的**强调色**高亮，劣势项用中性灰（不写死某个绿）
 - 底部加数据来源说明和日期
 - 遵守 card-design 铁律：禁蓝紫科技渐变、禁 emoji 当图标、填满不留死空白
+- **出图前跑 `check_no_emoji.py`（见下 Step 6），命中 emoji 就换 `icons-library.html` 的线性图标重做，不放行**
 
 ### Step 5 — 写入文件
 
@@ -96,10 +98,13 @@ layer: produce
 
 ### Step 6 — 渲染出图（勿手动截图）
 
-用共享脚本自动渲染成图：
+先用确定性门禁拦 emoji，再渲染（`--fail-on-emoji` 会在出图前自动跑同一条门禁，命中即失败）：
 
 ```bash
-python skills/shared/scripts/render_card.py \
+# 门禁：检出 emoji 即 FAIL（换 icons-library.html 的线性图标后重渲）
+python skills/shared/scripts/check_no_emoji.py --html outputs/主题名/assets/A_vs_B_对比.html
+
+python skills/shared/scripts/render_card.py --fail-on-emoji \
   --html outputs/主题名/assets/A_vs_B_对比.html \
   --out outputs/主题名/A_vs_B_对比.png \
   --full-page --width 1080 --height 1440

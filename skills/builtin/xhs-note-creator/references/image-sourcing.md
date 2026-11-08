@@ -4,7 +4,7 @@
 
 ## 安全图源优先级（从低风险到高风险）
 
-1. **AI 生成**（用户自备 text-to-image 服务：Nano Banana、Gemini Image、Flux、SD 等）—— 零版权风险，概念图 / 装饰图首选
+1. **AI 生成**（按 [ai-image-gen](../../ai-image-gen/SKILL.md) 优先使用系统 API；系统未配置时使用底座可用生图工具）—— 概念图 / 装饰图首选
 2. **Unsplash**（`images.unsplash.com`）—— Unsplash License，免费商用，无需署名
 3. **Pexels**（`images.pexels.com`）—— 免费商用，无需署名
 4. **Pixabay**（`pixabay.com`）—— CC0，免费商用
@@ -77,7 +77,7 @@ print(f'裁剪完成：{w}x{h} → {w}x{h-40}')
 
 ### 方法二：AI 生图替换（水印无法去除时）
 
-调用用户自备的 text-to-image 服务，提示词写作要点：
+按 `ai-image-gen` 选择系统 API 或底座生图工具，提示词写作要点：
 
 - 具体描述场景而非抽象概念
 - 加风格词：`minimalist`、`clean`、`professional`、`flat design`
