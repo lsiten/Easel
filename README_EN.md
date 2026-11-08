@@ -282,6 +282,30 @@ easel skill social-content -i "Write a post introducing spatial intelligence"
 easel skill quality-gate -i "Review this draft" -p MyCreatorProfile
 ```
 
+## 🎬 Video Production (OpenFilm subproject)
+
+Easel integrates [OpenFilm](https://github.com/openfilm/openfilm) as an **optional subproject** (`subprojects/openfilm/`, a git submodule) for AI video production. Easel's agent **drives OpenFilm to produce the video** — it does not emit `film.html` itself. Instead it runs OpenFilm's CLI and its own operating Skills (`edit` / `media` / `canvas`) end-to-end, while OpenFilm's **Studio** provides the visual editor.
+
+```bash
+easel skill video-openfilm -i "Make an explainer video about spatial intelligence"   # agent drives OpenFilm
+easel doctor                                             # includes an optional OpenFilm check
+```
+
+Installation: `setup.sh` step 7 tries to install OpenFilm (`npm i -g openfilm`, falling back to `npx`; non-fatal, never blocks install). You can also run `npm i -g openfilm` manually. When OpenFilm is ready, videos belonging to an OpenFilm project in the content library show a **Edit in Studio ↗** link that opens its Studio visual editor. If OpenFilm is not installed, other capabilities (chat, planning, text, etc.) are unaffected.
+
+## 📦 Per-Account Asset Library
+
+Easel supports an **asset library per account (profile)**: you only register material-source directories (images, videos, text) used for making videos, and Easel **auto-organizes them by content understanding** — reading text, viewing images, transcribing video — then categorizes by the understood topic into the matching directory, for later **video** and **article** creation.
+
+```bash
+easel skill asset-library -i "Register /path/to/my/assets for the current profile and organize by content"   # agent registers → understands per-item → categorizes
+python skills/shared/scripts/assets.py add <profile> <dir>                        # register a source directory
+python skills/shared/scripts/assets.py organize <profile>                          # baseline organize by type + keywords
+python skills/shared/scripts/assets.py query <profile> <topic>                     # query related assets by topic
+```
+
+The registration list lives in `profiles/asset_scopes.json` (mirroring `kb_scopes.json`); the organized tree lives in `profiles/<profile>/assets/` (category dirs + `manifest.json` + `_index.json`, files placed as symlinks with a copy fallback). The Web content library shows an **Asset Library** node to browse categories and files and to "organize assets" in one click; video/article Skills query the current profile's assets during creation.
+
 ## 🧬 Account Profiles
 
 Each profile is stored under `profiles/<name>/` and contains six dimensions: identity, style, audience, platforms, preferences and boundaries, and long-term memory.
@@ -303,6 +327,7 @@ Easel/
 ├── assets/                   Brand, README media, and imported assets
 ├── profiles/                 Account profiles
 ├── outputs/                  Content projects and final deliverables
+├── subprojects/              Third-party engine subproject (OpenFilm: AI video + Studio visualization, optional)
 ├── agents/                   Shared Agent workspace and harness support files
 └── docs/                     Specifications, capability map, and architecture docs
 ```

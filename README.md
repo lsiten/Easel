@@ -312,6 +312,45 @@ easel skill quality-gate -i "这是一段待发布文案" -p 科技数码达人
 
 Web 工作台提供同样的能力，并额外管理会话、素材、账号、画像、内容库和发布状态。拖入对话框的素材会作为结构化附件传给 Agent，用户消息只显示实际输入的文字。
 
+## 🎬 视频制作（OpenFilm 子项目）
+
+Easel 把 [OpenFilm](https://github.com/openfilm/openfilm) 作为**可选子项目**集成（`subprojects/openfilm/`，git submodule），用于 AI 视频制作。
+Easel 的 Agent 会**直接驱动 OpenFilm 去制作视频**——不是自己产出 `film.html`，而是调用 OpenFilm 的 CLI 与其自带的操作技能（`edit` / `media` / `canvas`）端到端完成；OpenFilm 的 **Studio** 提供可视化编辑。
+
+```bash
+easel skill video-openfilm -i "帮我做一段空间智能的介绍视频"   # Agent 读取技能并驱动 OpenFilm 制作
+easel doctor                                             # 含「OpenFilm（可选：视频制作 + Studio 可视化）」检查项
+```
+
+安装：`setup.sh` 的第 7 步会尝试安装 OpenFilm（`npm i -g openfilm`，失败降级为 `npx`，非致命不阻断安装）；
+也可手动 `npm i -g openfilm`。OpenFilm 就绪后，内容库里属于 OpenFilm 项目的视频会显示「**在 Studio 中编辑 ↗**」入口，
+直接打开其 Studio 可视化页面。OpenFilm 未安装时不影响聊天、策划与文本创作等其它能力。
+
+## 📦 每账号素材库
+
+Easel 支持**每个账号（画像）独立的素材库**：你只需把制作视频用的素材目录（图片、视频、文本）登记进去，Easel 会**按内容理解自动整理**——文本直接读、图片看、视频转写——再按理解到的主题归类到相应目录，供后续**视频创作**和**文章创作**取用。
+
+```bash
+easel skill asset-library -i "把 /path/to/我的素材 登记到当前画像并按内容整理"   # Agent 登记源目录 → 逐件理解 → 归类
+python skills/shared/scripts/assets.py add <画像> <目录>                        # 登记素材源目录
+python skills/shared/scripts/assets.py organize <画像>                          # 按类型 + 关键词基线整理
+python skills/shared/scripts/assets.py query <画像> <主题>                        # 按主题检索相关素材
+```
+
+登记清单存 `profiles/asset_scopes.json`（与 `kb_scopes.json` 同构），整理后的素材树落在 `profiles/<画像>/assets/`（按分类目录 + `manifest.json` + `_index.json`，文件以软链落位、失败回退拷贝）。Web 内容库里会显示「**素材库**」节点，可浏览分类与文件、一键「整理素材」；创作时视频/文章 skill 会随当前画像调用 `query` 检索相关素材。
+
+Web 登记目录后自动交给当前 Agent 理解和整理，页面显示进度，离开或刷新后任务继续；失败会显示原因。
+同名素材不会互相覆盖，重新整理会更新摘要、标签和分类。仅 API 聊天模式需要先切换到具备文件工具的 Agent。
+
+macOS 需要工作台在关闭终端或 Codex 后继续运行时，可使用项目服务管理器（登录后启动、异常退出自动重启）：
+
+```bash
+.venv/bin/python scripts/easel_service.py start
+.venv/bin/python scripts/easel_service.py status
+.venv/bin/python scripts/easel_service.py restart  # 后端代码更新后重载
+.venv/bin/python scripts/easel_service.py stop     # 停止并取消登录启动
+```
+
 ## 🧬 账号画像
 
 一个画像对应 `profiles/<名字>/` 目录，包含六个维度：定位、风格、受众、平台、偏好与红线、长期记忆。
@@ -333,6 +372,7 @@ Easel/
 ├── assets/                   品牌、README 媒体与用户导入素材
 ├── profiles/                 账号画像（每个画像一个目录）
 ├── outputs/                  内容项目与最终产物
+├── subprojects/              第三方引擎子项目（OpenFilm：AI 视频制作 + Studio 可视化，可选）
 ├── agents/                   共享 Agent 工作区与底座支持文件
 └── docs/                     能力规范、能力地图与架构文档
 ```

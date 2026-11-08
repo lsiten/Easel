@@ -5,12 +5,12 @@ import type { ComponentType } from 'react';
 import {
   IconChat, IconSkills, IconOutputs, IconAccounts, IconProfile,
   IconNewChat, IconEdit, IconArchive, IconUnarchive, IconTrash, IconChevron,
-  IconDashboard,
+  IconDashboard, IconLayers, IconVideo,
 } from './icons';
 import { IconGear } from './settingsIcons';
 import ThemeToggle from './ThemeToggle';
 
-export type Page = 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'accounts' | 'profile';
+export type Page = 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'assets' | 'video' | 'accounts' | 'profile';
 
 interface SidebarProps {
   currentPage: Page;
@@ -38,6 +38,8 @@ const NAV: { page: Page; Icon: ComponentType<{ size?: number }>; label: string }
   { page: 'chat', Icon: IconChat, label: '对话' },
   { page: 'skills', Icon: IconSkills, label: '技能库' },
   { page: 'outputs', Icon: IconOutputs, label: '内容库' },
+  { page: 'assets', Icon: IconLayers, label: '素材库' },
+  { page: 'video', Icon: IconVideo, label: '视频制作' },
   { page: 'accounts', Icon: IconAccounts, label: '账号' },
   { page: 'profile', Icon: IconProfile, label: '画像' },
 ];
@@ -64,6 +66,17 @@ export default function Sidebar({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('easel_sidebar_collapsed') === '1'; } catch { return false; }
+  });
+  const toggleCollapse = () => {
+    setCollapsed((v) => {
+      const n = !v;
+      try { localStorage.setItem('easel_sidebar_collapsed', n ? '1' : '0'); } catch { /* ignore */ }
+      return n;
+    });
+  };
 
   const startRename = (s: ChatSession) => { setRenamingId(s.id); setRenameValue(s.title); };
   const commitRename = () => {
@@ -118,12 +131,17 @@ export default function Sidebar({
   };
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header">
         <div className="sidebar-logo">
           <img className="sidebar-logo-icon" src="./static/easel-icon-transparent.png" alt="" />
           <h1>Easel</h1>
           <ThemeToggle />
+          <button className="collapse-toggle" onClick={toggleCollapse}
+            title={collapsed ? '展开侧栏' : '收起侧栏'}
+            style={{ transform: collapsed ? 'none' : 'rotate(180deg)' }}>
+            <IconChevron size={16} />
+          </button>
         </div>
         <select
           className="persona-select"
@@ -148,9 +166,10 @@ export default function Sidebar({
             key={page}
             className={`nav-item ${currentPage === page ? 'active' : ''}`}
             onClick={() => onPageChange(page)}
+            title={label}
           >
             <span className="nav-icon"><Icon size={18} /></span>
-            {label}
+            <span className="nav-label">{label}</span>
           </button>
         ))}
       </nav>

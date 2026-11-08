@@ -80,7 +80,24 @@ def _pyfn_check_model() -> tuple[bool, str]:
     return False, ""
 
 
-_PYFN = {"cft": _pyfn_check_cft, "model": _pyfn_check_model}
+def _pyfn_check_openfilm() -> tuple[bool, str]:
+    """OpenFilm 视频制作引擎：复用 openfilm.py 的能力探测（子项目/全局/npx 任一即可）。"""
+    try:
+        import importlib.util
+        shared = Path(__file__).resolve().parent
+        spec = importlib.util.spec_from_file_location("openfilm", shared / "openfilm.py")
+        of_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(of_mod)
+        j = of_mod._check_json(of_mod.capability())
+        if j.get("available"):
+            runner = (j.get("runner") or [None])[0]
+            return True, f"{j.get('openfilm')} · {runner or 'npx'}"
+        return False, "未找到 openfilm 运行器（需 Node 22.2+ 或 npm）"
+    except Exception as e:  # noqa: BLE001
+        return False, f"{type(e).__name__}: {e}"
+
+
+_PYFN = {"cft": _pyfn_check_cft, "model": _pyfn_check_model, "openfilm": _pyfn_check_openfilm}
 
 
 TOOLS: list[Tool] = [
@@ -134,9 +151,15 @@ TOOLS: list[Tool] = [
     Tool("pylibs", "常用 Python 库", "common", "Pillow · edge-tts · pdfplumber · requests",
          ["{python}", "-c", "import PIL,edge_tts,pdfplumber,requests;print('4/4 ok')"],
          _pip_chain("Pillow", "edge-tts", "pdfplumber", "requests")),
+    # ── OpenFilm 视频制作 ──
+    Tool("openfilm", "OpenFilm", "of", "视频制作引擎 + Studio 可视化（子项目；npm 全局装或 npx 兜底）",
+         ["@pyfn:openfilm"],
+         [("npm 全局安装 openfilm", ["npm", "install", "-g", "openfilm"], 900),
+          ("npx 兜底 openfilm", ["npx", "-y", "openfilm@latest", "--version"], 900)],
+         big=True),
 ]
 
-GROUP_NAMES = {"rm": "视频产线套件（Remotion）", "pub": "发布链", "common": "常用库"}
+GROUP_NAMES = {"rm": "视频产线套件（Remotion）", "of": "OpenFilm 视频制作", "pub": "发布链", "common": "常用库"}
 
 # ═══════════════════════════════════════════════════════════════════════
 # 解释器解析：优先「Scripts 目录已在 PATH 上」的（装完 CLI 直接可见）

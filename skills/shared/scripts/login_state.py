@@ -51,11 +51,30 @@ def read_sms_code(path: str | None) -> str:
     return code
 
 
-def write_status(path: str | None, state: str, message: str = "", qr: str = "") -> None:
-    """原子写登录状态。path 为空则跳过（CLI 直跑不需要文件时）。"""
+def _active_browser_name() -> str:
+    """当前活动浏览器名（ego/chrome），用于给登录成功标记打浏览器标识；检测失败返回 ''。
+
+    浏览器切换（如 Chrome→Ego）会隔离 profile，历史标记可能已失效；标记记录登录时的浏览器，
+    Web 后端 _account_logged_in 据此判断标记是否早于浏览器切换。延迟导入避免 login_state 导入期依赖 easel。"""
+    try:
+        from easel.browser import select_browser
+        return select_browser().name
+    except Exception:
+        return ""
+
+
+def write_status(path: str | None, state: str, message: str = "", qr: str = "", browser: str = "") -> None:
+    """原子写登录状态。path 为空则跳过（CLI 直跑不需要文件时）。
+
+    登录成功（success）且未显式指定 browser 时，自动记录当前活动浏览器名；供 Web 后端
+    _account_logged_in 判断标记是否早于浏览器切换（profile 隔离 → 标记可能失效）。"""
     if not path:
         return
+    if state == "success" and not browser:
+        browser = _active_browser_name()
     data = {"state": state, "message": message, "qr": qr, "ts": int(time.time())}
+    if browser:
+        data["browser"] = browser
     d = os.path.dirname(path) or "."
     os.makedirs(d, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")

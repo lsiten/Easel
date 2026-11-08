@@ -1,0 +1,12 @@
+.asset-library-page .gallery-head { flex-wrap: wrap; }
+.asset-library-page .asset-source { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.asset-library-page .gcard { text-align: left; color: var(--text); font: inherit; }
+.asset-library-page .gcard:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 3px; }
+.asset-library-page .asset-source button { min-width: 24px; min-height: 24px; }
+.asset-library-page button.crumb { border: 0; background: none; padding: 4px; font: inherit; }
+@media (max-width: 640px) {
+  .asset-library-page { padding: 20px 16px; }
+  .asset-library-page .gallery-head { flex-direction: column; }
+  .asset-library-page .gallery-grid { grid-template-columns: minmax(0, 1fr); }
+  .asset-library-page .btn, .asset-library-page button.crumb { min-height: 44px; }
+}

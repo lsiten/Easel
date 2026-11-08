@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react';
 import type { ChatMessage } from '../lib/store';
 import { renderMarkdown } from '../lib/sanitize';
 import { linkifyOutputs, externalizeMediaLinks } from '../lib/linkifyOutputs';
-import { IconCopy, IconCheck, IconRetry } from './icons';
+import { IconCopy, IconCheck, IconRetry, IconQuote } from './icons';
 import { extractArtifacts } from '../lib/artifacts';
 import ArtifactGallery from './ArtifactGallery';
 
 export interface BubbleActions {
   onCopy: () => void;
   onRetry?: () => void;    // 仅最后一轮可用（append-only：不改写历史）
+  onQuote?: () => void;    // 把该消息内容引用到输入框作为上下文
   canModify: boolean;      // 流式中禁用 retry
 }
 
@@ -18,6 +19,9 @@ interface MessageBubbleProps {
   thinking?: string;
   activity?: string;
   stillWorking?: string;   // 防呆心跳提示（未卡住）；仅流式时的独立提示，不替代思考/活动
+  isVideoSession?: boolean;  // 该会话是视频创作（OpenFilm）：创作产物默认展示 OpenFilm 预览，非 mp4
+  sessionKey?: string;   // 本会话 id：消息内联 OpenFilm 预览按会话取同一项目（与右侧面板一致）
+  persona?: string;      // 与右侧 Studio 面板一致：按会话+画像取同一 OpenFilm 项目
   actions?: BubbleActions;
 }
 
@@ -36,11 +40,14 @@ function ActionBar({ actions }: { actions: BubbleActions }) {
       {actions.onRetry && actions.canModify && (
         <button className="msg-action" onClick={actions.onRetry} title="重新生成"><IconRetry size={14} /><span>重试</span></button>
       )}
+      {actions.onQuote && (
+        <button className="msg-action" onClick={actions.onQuote} title="引用到输入框作为上下文"><IconQuote size={14} /><span>引用</span></button>
+      )}
     </div>
   );
 }
 
-export default function MessageBubble({ message, isStreaming, thinking, activity, stillWorking, actions }: MessageBubbleProps) {
+export default function MessageBubble({ message, isStreaming, thinking, activity, stillWorking, isVideoSession, sessionKey, persona, actions }: MessageBubbleProps) {
   const rendered = useMemo(() => {
     if (message.role === 'user') return { html: '', artifacts: [], archives: [] };
     // 助手正文里裸露的产物路径先转成前端可用链接（文件直开、图片内联、目录跳内容库）。
@@ -99,6 +106,12 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
     </div>
   ) : null;
 
+  // 视频会话的产物默认是 OpenFilm 预览（不是 mp4）：判断该助手消息是否在交付视频产物
+  // （引用了 film/outputs/Studio），且没有导出/发布出 mp4 → 创作产物展示 OpenFilm 预览。
+  const hasVideoArtifact = rendered.artifacts.some((a) => a.kind === 'video');
+  const isVideoProduct = isVideoSession && !hasVideoArtifact &&
+    /outputs\/|film\.html|127\.0\.0\.1|localhost/.test(message.content);
+
   // 等待回复中（还没有正文、思考、活动）
   if (isStreaming && !message.content && !effThinking && !liveActivity && !liveHint) {
     return (
@@ -120,8 +133,15 @@ export default function MessageBubble({ message, isStreaming, thinking, activity
         <div className="message-bubble assistant">
           {livePanel}
           {message.content && <div dangerouslySetInnerHTML={{ __html: rendered.html }} />}
-          {!isStreaming && (rendered.artifacts.length > 0 || rendered.archives.length > 0) && (
-            <ArtifactGallery artifacts={rendered.artifacts} archives={rendered.archives} />
+          {!isStreaming && (rendered.artifacts.length > 0 || rendered.archives.length > 0 || isVideoProduct) && (
+            <ArtifactGallery
+              artifacts={rendered.artifacts}
+              archives={rendered.archives}
+              isVideoSession={isVideoSession}
+              videoProduct={isVideoProduct}
+              sessionKey={sessionKey}
+              persona={persona}
+            />
           )}
           {isStreaming && <span className="streaming-cursor" />}
         </div>

@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import { fetchOutputs, fetchOutputContent, fetchOutputChildren, fetchKbScope, mediaUrl, deleteOutput, kbQuery, kbSave, kbIngest, kbStatus } from '../lib/api';
+import { fetchOutputs, fetchOutputContent, fetchOutputChildren, fetchKbScope, mediaUrl, assetsMediaUrl, fetchAssetsChildren, deleteOutput, kbQuery, kbSave, kbIngest, kbStatus } from '../lib/api';
+import { AssetOrganizationControl } from './AssetOrganizationControl';
 import type { OutputNode, OutputMeta, KbDoc, KbQueryResult, KbDepositResult } from '../lib/api';
+import { useOpenfilmStudio } from '../lib/useOpenfilmStudio';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconOutputs, IconImage, IconVideo, IconMusic, IconFile, IconFolder, IconRefresh, IconChevron, IconTrash, IconSearch, IconBookmark } from './icons';
 
@@ -60,9 +62,10 @@ function coverNode(m?: OutputMeta): OutputNode | null {
 }
 
 
-function Thumb({ f, big }: { f: OutputNode | null; big?: boolean }) {
-  if (f && f.kind === 'image') return <img src={mediaUrl(f.path)} alt="" loading="lazy" />;
-  if (f && f.kind === 'video') return <video src={mediaUrl(f.path)} preload="metadata" muted />;
+function Thumb({ f, big, resolve }: { f: OutputNode | null; big?: boolean; resolve?: (p: string) => string }) {
+  const src = f ? (resolve ? resolve(f.path) : mediaUrl(f.path)) : '';
+  if (f && f.kind === 'image') return <img src={src} alt="" loading="lazy" />;
+  if (f && f.kind === 'video') return <video src={src} preload="metadata" muted />;
   return <div className="gcard-ph">{kindIcon(f?.kind, big ? 34 : 30)}</div>;
 }
 
@@ -72,9 +75,10 @@ interface OutputsPageProps {
   onJumpHandled?: () => void;
   /** 当前画像：知识库(外部内容源)按其聚焦范围过滤，查询结果随画像而不同；空=通用全量 */
   persona?: string;
+  session?: string;
 }
 
-export default function OutputsPage({ jumpPath, onJumpHandled, persona }: OutputsPageProps) {
+export default function OutputsPage({ jumpPath, onJumpHandled, session, persona }: OutputsPageProps) {
   const [roots, setRoots] = useState<OutputNode[]>([]);
   const [treeError, setTreeError] = useState('');
   const [stack, setStack] = useState<string[]>([]);   // 当前所在的文件夹名称路径
@@ -82,6 +86,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, persona }: Output
   const [selected, setSelected] = useState<OutputNode | null>(null);
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
+  const { studio: ofStudio, refresh: refreshStudio } = useOpenfilmStudio({ session, persona });
   const reqSeq = useRef(0);
   const [lazyMap, setLazyMap] = useState<Record<string, OutputNode[]>>({});
   const [extLoading, setExtLoading] = useState(false);
@@ -104,8 +109,9 @@ export default function OutputsPage({ jumpPath, onJumpHandled, persona }: Output
 
   const load = useCallback(() => {
     setTreeError('');
+    refreshStudio();
     fetchOutputs(persona).then(setRoots).catch(() => setTreeError('加载产物列表失败'));
-  }, [persona]);
+  }, [persona, refreshStudio]);
   // 切换画像：回到顶层、清空懒加载缓存、重新拉取聚焦后的内容树。
   useEffect(() => { setStack([]); setLazyMap({}); }, [persona]);
   useEffect(() => { load(); }, [load]);
@@ -148,7 +154,10 @@ export default function OutputsPage({ jumpPath, onJumpHandled, persona }: Output
     if (!extDirPath) return;
     let cancelled = false;
     setExtLoading(true);
-    fetchOutputChildren(extDirPath, persona)
+    const loader = extDirPath.startsWith('@assets/')
+      ? fetchAssetsChildren(extDirPath, persona)
+      : fetchOutputChildren(extDirPath, persona);
+    loader
       .then((children) => { if (!cancelled) setLazyMap((m) => ({ ...m, [extDirPath!]: children })); })
       .catch(() => {})
       .finally(() => { if (!cancelled) setExtLoading(false); });
@@ -185,7 +194,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, persona }: Output
 
   const remove = useCallback(async (node: OutputNode, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (node.external) return;   // 外部知识源只读：入口已隐藏删除，这里再兜一层
+    if (node.external || node.assets) return;   // 外部知识源 / 素材库只读：入口已隐藏删除，这里再兜一层
     const isDir = node.type === 'dir';
     const label = isDir ? `项目/文件夹「${node.meta?.title || node.name}」及其全部内容` : `文件「${node.name}」`;
     if (!window.confirm(`确定删除${label}？\n此操作不可恢复。`)) return;
@@ -204,11 +213,16 @@ export default function OutputsPage({ jumpPath, onJumpHandled, persona }: Output
     if (f.kind === 'text' && !isHtml(f.name)) {
       setLoading(true);
       try {
-        const res = await fetchOutputContent(f.path);
-        if (seq === reqSeq.current) setContent(res.isBinary ? '' : res.content);
+        if (f.path.startsWith('@assets/')) {
+          const r = await fetch(assetsMediaUrl(f.path, persona));
+          if (seq === reqSeq.current) setContent(await r.text());
+        } else {
+          const res = await fetchOutputContent(f.path);
+          if (seq === reqSeq.current) setContent(res.isBinary ? '' : res.content);
+        }
       } finally { if (seq === reqSeq.current) setLoading(false); }
     }
-  }, []);
+  }, [persona]);
 
   // 知识库检索：query 随画像聚焦（通用 = 全量）；结果按 relative_path 命中。
   const runKbQuery = useCallback(async () => {
@@ -275,11 +289,29 @@ export default function OutputsPage({ jumpPath, onJumpHandled, persona }: Output
     onJumpHandled?.();
   }, [jumpPath, roots, open, onJumpHandled]);
 
+  // 素材库节点（@assets/…）：媒体/内容走 /api/assets/*（随画像），其余走通用 /api/media。
+  const isAsset = (p?: string) => !!p && p.startsWith('@assets/');
+  const resolveMedia = (p: string) => isAsset(p) ? assetsMediaUrl(p, persona) : mediaUrl(p);
+
   const preview = () => {
     if (!selected) return null;
-    const url = mediaUrl(selected.path);
+    const url = resolveMedia(selected.path);
     if (selected.kind === 'image') return <img src={url} alt={selected.name} style={{ maxWidth: '100%', borderRadius: 'var(--radius)' }} />;
-    if (selected.kind === 'video') return <video src={url} controls style={{ maxWidth: '100%', borderRadius: 'var(--radius)' }} />;
+    if (selected.kind === 'video') {
+      // 该视频所属项目是 openfilm 项目（含 film.html）且 Studio 正在运行 → 给「在 Studio 中编辑」入口。
+      const seg = selected.path.split('/')[0];
+      const ofProject = roots.find((r) => r.name === seg)?.openfilmProject === true;
+      const studioUrl = ofStudio?.topic === seg ? ofStudio.studio : '';
+      return (
+        <>
+          <video src={url} controls style={{ maxWidth: '100%', borderRadius: 'var(--radius)' }} />
+          {ofProject && studioUrl && (
+            <div style={{ marginTop: 8 }}><a href={studioUrl} target="_blank" rel="noreferrer"
+              style={{ color: 'var(--accent-start)', fontSize: 13 }}>在 Studio 中编辑 ↗</a></div>
+          )}
+        </>
+      );
+    }
     if (selected.kind === 'audio') return <audio src={url} controls style={{ width: '100%' }} />;
     if (selected.kind === 'text' && isHtml(selected.name)) return (
       <>
@@ -306,8 +338,8 @@ export default function OutputsPage({ jumpPath, onJumpHandled, persona }: Output
       <div key={d.path} className="card card-hover gcard" onClick={() => enterDir(d.name)}>
         <div className="gcard-thumb">
           <span className="gcard-kind">{m?.kind ? (KIND_LABEL[m.kind] || m.kind) : '文件夹'}</span>
-          {!d.external && <button className="gcard-del" title="删除" onClick={(e) => remove(d, e)}><IconTrash size={14} /></button>}
-          {cover ? <Thumb f={cover} big /> : <div className="gcard-ph"><IconFolder size={38} /></div>}
+          {!d.external && !d.assets && <button className="gcard-del" title="删除" onClick={(e) => remove(d, e)}><IconTrash size={14} /></button>}
+          {cover ? <Thumb f={cover} big resolve={resolveMedia} /> : <div className="gcard-ph"><IconFolder size={38} /></div>}
         </div>
         <div className="gcard-meta">
           <div className="gcard-name" title={m?.title || d.name}>
@@ -315,6 +347,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, persona }: Output
           </div>
           <div className="gcard-sub" style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             {d.external && <span style={badge}>知识库</span>}
+            {d.assets && <span style={badge}>素材库</span>}
             {m?.platform && <span style={badge}>{m.platform}</span>}
             {m?.status && <span style={statusBadge(m.status)}>{STATUS_LABEL[m.status] || m.status}</span>}
             <span>{d.fileCount ?? 0} 个文件</span>
@@ -328,12 +361,13 @@ export default function OutputsPage({ jumpPath, onJumpHandled, persona }: Output
     <div key={f.path} className="card card-hover gcard" onClick={() => open(f)}>
       <div className="gcard-thumb">
         <span className="gcard-kind">{kindLabel(f)}</span>
-        {!f.external && <button className="gcard-del" title="删除" onClick={(e) => remove(f, e)}><IconTrash size={14} /></button>}
-        <Thumb f={f} />
+        {!f.external && !f.assets && <button className="gcard-del" title="删除" onClick={(e) => remove(f, e)}><IconTrash size={14} /></button>}
+        <Thumb f={f} resolve={resolveMedia} />
       </div>
       <div className="gcard-meta">
         <div className="gcard-name" title={f.name}>{f.name}</div>
         {f.external && <div className="gcard-sub" style={{ display: 'flex', gap: 6 }}><span style={badge}>知识库</span></div>}
+        {f.assets && <div className="gcard-sub" style={{ display: 'flex', gap: 6 }}><span style={badge}>素材库</span></div>}
       </div>
     </div>
   );
@@ -383,6 +417,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, persona }: Output
             <button className="btn btn-sm" onClick={runKbQuery} disabled={!kbReady || !kbQ.trim() || kbSearching}><IconSearch size={14} /> {kbSearching ? "检索中…" : "检索"}</button>
           </div>
           <button className="btn btn-sm" onClick={() => setDepositOpen(true)} disabled={!kbReady}><IconBookmark size={14} /> 沉淀</button>
+          <AssetOrganizationControl persona={persona || ''} onComplete={load} />
           <button className="btn btn-sm" onClick={load}><IconRefresh size={14} /> 刷新</button>
         </div>
       </div>

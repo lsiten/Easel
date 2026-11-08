@@ -57,6 +57,9 @@ from easel.harnesses.models import resolve_effective_model
 from easel import kb
 from easel.harnesses import store as harness_store
 from easel.harnesses.base import HarnessError, RunRequest
+from easel.openfilm_references import reference_context
+from easel.openfilm_studio import StudioUrls, live_project_urls
+from skills.shared.scripts.project_scope import in_persona_scope
 PROFILES_DIR = PROJECT_ROOT / "profiles"
 SKILLS_DIR = PROJECT_ROOT / "skills"
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
@@ -1165,12 +1168,15 @@ def get_output_tree(persona: str | None = None) -> list[dict]:
             # 以及根目录散文件（按新规约产物必在项目目录内，根散文件=系统状态/残渣）。
             if e.name.startswith('.') or e.name.startswith('_'):
                 continue
-            if not e.is_dir() or e.name in SYSTEM_TOPLEVEL_DIRS:
+            if not e.is_dir() or e.name in SYSTEM_TOPLEVEL_DIRS or not in_persona_scope(e, persona):
                 continue
             node = _build_output_node(e, e.name)
             meta = _read_project_meta(e)
             if meta:
                 node['meta'] = meta
+            # OpenFilm 视频项目（含 film.html）：前端据此在视频预览显示「在 Studio 中编辑」。
+            if (e / "film.html").is_file():
+                node["openfilmProject"] = True
             items.append(node)
     # 外部只读内容源（本地知识库）：作为顶层节点并入内容库，懒加载、只读、不可删除。
     # 按当前画像聚焦（kb_scopes.json）过滤其顶层子节点：查询结果随画像而不同。
@@ -1180,6 +1186,14 @@ def get_output_tree(persona: str | None = None) -> list[dict]:
         except Exception:
             # 一个外部源出错（路径不可读等）不影响其余内容库展示。
             continue
+    # 素材库（当前画像的每账号素材，按内容理解整理）：并入内容库，懒加载、可浏览（assets 标记）。
+    try:
+        _am = _assets_mod()
+        node = _am.tree_for_library(persona)
+        if node:
+            items.append(node)
+    except Exception:  # noqa: BLE001  素材库读取失败不影响其余内容库展示
+        pass
     # 按最后修改时间倒序：最近产物排最前（供工作台「最近产物」与内容库时间排序）
     return sorted(items, key=lambda x: x.get('mtime', 0), reverse=True)
 
@@ -2381,12 +2395,37 @@ class AttachmentRef(BaseModel):
     path: str
 
 
+class ReferenceRef(BaseModel):
+    """结构化引用：右侧视频制作面板里选中的元素（整片/镜头/音轨/品牌轨道/素材）。
+    与文本 quote 不同，它带 kind/id/label/detail，让 Agent 明确知道引用对象的身份与内容，
+    而非只收到一段纯文本片段。"""
+    kind: str = Field(max_length=80)
+    id: str = Field(max_length=16384)
+    label: str = Field(max_length=1000)
+    detail: str = Field(default="", max_length=16384)
+
+
+_REF_KIND_LABEL = {
+    "openfilm-project": "视频项目",
+    "openfilm-scene": "镜头",
+    "openfilm-track": "轨道",
+    "openfilm-ref": "元素",
+    "asset": "素材",
+}
+
+
+def _ref_kind_label(kind: str) -> str:
+    return _REF_KIND_LABEL.get(kind, "引用")
+
+
 class ChatRequest(BaseModel):
     message: str
     persona: str | None = None
     sessionId: str | None = None
     turnId: str | None = None
     attachments: list[AttachmentRef] = Field(default_factory=list)
+    quote: str | None = None   # 用户引用到输入框作为上下文的片段（来自某条消息/所选文本）
+    references: list[ReferenceRef] = Field(default_factory=list)  # 结构化引用：右侧元素（视频/镜头/音轨等）
 
 
 def _attachment_scope(session_id: str) -> str:
@@ -2440,6 +2479,19 @@ def _attachment_context(req: ChatRequest) -> str:
 def _chat_message(req: ChatRequest) -> str:
     context = _attachment_context(req)
     message = req.message.strip()
+    # 用户引用的上下文：把某条消息/所选文本作为背景交给 Agent（据其理解意图，不必复述）。
+    # 这是用户自己选出的文本，无需像附件那样做路径校验；仍做长度收敛，避免把超长正文塞进 prompt。
+    quote = (req.quote or "").strip()
+    if quote:
+        quote = quote[:2000]
+        quote_block = (
+            "〔用户引用的上下文（据此理解其意图，不必向用户复述被引用内容）〕\n"
+            + quote
+        )
+        context = (context + "\n\n" + quote_block) if context else quote_block
+    selected_elements = reference_context(req.references)
+    if selected_elements:
+        context = f"{context}\n\n{selected_elements}" if context else selected_elements
     if context:
         message = f"{message}\n\n{context}" if message else context
     if not message:
@@ -2716,7 +2768,8 @@ async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: st
         _save_turn(pk, "running", "", {"turn_id": turn_id, "runtime": runtime})
         claimed = True
         env = {**read_settings(ENV_FILE), **_proxy_env(), "EASEL_AGENT_RUNTIME": runtime,
-               "EASEL_ROOT": str(PROJECT_ROOT)}
+               "EASEL_ROOT": str(PROJECT_ROOT),
+               "EASEL_SESSION_KEY": sk, "EASEL_PERSONA": req.persona or ""}
         # 模型未显式配置时，按该底座的原生模型目录解析，避免落到引擎自带、
         # 本机不可达的默认模型（如 pi 默认的 claude/api.anthropic.com）。
         model = config["models"].get(runtime, "")
@@ -3338,6 +3391,38 @@ async def api_output(path: str):
         return {"path": path, "content": "", "kind": "binary", "isBinary": True}
 
 
+@app.get("/api/media/poster/{path:path}")
+async def api_media_poster(path: str):
+    """视频海报（首帧缩略图）：供 <video poster> 即时显示、播放失败时的兜底画面，
+    也让 agent「看到」成片画面（抽帧可检）。惰性生成并缓存到 <视频同目录>/_poster.jpg；
+    源文件变新或缓存缺失时（重）生成。抽帧不可用则 404，前端据此回退到重试/打开原文件。
+    注意：本路由必须注册在 /api/media/{path:path} 之前，否则会被贪婪的 media 路由吞掉 → 404。"""
+    full = _safe_output_path(path)
+    if full.suffix.lower() not in VIDEO_EXTS:
+        raise HTTPException(400, '非视频文件，无海报')
+    poster = full.parent / "_poster.jpg"
+    try:
+        need = (not poster.is_file()) or (full.stat().st_mtime > poster.stat().st_mtime)
+    except OSError:
+        need = True
+    if need:
+        ff = shutil.which("ffmpeg")
+        if ff:
+            def _gen() -> int:
+                return subprocess.run(
+                    [ff, "-y", "-i", str(full), "-frames:v", "1", "-update", "1",
+                     "-vf", "scale=640:-2", "-q:v", "3", str(poster)],
+                    capture_output=True, timeout=90, check=False,
+                ).returncode
+            try:
+                await asyncio.to_thread(_gen)
+            except Exception:  # noqa: BLE001  抽帧失败不阻断：404 让前端回退到重试/打开原文件
+                pass
+    if not poster.is_file():
+        raise HTTPException(404, '无法生成海报')
+    return FileResponse(poster, headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/api/media/{path:path}")
 async def api_media(path: str):
     """原样输出媒体文件（图片/视频/音频/HTML/PDF），供 <img>/<video>/iframe/下载。"""
@@ -3347,6 +3432,640 @@ async def api_media(path: str):
     headers = ({"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
                if full.suffix.lower() in {".html", ".htm"} else {})
     return FileResponse(full, headers=headers)
+
+
+# ── OpenFilm 视频制作引擎：Studio 可视化地址 + 能力状态（与 openfilm.py 封装联动）──
+def _load_openfilm_mod():
+    """按文件加载 openfilm.py 为模块（无缓存，每次 exec）：供能力探测与 film 内容指纹复用，
+    避免重复写导入逻辑；openfilm.py 顶层只定义函数，exec 很轻。失败返回 None。"""
+    try:
+        import importlib.util as _iu
+        import sys as _sys
+        shared = PROJECT_ROOT / "skills" / "shared" / "scripts"
+        if str(shared) not in _sys.path:
+            _sys.path.insert(0, str(shared))
+        spec = _iu.spec_from_file_location("openfilm", shared / "openfilm.py")
+        mod = _iu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:  # noqa: BLE001  加载失败不影响返回
+        return None
+
+
+def _session_film_rev(mod, topic: str | None) -> str:
+    """本会话项目 film.html 的内容指纹（mtime 秒带小数）：供前端仅在内容变化时刷新预览 iframe——
+    film 预览 URL 稳定（token 由项目 id 派生），iframe 不会自发重载，故按内容指纹触发刷新，实现
+    「Agent 改 film.html → 面板实时刷新」。解析不到项目/film.html 时返回空（前端不强制刷新，回退手动「刷新」）。"""
+    if mod is None:
+        return ""
+    try:
+        proj = mod._resolve_project((topic or "").strip())
+        if proj is None:
+            return ""
+        for f in (proj / "film.html", proj / ".film" / "film.html"):
+            if f.is_file():
+                return f"{f.stat().st_mtime:.6f}"
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
+# ── 按会话稳健解析 OpenFilm film 预览（自动播放 + 指向有真实内容的项目，避免面板黑屏/空片）────────
+
+def _openfilm_topic_dir(topic: str | None) -> Path | None:
+    """把主题名解析到 outputs 下的项目目录（非系统/非隐藏）；取不到返回 None。供按主题读 film.html
+    内容 / .film/id（不依赖 openfilm 模块，模块加载失败也能判断）。"""
+    t = (topic or "").strip()
+    if not t:
+        return None
+    d = OUTPUTS_DIR / t
+    return d if d.is_dir() else None
+
+def _openfilm_film_has_content(d: Path | None) -> bool:
+    """该 openfilm 项目的 film.html 是否有真实内容（非空壳）：含 <section> 或媒体
+    （iframe/img/audio/video）即算有内容。空壳 film（仅 viewport 骨架，如 141B 的占位项目）预览
+    会黑屏；缺失或空壳项目不可展示，不回退到其他项目。"""
+    if d is None:
+        return False
+    for f in (d / "film.html", d / ".film" / "film.html"):
+        if f.is_file():
+            try:
+                raw = f.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                return False
+            body = re.sub(r"<!--.*?-->", "", raw, flags=re.S)
+            return bool(re.search(r"<(?:section|iframe|img|audio|video)\b", body, flags=re.I))
+    return False
+
+def _openfilm_project_id(d: Path) -> str:
+    """读 openfilm 项目目录的 .film/id（openfilm 内部项目 id）；取不到返回空。film 预览 token 由该
+    id 派生（与 openfilm.py _film_preview_url 同算法），供按主题稳健算 film 预览地址（不依赖陈旧绑定）。"""
+    for f in (d / ".film" / "id", d / "id"):
+        if f.is_file():
+            try:
+                return f.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
+    return ""
+
+def _pick_openfilm_topic_with_content() -> str | None:
+    """挑一个含真实内容的视频项目作为展示/启动回退：outputs 下非系统/非隐藏子目录按 mtime 倒序，取
+    第一个 film.html 有内容者；没有则 None。用于绑定主题为空/无内容时，选一个能真正展示的项目。"""
+    try:
+        cands = [p for p in OUTPUTS_DIR.iterdir()
+                 if p.is_dir() and not p.name.startswith("_") and not p.name.startswith(".")]
+        for p in sorted(cands, key=lambda x: x.stat().st_mtime, reverse=True):
+            if _openfilm_film_has_content(p):
+                return p.name
+    except OSError:
+        pass
+    return None
+
+def _openfilm_display_topic(bound: str | None) -> str | None:
+    """解析本会话要展示的 OpenFilm 视频主题：绑定主题 film 有真实内容就用它；为空/缺失
+    （陈旧绑定/未制作）则回退到最近修改且含内容的视频项目，避免面板黑屏/空片。取不到含内容的
+    项目则原样返回绑定主题（至少不空指针，交给上游回退 editor 地址）。"""
+    bdir = _openfilm_topic_dir(bound)
+    if bdir is not None and _openfilm_film_has_content(bdir):
+        return bound
+    return _pick_openfilm_topic_with_content() or bound
+
+def _openfilm_studio_url_fresh(mod, topic: str | None) -> str:
+    """按（已解析的）主题算 film 预览地址：由项目 .film/id 派生 token + ?film-preview=1（注入 timeline 与
+    定位 CSS、但不注入 filmHost 宿主标记 → 非托管、自动播放、逐帧单场景），与 openfilm.py _film_preview_url
+    同源；取不到返回空（调用方退回已存地址）。"""
+    if mod is None or not topic:
+        return ""
+    d = _openfilm_topic_dir(topic)
+    if d is None:
+        return ""
+    pid = _openfilm_project_id(d)
+    if not pid:
+        return ""
+    return mod._film_preview_url(pid)
+
+def _openfilm_editor_url_fresh(mod, topic: str | None) -> str:
+    """按（已解析的）主题算 editor（编辑视角，pin 后按会话隔离）地址：由项目 .film/id 派生 + ?pin=1，
+    与 openfilm.py _editor_url_fresh 同源；取不到返回空（调用方退回 film 预览）。"""
+    if mod is None or not topic:
+        return ""
+    d = _openfilm_topic_dir(topic)
+    if d is None:
+        return ""
+    pid = _openfilm_project_id(d)
+    if not pid:
+        return ""
+    return mod._editor_url_fresh(pid)
+
+def _ensure_film_preview(url: str) -> str:
+    """给 film 预览地址补 ?film-preview=1（注入 timeline + 定位 CSS、但不注入 filmHost 宿主标记 → 非托管、
+    自动播放、逐帧单场景）；已带 film-preview 则原样返回。供已存 studio 地址（open 时写、可能早于
+    film-preview 改动）在展示前补齐，避免单独加载进 iframe 无宿主 → 黑屏、或退回原始 film.html → 网格。"""
+    if not url:
+        return ""
+    from urllib.parse import urlparse, urlencode, parse_qs
+    u = urlparse(url)
+    if "film-preview" in parse_qs(u.query):
+        return url
+    q = {**parse_qs(u.query), "film-preview": ["1"]}
+    return f"{u.scheme}://{u.netloc}{u.path}?{urlencode(q, doseq=True)}{u.fragment}"
+
+
+def _ensure_player(url: str) -> str:
+    """给 film 预览地址补 ?player=1（OpenFilm 的 player 模式：不自动播放、带播放/暂停 + 进度条、默认暂停；
+    供消息内联预览用，替代 film-preview 的自动播放、让成片可点选播放/暂停/拖动进度）。已带 player 则原样返回。"""
+    if not url:
+        return ""
+    from urllib.parse import urlparse, urlencode, parse_qs
+    u = urlparse(url)
+    if "player" in parse_qs(u.query):
+        return url
+    q = {**parse_qs(u.query), "player": ["1"]}
+    return f"{u.scheme}://{u.netloc}{u.path}?{urlencode(q, doseq=True)}{u.fragment}"
+
+
+@app.get("/api/openfilm/studio")
+def api_openfilm_studio(session: str | None = None, persona: str | None = None):
+    """按会话返回当前绑定项目的 Studio 地址与能力状态。
+
+    地址只由当前项目 .film/id 和 Studio run.json 派生；不回退到历史存储地址。
+    studio/editor 为 pin 编辑视角，film/player 为该项目的播放视角。不可探活的地址返回空。
+    has_video 表示绑定项目有实际内容；rev 是该项目内容指纹，供前端更新预览。
+    """
+    sk = _eff_sk(session, persona)
+    mod = _load_openfilm_mod()
+    topic = _session_openfilm_topic(sk)
+    has_video = _openfilm_film_has_content(_openfilm_topic_dir(topic))
+    # Only current-project identities may produce preview URLs. Stored links can outlive a rebind.
+    urls = _openfilm_live_urls(mod, topic) if has_video else StudioUrls()
+    studio, editor, film = urls.studio, urls.editor, urls.film
+    capability = None
+    available = False
+    if mod is not None:
+        try:
+            cap = mod._check_json(mod.capability())
+            capability = {"available": cap["available"], "openfilm": cap.get("openfilm"),
+                          "runner": cap.get("runner")}
+            available = available or cap["available"]
+        except Exception:  # noqa: BLE001  能力探测失败不影响返回
+            pass
+    rev = _session_film_rev(mod, topic)   # 用有效主题算 film 内容指纹，与展示的项目一致
+    # Preview, references and revision all describe this explicitly bound topic.
+    player = _ensure_player(film)   # 消息内联预览 = player 模式（播放/暂停+进度、默认暂停）；取不到退回 film（自动播放）
+    if not has_video:
+        # 未产出视频：清空所有预览地址与内容指纹（不显示他人/共享项目或陈旧预览），只保留 openfilm 能力状态；
+        # 显式视频会话（activeSession.video）仍会挂载面板显示「制作中」，但不再冒出别的成片预览。
+        studio = editor = film = player = ""
+        rev = ""
+    return {"studio": studio, "editor": editor, "film": film, "player": player, "topic": topic, "capability": capability,
+           "available": available, "rev": rev, "has_video": has_video}
+
+
+def _openfilm_live_urls(mod, topic: str | None) -> StudioUrls:
+    """Use the same project-derived readiness rule for preview and launch."""
+    return live_project_urls(_openfilm_editor_url_fresh(mod, topic),
+                             _openfilm_studio_url_fresh(mod, topic), _url_alive)
+
+
+class OpenfilmStudioLaunchRequest(BaseModel):
+    topic: str | None = None
+    session: str | None = None
+    persona: str | None = None
+
+
+def _openfilm_shared_scripts() -> Path:
+    return PROJECT_ROOT / "skills" / "shared" / "scripts"
+
+
+def _pick_openfilm_topic() -> str:
+    """挑一个 OpenFilm 视频主题作为启动/续接项目：最近修改的非系统 outputs 子目录，否则 film。"""
+    try:
+        cands = [
+            p for p in OUTPUTS_DIR.iterdir()
+            if p.is_dir() and not p.name.startswith("_") and not p.name.startswith(".")
+        ]
+        if cands:
+            return max(cands, key=lambda p: p.stat().st_mtime).name
+    except OSError:
+        pass
+    return "film"
+
+
+def _openfilm_topic_file(sk: str) -> Path:
+    """某会话的 OpenFilm 主题绑定落盘路径（sk 做文件名安全化，与 _turn_file 同规约）。
+    内容是 openfilm.py open 时记录的主题目录名；供 Studio/refs/launch 按会话取自己的视频项目，
+    避免「不同会话加载同一个 OpenFilm 项目」。与 openfilm.py 的 EASEL_SESSION_KEY 落盘同规约。"""
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", sk)[:120]
+    return SESSIONS_DIR / f"{safe}.openfilm-topic.txt"
+
+
+def _session_openfilm_studio_file(sk: str) -> Path:
+    """某会话的 OpenFilm 视频预览地址落盘路径（openfilm.py open 时按 EASEL_SESSION_KEY 写入）。
+    内容是每项目独立的 film 预览地址（filmOrigin/p/<token>/film.html），Easel 面板按会话取自己的地址
+    ——隔离来自每项目独立地址（不被 editor 广播翻转），而非各起一台 Studio。与 openfilm.py 的
+    _session_studio_file 同规约（路径必须一致）。"""
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", sk)[:120]
+    return SESSIONS_DIR / f"{safe}.openfilm-studio.txt"
+
+
+def _session_openfilm_editor_file(sk: str) -> Path:
+    """某会话的 OpenFilm editor 地址落盘路径（openfilm.py open 时按 EASEL_SESSION_KEY 写入）。供面板
+    「在 Studio 中编辑/独立窗口」按钮打开共享 Studio（到本会话项目）；与 openfilm.py 的
+    _session_editor_file 同规约（路径必须一致）。"""
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", sk)[:120]
+    return SESSIONS_DIR / f"{safe}.openfilm-editor.txt"
+
+
+def _session_openfilm_film_file(sk: str) -> Path:
+    """某会话的 OpenFilm film 预览地址落盘路径（openfilm.py open 时按 EASEL_SESSION_KEY 写入）。供面板在
+    editor（编辑视角）不可用时退回 film 预览（播放视图）；与 openfilm.py 的 _session_film_file 同规约。"""
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", sk)[:120]
+    return SESSIONS_DIR / f"{safe}.openfilm-film.txt"
+
+
+def _read_session_file(f: Path) -> str:
+    """读会话落盘地址文件；不存在/读不到返回空。"""
+    if not f.is_file():
+        return ""
+    try:
+        return f.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _url_alive(url: str) -> bool:
+    """地址对应的服务是否存活（openfilm Studio/film 预览）；已死返回 False（视为未就绪）。"""
+    if not url:
+        return False
+    try:
+        urllib.request.urlopen(url, timeout=2)
+        return True
+    except Exception:  # noqa: BLE001  服务已死 → 视为未就绪
+        return False
+
+
+def _session_openfilm_topic(sk: str) -> str | None:
+    """取某会话绑定的 OpenFilm 主题（openfilm.py open 时按 EASEL_SESSION_KEY 记录）；无绑定则 None。"""
+    if not sk:
+        return None
+    f = _openfilm_topic_file(sk)
+    if f.is_file():
+        try:
+            topic = f.read_text(encoding="utf-8").strip()
+            if topic:
+                return topic
+        except OSError:
+            pass
+    return None
+
+
+def _openfilm_studio_topic() -> str | None:
+    """全局 Studio 当前打开的主题（openfilm.py open 时记录）；用于判断「一机一台」的共享 Studio
+    此刻是否正显示某会话绑定的项目，据此做按会话隔离（避免串到别会话的项目）。"""
+    f = OUTPUTS_DIR / "_run" / "openfilm-studio-topic.txt"
+    if f.is_file():
+        try:
+            return f.read_text(encoding="utf-8").strip() or None
+        except OSError:
+            pass
+    return None
+
+
+@app.post("/api/openfilm/studio/launch")
+def api_openfilm_studio_launch(req: OpenfilmStudioLaunchRequest):
+    """后台启动本会话绑定的现存项目；当前项目已就绪时复用，缺失时返回 no-project。
+
+    就绪判断与预览接口使用同一项目派生地址，不采信旧地址文件或其他会话项目。
+    openfilm.py 仍按 EASEL_SESSION_KEY 记录当前会话绑定，供 CLI 与 refs 复用。
+    """
+    sk = _eff_sk(req.session, req.persona)
+    # 仅启动本会话绑定的项目：无绑定 → 不启动（不串到别会话/最近项目），返回 no-project。
+    # 按会话隔离来自「各会话只开各会话自己绑定的项目」；Agent 用 openfilm 制作时会把本会话项目
+    # 绑定记到 <sk>.openfilm-topic.txt，此处据此取本会话项目，绝不再回退到他人/最近项目。
+    topic = _session_openfilm_topic(sk)
+    if _openfilm_topic_dir(topic) is None:
+        return {"launched": False, "topic": "", "reason": "no-project"}
+    # Readiness belongs to the currently bound project, never a previously stored URL.
+    if _openfilm_live_urls(_load_openfilm_mod(), topic).studio:
+        return {"launched": False, "topic": topic, "reason": "already-running"}
+    shared = _openfilm_shared_scripts()
+    # 只注入 EASEL_SESSION_KEY 供 openfilm.py 按会话落盘 film 预览/editor 地址；不再派生 per-session
+    # home/端口——共享一台 Studio（默认 home）。
+    env = {**os.environ, "EASEL_SESSION_KEY": sk}
+
+    def _run() -> None:
+        try:
+            subprocess.run(
+                [sys.executable, str(shared / "openfilm.py"), "open", topic, "--no-browser"],
+                cwd=str(PROJECT_ROOT), capture_output=True, timeout=900, env=env,
+            )
+        except Exception:  # noqa: BLE001  启动失败不影响返回；前端轮询会看到仍占位或重试
+            pass
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"launched": True, "topic": topic}
+
+
+# ── OpenFilm 可引用元素：把当前视频项目（film.html + 场景页）解析成结构化引用，
+# 供右侧视频制作面板「引用」按钮使用；选中后随消息交给 Agent（让 Agent 明确知道引用内容）。──
+def _strip_html_tags(raw: str) -> str:
+    raw = re.sub(r"<script[\s\S]*?</script>", "", raw, flags=re.I)
+    raw = re.sub(r"<style[\s\S]*?</style>", "", raw, flags=re.I)
+    text = re.sub(r"<[^>]+>", " ", raw)
+    for a, b in (("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'), ("&#39;", "'")):
+        text = text.replace(a, b)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _openfilm_scene_ref(project_dir: Path, src: str, at: str) -> dict:
+    """把 film.html 里的一个 iframe 镜头（src 指向场景页）解析成结构化引用。"""
+    file = src.split("#", 1)[0]
+    label = Path(file).name
+    detail = f"出现在第 {at}s"
+    p = project_dir / file
+    if p.is_file():
+        try:
+            raw = p.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            raw = ""
+        title_m = re.search(r"<title>\s*(.*?)\s*</title>", raw, flags=re.I | re.S)
+        visible = _strip_html_tags(raw)
+        if title_m and title_m.group(1).strip():
+            label = title_m.group(1).strip()
+        if visible:
+            detail = f"出现在第 {at}s；画面文字：{visible[:300]}"
+    return {"kind": "openfilm-scene", "id": f"openfilm-scene::{file}", "label": label, "detail": detail}
+
+
+def _openfilm_track_ref(src: str, at: str, role: str) -> dict:
+    """把 film.html 里的一个 img/audio 轨道（品牌标识/音轨）解析成结构化引用。"""
+    asset = src.split("#", 1)[0]
+    return {
+        "kind": "openfilm-track",
+        "id": f"openfilm-track::{asset}",
+        "label": f"{role} · {Path(asset).name}",
+        "detail": f"{role} {asset}；出现在第 {at}s",
+    }
+
+
+def _openfilm_refs(project_dir: Path) -> list[dict]:
+    """解析当前 OpenFilm 电影项目（film.html + 场景页）为可引用元素列表。"""
+    film = project_dir / "film.html"
+    if not film.is_file():
+        return []
+    try:
+        html = film.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return []
+    refs: list[dict] = [
+        {
+            "kind": "openfilm-project",
+            "id": f"openfilm-project::{project_dir.name}",
+            "label": f"整片 · {project_dir.name}",
+            "detail": f"OpenFilm 视频 outputs/{project_dir.name}/（film.html）；用 openfilm.py frame {project_dir.name} 取帧看画面，或读该 film.html 定位元素",
+        }
+    ]
+    for sec in re.finditer(r"<section[^>]*>(.*?)</section>", html, flags=re.S | re.I):
+        body = sec.group(1)
+        for m in re.finditer(r"<iframe[^>]*\bsrc=[\"\']([^\"\']+)[\"\'][^>]*>", body, flags=re.I):
+            at_m = re.search(r"\bat=[\s\"\']?([\d.]+)", m.group(0))
+            at = at_m.group(1) if at_m else "?"
+            refs.append(_openfilm_scene_ref(project_dir, m.group(1), at))
+        for m in re.finditer(r"<img[^>]*\bsrc=[\"\']([^\"\']+)[\"\'][^>]*>", body, flags=re.I):
+            at_m = re.search(r"\bat=[\s\"\']?([\d.]+)", m.group(0))
+            at = at_m.group(1) if at_m else "?"
+            refs.append(_openfilm_track_ref(m.group(1), at, "品牌/叠层"))
+        for m in re.finditer(r"<audio[^>]*\bsrc=[\"\']([^\"\']+)[\"\'][^>]*>", body, flags=re.I):
+            at_m = re.search(r"\bat=[\s\"\']?([\d.]+)", m.group(0))
+            at = at_m.group(1) if at_m else "?"
+            refs.append(_openfilm_track_ref(m.group(1), at, "音轨"))
+    return refs
+
+
+@app.get("/api/openfilm/refs")
+def api_openfilm_refs(session: str | None = None, persona: str | None = None):
+    """本会话的 OpenFilm 视频项目的可引用元素（整片/各镜头/音轨/品牌轨道）。按会话解析主题，
+    不串到别会话；无本会话绑定则返回空。前端据此在右侧视频制作面板给每个元素显示「引用」按钮；
+    选中后作为结构化上下文交给 Agent（让 Agent 明确知道引用的是什么、能据此用 openfilm 查看/操作）。"""
+    sk = _eff_sk(session, persona)
+    # 仅取本会话绑定的项目：无绑定 → 返回空（不串到别会话/最近项目），与面板展示一致。
+    topic = _session_openfilm_topic(sk)
+    if not topic:
+        return {"refs": [], "topic": None}
+    project_dir = OUTPUTS_DIR / topic
+    if not project_dir.is_dir() or not (project_dir / "film.html").is_file():
+        return {"refs": [], "topic": topic}
+    try:
+        refs = _openfilm_refs(project_dir)
+    except Exception:  # noqa: BLE001  解析失败返回空，不影响主流程
+        refs = []
+    return {"refs": refs, "topic": topic}
+
+
+# ── 素材库（每账号素材，按内容理解整理，供视频/文章创作取用；与 assets.py 封装联动）──
+_ASSETS_MOD = None
+
+def _assets_mod():
+    """惰性加载 skills/shared/scripts/assets.py（素材库引擎，供 CLI/skill/web/doctor 复用）。"""
+    global _ASSETS_MOD
+    if _ASSETS_MOD is not None:
+        return _ASSETS_MOD
+    import importlib.util as _iu
+    import sys as _sys
+    shared = PROJECT_ROOT / "skills" / "shared" / "scripts"
+    if str(shared) not in _sys.path:
+        _sys.path.insert(0, str(shared))
+    spec = _iu.spec_from_file_location("assets", shared / "assets.py")
+    _ASSETS_MOD = _iu.module_from_spec(spec)
+    spec.loader.exec_module(_ASSETS_MOD)
+    return _ASSETS_MOD
+
+
+def _assets_resolve(path: str, persona: str | None) -> tuple[Path, Path] | None:
+    """把 @assets/<子路径> 解析到当前画像的素材库目录内（防穿越）。非 @assets 返回 None。
+
+    素材库内条目多为指向源目录的 symlink，故 containment 校验在「未 resolve」的路径
+    上进行（保留链接），媒体/目录预览经 FileResponse/iterdir 在系统层自然跟随链接。
+    显式拒绝含 .. 或绝对路径段的 sub，杜绝越界。
+    """
+    if not path or not path.startswith("@assets/"):
+        return None
+    sub = path[len("@assets/"):]
+    if sub.startswith("/") or ".." in sub.split("/"):
+        raise HTTPException(403, "非法路径")
+    root = (PROJECT_ROOT / "profiles" / (persona or "") / "assets").resolve()
+    if not root.is_dir():
+        return None
+    full = (root / sub) if sub else root
+    if full != root and root not in full.parents:
+        raise HTTPException(403, "非法路径")
+    return (root, full)
+
+
+def _assets_persona_name(persona: str | None) -> str:
+    return persona or ""
+
+
+@app.get("/api/assets/check")
+def api_assets_check(persona: str | None = None):
+    """素材库能力/状态：当前画像是否已登记素材源、已整理多少素材、多少分类。"""
+    try:
+        return _assets_mod().check_json(persona)
+    except Exception:  # noqa: BLE001
+        return {"profile": persona or "", "registered": False, "sources": [],
+                "organized": 0, "categories": 0, "registered_all": 0}
+
+
+@app.get("/api/assets/sources")
+def api_assets_sources(persona: str | None = None):
+    """当前画像已登记的素材源目录。"""
+    try:
+        return {"profile": persona or "", "sources": _assets_mod().sources(persona)}
+    except Exception:  # noqa: BLE001
+        return {"profile": persona or "", "sources": []}
+
+
+class AssetsAddRequest(BaseModel):
+    directory: str
+
+
+@app.post("/api/assets/sources")
+def api_assets_add(req: AssetsAddRequest, persona: str | None = None):
+    """登记一个素材源目录到当前画像素材库。"""
+    try:
+        return _assets_mod().add(persona or "", [req.directory])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, str(exc))
+
+
+@app.delete("/api/assets/sources/{directory:path}")
+def api_assets_remove(directory: str, persona: str | None = None):
+    """从当前画像素材库注销一个素材源目录。"""
+    try:
+        return _assets_mod().remove(persona or "", directory)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/assets/tree")
+def api_assets_tree(persona: str | None = None):
+    """当前画像素材库顶层树（分类目录 + 文件计数），供内容库/素材库面板展示；未配置返回 null。"""
+    try:
+        return _assets_mod().tree_for_library(persona)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@app.get("/api/assets/children/{path:path}")
+def api_assets_children(path: str, persona: str | None = None):
+    """素材库某层子节点（懒加载，只读；@assets/<子路径> 经 _assets_resolve 防穿越）。"""
+    ext = _assets_resolve(path, persona)
+    if ext is None:
+        raise HTTPException(404, "路径不在素材库")
+    _, target = ext
+    if not target.is_dir():
+        return []
+    children = []
+    try:
+        entries = sorted(target.iterdir())
+    except OSError:
+        return []
+    for c in entries:
+        # 跳过内部元文件（. 开头或 manifest.json），只展示真实素材
+        if c.name.startswith(".") or c.name == "manifest.json":
+            continue
+        child_path = f"{path}/{c.name}"
+        if c.is_dir():
+            children.append({"name": c.name, "type": "dir", "path": child_path,
+                             "assets": True, "mtime": _dir_mtime(c), "fileCount": _assets_mod()._count_files(c)})
+        else:
+            fm = _file_meta(c, child_path)
+            fm["type"] = "file"
+            fm["assets"] = True
+            children.append(fm)
+    children.sort(key=lambda x: (x["type"] == "file", -(x.get("mtime") or 0)))
+    return children
+
+
+@app.get("/api/assets/media/{path:path}")
+def api_assets_media(path: str, persona: str | None = None):
+    """素材库文件原样内容（媒体/文本预览）；@assets/<子路径> 经 _assets_resolve 防穿越。"""
+    ext = _assets_resolve(path, persona)
+    if ext is None:
+        raise HTTPException(404, "路径不在素材库")
+    _, full = ext
+    if not full.is_file():
+        raise HTTPException(404, "文件不存在")
+    return FileResponse(full, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/assets/query")
+def api_assets_query(what: str = "", kind: str | None = None, limit: int = 10,
+                     persona: str | None = None):
+    """按主题/类型检索当前画像素材库（供视频/文章创作 skill 调用）。"""
+    try:
+        return _assets_mod().query(persona or "", what, kind=kind, limit=limit)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _asset_agent_required() -> None:
+    if _direct_api_enabled():
+        raise HTTPException(409, "AI 素材整理需要具备文件和看图工具的 Agent，请先在设置中选择 Agent 底座")
+
+
+def _organize_asset_agent(prompt: str, profile: str, session: str) -> str:
+    return run_agent_sync(chat_turn_message(prompt, profile), TIMEOUT_PRODUCE, session)
+
+
+from web.asset_organization import AssetOrganizer, organization_router
+_ASSET_ORGANIZER = AssetOrganizer(OUTPUTS_DIR / "_asset_jobs", _assets_mod, _organize_asset_agent)
+app.include_router(organization_router(_ASSET_ORGANIZER, profile_exists, _asset_agent_required))
+
+
+@app.get("/api/assets/pick-dir")
+def api_assets_pick_dir(path: str = "", persona: str | None = None):
+    """素材源目录选择器：列出本机某层的子目录，供前端「点击选择目录」导航（只读浏览，不改动素材库）。
+
+    Easel 是本机单机应用（loopback + local_write_guard 保护），浏览的是用户自己的文件系统：
+    默认从主目录起步，逐层进入；只列目录、跳过隐藏目录与本应用内部目录。返回当前目录、上级、
+    子目录与常用目录快捷入口，前端据此渲染目录树并「选择此目录」登记为素材源。
+    """
+    raw = (path or "").strip()
+    base = Path(raw).expanduser() if raw else Path.home()
+    try:
+        base = base.resolve()
+    except (OSError, ValueError):
+        raise HTTPException(400, "非法路径")
+    if not base.is_dir():
+        raise HTTPException(400, "该路径不是目录")
+    # 跳过本应用自身内部目录与隐藏目录，避免误选/越界
+    skip = {"profiles", "outputs", "skills", "web", "scripts", "tests", "assets",
+            "subprojects", "agents", "easel", "__pycache__", ".git"}
+    dirs = []
+    try:
+        for c in sorted(base.iterdir()):
+            if not c.is_dir() or c.name.startswith(".") or c.name in skip:
+                continue
+            dirs.append({"name": c.name, "path": str(c.resolve())})
+    except OSError:
+        raise HTTPException(400, "无法读取该目录")
+    home = Path.home().resolve()
+    quick = [
+        {"name": "下载", "path": str(home / "Downloads")},
+        {"name": "图片", "path": str(home / "Pictures")},
+        {"name": "文档", "path": str(home / "Documents")},
+        {"name": "主目录", "path": str(home)},
+    ]
+    quick = [q for q in quick if Path(q["path"]).is_dir()]
+    return {
+        "path": str(base),
+        "name": base.name or str(base),
+        "parent": str(base.parent),
+        "dirs": dirs,
+        "quick": quick,
+    }
+
 
 
 # 系统数据目录/文件——不允许从内容库删除（删了会丢登录态/日历/发布记录）
@@ -3501,12 +4220,30 @@ async def api_upload_local(
     return {"ok": True, "files": saved}
 
 
-def _write_login_marker(platform: str, state: str, message: str = '', persona: str = '') -> None:
+def _active_browser_name() -> str | None:
+    """当前活动浏览器名（ego/chrome）；无法判定（未安装/检测失败）返回 None。
+
+    与 login_state._active_browser_name 同语义：浏览器切换会隔离 profile，据此判断登录标记
+    是否早于浏览器切换。延迟导入避免影响 web 启动路径。"""
+    try:
+        from easel.browser import select_browser
+        return select_browser().name
+    except Exception:
+        return None
+
+
+def _write_login_marker(platform: str, state: str, message: str = '', persona: str = '',
+                        browser: str = '') -> None:
     """回写登录标记 outputs/_login[/<画像>]/<平台>.json（与 login_state.write_status 同格式，原子写）。
-    whoami 真校验确认已登录后调用 → _account_logged_in 的快速路径此后自愈并持久。按画像隔离。"""
+    whoami 真校验确认已登录后调用 → _account_logged_in 的快速路径此后自愈并持久。按画像隔离。
+    记录当前活动浏览器名，供 _account_logged_in 判断标记是否早于浏览器切换（profile 隔离 → 可能失效）。"""
     d = _login_dir(persona)
     d.mkdir(parents=True, exist_ok=True)
+    if state == 'success' and not browser:
+        browser = _active_browser_name() or ''
     data = {"state": state, "message": message, "qr": "", "ts": int(time.time())}
+    if browser:
+        data["browser"] = browser
     st = d / f'{platform}.json'
     tmp = st.with_suffix('.json.tmp')
     try:
@@ -3538,12 +4275,25 @@ def _account_logged_in(platform: str, cfg: dict, persona: str = '') -> bool:
             pass
         return _wechat_has_credentials()
     st = _login_dir(persona) / f'{platform}.json'
-    if st.is_file():
-        try:
-            return json.loads(st.read_text(encoding="utf-8")).get('state') == 'success'
-        except Exception:
-            return False
-    return False
+    if not st.is_file():
+        return False
+    try:
+        marker = json.loads(st.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if marker.get('state') != 'success':
+        return False
+    # 浏览器标识校验：新标记记录了登录时的浏览器；与当前活动浏览器不符（Ego/Chrome profile 隔离），
+    # 说明该登录属于另一个隔离 profile、当前 profile 很可能未登录 → 快速路径判未登录，交由 whoami 真校验自愈。
+    marker_browser = marker.get('browser')
+    active = _active_browser_name()
+    if marker_browser:
+        return active is None or marker_browser == active
+    # 历史标记（无 browser 字段）：无法廉价判定它是否早于浏览器切换，故信任成功标记（best-effort 缓存）。
+    # 浏览器切换造成的失效由 whoami 真校验在拿到「确定」结论时重新打标/清除来收敛；快速路径不据此硬判未登录，
+    # 否则「当前实际已登录」或「校验 inconclusive（网络/风控/维护，保留上次登录态）」时会永久误报未登录且无法自愈，
+    # 与账号页 whoami 显示的真值长期不一致。
+    return True
 
 
 def _login_status(platform: str, persona: str = '') -> dict:

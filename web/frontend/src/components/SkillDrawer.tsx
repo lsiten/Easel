@@ -79,7 +79,10 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
     }
   };
 
-  const blocked = detail?.needsApi && !detail.apiConfigured;
+  const missingApi = detail?.needsApi && !detail.apiConfigured;
+  const agentImageFallback = missingApi && detail?.apiSpec?.providers.some((provider) =>
+    provider.keys.some((key) => key.env === 'IMG_API_KEY' && key.required));
+  const blocked = missingApi && !agentImageFallback;
 
   return (
     <div className="drawer-overlay" onClick={onClose}>
@@ -94,7 +97,7 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
                 {detail?.needsApi && (
                   detail.apiConfigured
                     ? <span className="badge badge-ok">✓ 已配置</span>
-                    : <span className="badge badge-warn">❗ 需配置 API</span>
+                    : <span className="badge badge-warn">{agentImageFallback ? '可尝试底座生图' : '❗ 需配置 API'}</span>
                 )}
               </div>
             </div>
@@ -196,9 +199,11 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
           {/* 执行 */}
           <div className="panel">
             <div className="panel-title">▶ 运行</div>
-            {blocked && (
+            {missingApi && (
               <div style={{ fontSize: 13, color: 'var(--amber)', marginBottom: 10 }}>
-                该 SKILL 需要先配置上面的 API 才能运行。
+                {agentImageFallback
+                  ? '未配置生图 API。若当前 Agent 底座提供生图工具，将直接使用；否则会提示补充配置。'
+                  : '该 SKILL 需要先配置上面的 API 才能运行。'}
               </div>
             )}
             <textarea

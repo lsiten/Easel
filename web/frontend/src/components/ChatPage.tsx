@@ -4,14 +4,16 @@ import QuestionCards from './QuestionCards';
 import BrushEntry from './BrushEntry';
 import type { ChatSession, ChatMessage, StreamState } from '../lib/store';
 import { uploadFiles, adoptOversize } from '../lib/api';
-import type { UploadedFile } from '../lib/api';
-import { IconArrowUp, IconStop, IconPlus, IconFile } from './icons';
+import type { UploadedFile, Reference } from '../lib/api';
+import { IconArrowUp, IconStop, IconPlus, IconFile, IconQuote } from './icons';
 
 interface ChatPageProps {
   apiDirect: boolean;
   session: ChatSession;
   stream?: StreamState;          // 进行中的流式态（来自 App，切页也不丢）
-  onSend: (displayText: string, attachments?: UploadedFile[]) => void;
+  refs: Reference[];            // 结构化引用（右侧视频/镜头/音轨等），随消息交给 Agent
+  onRemoveRef: (id: string) => void;
+  onSend: (displayText: string, attachments?: UploadedFile[], quote?: string) => void;
   onStop: () => void;
   onResend: (
     userIndex: number,
@@ -20,6 +22,8 @@ interface ChatPageProps {
     legacyAgentText?: string,
   ) => void; // 重试：仅对最后一轮
   onQuestionAnswered?: (questionId: string) => void;   // 某道问答题提交成功（App 记录答过，重放不再出现）
+  isVideoSession?: boolean;   // 该会话是视频创作（OpenFilm）：创作产物默认展示 OpenFilm 预览，非 mp4
+  persona?: string;        // 与右侧 Studio 面板一致：消息内联预览按本会话+画像取同一 OpenFilm 项目
 }
 
 // 空态推荐（贴合 Easel 社媒创作场景）
@@ -36,9 +40,10 @@ function greeting(): string {
   return `${g}，想创作点什么？`;
 }
 
-export default function ChatPage({ apiDirect, session, stream, onSend, onStop, onResend, onQuestionAnswered }: ChatPageProps) {
+export default function ChatPage({ apiDirect, session, stream, onSend, onStop, onResend, onQuestionAnswered, refs, onRemoveRef, isVideoSession, persona }: ChatPageProps) {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<UploadedFile[]>([]);
+  const [quotes, setQuotes] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [maxMb, setMaxMb] = useState(50);
@@ -93,6 +98,8 @@ export default function ChatPage({ apiDirect, session, stream, onSend, onStop, o
     if (e.clipboardData.files?.length) { e.preventDefault(); doUpload(e.clipboardData.files); }
   };
   const removeAttachment = (path: string) => setAttachments((a) => a.filter((x) => x.path !== path));
+  const onQuote = (snippet: string) => setQuotes((q) => (q.includes(snippet) ? q : [...q, snippet]));
+  const removeQuote = (snippet: string) => setQuotes((q) => q.filter((x) => x !== snippet));
 
   useEffect(() => {
     if (!isEmpty) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -108,11 +115,13 @@ export default function ChatPage({ apiDirect, session, stream, onSend, onStop, o
 
   const handleSend = () => {
     const trimmed = input.trim();
-    if ((!trimmed && attachments.length === 0) || isStreaming || uploading) return;
-    // 附件通过结构化字段发送；用户消息气泡只显示用户实际输入的文字。
-    onSend(trimmed, attachments);
+    if ((!trimmed && attachments.length === 0 && quotes.length === 0 && refs.length === 0) || isStreaming || uploading) return;
+    // 附件通过结构化字段发送；引用作为上下文发给 agent（不进用户可见气泡）。
+    const quote = quotes.length ? quotes.join('\n\n') : undefined;
+    onSend(trimmed, attachments, quote);
     setInput('');
     setAttachments([]);
+    setQuotes([]);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -136,6 +145,26 @@ export default function ChatPage({ apiDirect, session, stream, onSend, onStop, o
             <span key={a.path} className="attach-chip" title={a.path}>
               <IconFile size={12} /> <span className="attach-name">{a.name}</span>
               <button className="attach-x" onClick={() => removeAttachment(a.path)} title="移除">×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      {quotes.length > 0 && (
+        <div className="composer-quotes">
+          {quotes.map((q) => (
+            <span key={q} className="quote-chip" title={q}>
+              <IconQuote size={12} /> <span className="quote-name">{q.length > 24 ? q.slice(0, 24) + '…' : q}</span>
+              <button className="attach-x" onClick={() => removeQuote(q)} title="移除">×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      {refs.length > 0 && (
+        <div className="composer-quotes">
+          {refs.map((r) => (
+            <span key={r.id} className="ref-chip" title={r.detail ? `${r.label}：${r.detail}` : r.label}>
+              <IconQuote size={12} /> <span className="ref-name">{r.label}</span>
+              <button className="attach-x" onClick={() => onRemoveRef(r.id)} title="移除">×</button>
             </span>
           ))}
         </div>
@@ -169,7 +198,7 @@ export default function ChatPage({ apiDirect, session, stream, onSend, onStop, o
         {isStreaming ? (
           <button className="send-btn" onClick={onStop} title="停止生成"><IconStop size={15} /></button>
         ) : (
-          <button className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length) || uploading} title="发送"><IconArrowUp size={17} /></button>
+          <button className="send-btn" onClick={handleSend} disabled={(!input.trim() && !attachments.length && !quotes.length && !refs.length) || uploading} title="发送"><IconArrowUp size={17} /></button>
         )}
       </div>
     </div>
@@ -228,6 +257,7 @@ export default function ChatPage({ apiDirect, session, stream, onSend, onStop, o
                   onRetry: isLastFinal
                     ? () => onResend(i, msg.content, msg.attachments, msg.agentContent)
                     : undefined,
+                  onQuote: msg.content ? () => onQuote(msg.content) : undefined,
                   canModify: !isStreaming,
                 };
               } else {
@@ -238,6 +268,7 @@ export default function ChatPage({ apiDirect, session, stream, onSend, onStop, o
                   onRetry: (isLastFinal && prevUser)
                     ? () => onResend(pi, prevUser.content, prevUser.attachments, prevUser.agentContent)
                     : undefined,
+                  onQuote: msg.content ? () => onQuote(msg.content) : undefined,
                   canModify: !isStreaming,
                 };
               }
@@ -250,6 +281,9 @@ export default function ChatPage({ apiDirect, session, stream, onSend, onStop, o
                 thinking={live ? stream!.thinking : ''}
                 activity={live ? stream!.activity : ''}
                 stillWorking={live ? stream!.stillWorking : ''}
+                isVideoSession={isVideoSession}
+                sessionKey={session.id}
+                persona={persona}
                 actions={actions}
               />
             );

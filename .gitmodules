@@ -1,0 +1,3 @@
+[submodule "subprojects/openfilm"]
+	path = subprojects/openfilm
+	url = https://github.com/lsiten/openfilm.git

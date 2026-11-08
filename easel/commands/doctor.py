@@ -172,6 +172,40 @@ def cmd_doctor(_args) -> int:
     except Exception:  # noqa: BLE001  探测失败不阻塞 doctor
         pass
 
+    # 3.6 OpenFilm（视频制作引擎 + Studio 可视化）：信息性提示，不计入 all_ok（可选子项目）。
+    try:
+        import importlib.util
+        import sys as _sys
+        shared = PROJECT_ROOT / "skills" / "shared" / "scripts"
+        if str(shared) not in _sys.path:
+            _sys.path.insert(0, str(shared))
+        spec = importlib.util.spec_from_file_location("openfilm", shared / "openfilm.py")
+        of_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(of_mod)
+        j = of_mod._check_json(of_mod.capability())
+        if j["available"]:
+            detail = f"{j.get('openfilm')} via {j.get('runner')}"
+            _check("OpenFilm（可选：视频制作 + Studio 可视化）", True, detail)
+    except Exception:  # noqa: BLE001  探测失败不阻塞 doctor
+        pass
+
+    # 3.7 素材库（每账号素材源 → 按内容理解整理 → 供视频/文章创作取用）：信息性提示，不计入 all_ok。
+    try:
+        import importlib.util
+        import sys as _sys
+        shared = PROJECT_ROOT / "skills" / "shared" / "scripts"
+        if str(shared) not in _sys.path:
+            _sys.path.insert(0, str(shared))
+        spec = importlib.util.spec_from_file_location("assets", shared / "assets.py")
+        as_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(as_mod)
+        j = as_mod.check_json(None)
+        if j.get("registered_all"):
+            detail = f"已登记 {j['registered_all']} 个画像素材源"
+            _check("素材库（可选：每账号素材整理）", True, detail)
+    except Exception:  # noqa: BLE001  探测失败不阻塞 doctor
+        pass
+
     # Key project files
     key_files = [
         ("skills/builtin/", PROJECT_ROOT / "skills" / "builtin"),

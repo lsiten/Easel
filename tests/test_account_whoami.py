@@ -19,7 +19,7 @@ def account_state(tmp_path, monkeypatch):
 
 
 def test_whoami_does_not_start_browser_during_login(account_state, monkeypatch):
-    web.LOGIN_PROCESSES["xiaohongshu"] = SimpleNamespace(poll=lambda: None)
+    web.LOGIN_PROCESSES["_general::xiaohongshu"] = SimpleNamespace(poll=lambda: None)
     monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: pytest.fail("login owns profile"))
     result = asyncio.run(web.api_account_whoami("xiaohongshu"))
     assert not result["loggedIn"]
@@ -31,7 +31,7 @@ def test_whoami_waits_for_successful_login_to_release_profile(account_state, mon
     events = []
     process = SimpleNamespace(poll=lambda: None if not events else 0,
                               wait=lambda **kwargs: events.append("released"))
-    web.LOGIN_PROCESSES["weixin-channels"] = process
+    web.LOGIN_PROCESSES["_general::weixin-channels"] = process
     def run(*args, **kwargs):
         assert events == ["released"]
         return SimpleNamespace(returncode=0, stdout=json.dumps({
@@ -49,7 +49,7 @@ def test_whoami_reports_profile_save_timeout_without_caching_empty_identity(acco
     def wait(**kwargs):
         raise web.subprocess.TimeoutExpired("login", 8)
 
-    web.LOGIN_PROCESSES["weixin-channels"] = SimpleNamespace(poll=lambda: None, wait=wait)
+    web.LOGIN_PROCESSES["_general::weixin-channels"] = SimpleNamespace(poll=lambda: None, wait=wait)
     monkeypatch.setattr(web.subprocess, "run", lambda *args, **kwargs: pytest.fail("profile still locked"))
     with pytest.raises(web.HTTPException) as error:
         asyncio.run(web.api_account_whoami("weixin-channels", force=True))
@@ -61,8 +61,10 @@ def test_mp_whoami_reads_backend_account_not_configured_label(account_state, mon
     web._write_login_marker("wechat-oa-mp", "success")
     monkeypatch.setattr(web, "_wechat_web_account", lambda: {"name": "Configured label"})
     def run(command, **kwargs):
-        assert command[-2:] == ["whoami", "--no-proxy"]
         assert command[1].endswith("weixin_mp_stats.py")
+        assert command[2] == "whoami"
+        assert "--no-proxy" in command
+        assert "--profile-base" in command
         return SimpleNamespace(returncode=0, stdout=json.dumps({
             "loggedIn": True, "name": "Actual MP account", "avatar": "https://self.test/mp.png",
         }))
@@ -88,7 +90,7 @@ def test_mp_expired_session_can_use_appid_without_faking_backend_login(account_s
 
 def test_douyin_whoami_does_not_use_model_proxy(account_state, monkeypatch):
     def run(command, **kwargs):
-        assert command[-2:] == ["whoami", "--no-proxy"]
+        assert "--no-proxy" in command
         return SimpleNamespace(returncode=0, stdout='{"loggedIn":false,"name":"","avatar":""}')
 
     monkeypatch.setattr(web.subprocess, "run", run)
@@ -154,7 +156,7 @@ def test_unknown_account_identity_preserves_last_verified_identity(account_state
 
 def test_manual_whoami_bypasses_server_cache(account_state, monkeypatch):
     calls = []
-    web._WHOAMI_CACHE["xiaohongshu"] = (web.time.time(), {
+    web._WHOAMI_CACHE["_general::xiaohongshu"] = (web.time.time(), {
         "loggedIn": False, "name": "", "avatar": ""})
 
     def run(*args, **kwargs):
@@ -175,7 +177,7 @@ def test_confident_logout_removes_expired_marker(account_state, monkeypatch):
         returncode=0, stdout='{"loggedIn": false}'))
     assert not asyncio.run(web.api_account_whoami("xiaohongshu"))["loggedIn"]
     assert not (account_state / "xiaohongshu.json").exists()
-    assert not web._WHOAMI_CACHE["xiaohongshu"][1]["loggedIn"]
+    assert not web._WHOAMI_CACHE["_general::xiaohongshu"][1]["loggedIn"]
 
 
 def test_concurrent_account_checks_share_one_browser(account_state, monkeypatch):

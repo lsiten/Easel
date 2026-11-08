@@ -223,7 +223,7 @@ echo -e "\n${DIM}  安装 Easel 与 Web 依赖；进入 Web 设置选择 Codex /
 # 默认先走国内镜像再回落 nodejs.org：实测同一个包 nodejs.org ~20KB/s（20 分钟都下不完），
 # 阿里云 ~590KB/s（53 秒）。EASEL_NODE_MIRROR 可覆盖，镜像目录结构需与 nodejs.org/dist 一致。
 NODE_MIRROR_DEFAULT="https://mirrors.aliyun.com/nodejs-release"
-step "1/6" "检查系统环境" "Python · Node.js · Git · FFmpeg"
+step "1/7" "检查系统环境" "Python · Node.js · Git · FFmpeg"
 info "检查 Node.js..."
 node_version_ok() {
     { [ "$1" -eq 20 ] && [ "$2" -ge 19 ]; } \
@@ -385,7 +385,7 @@ fi
 # 国内网络直连 registry.npmjs.org 经常极慢或超时，探测失败自动回落 npmmirror。
 # 注意不再 `npm config set registry` 写用户全局配置 —— 改为安装命令上挂
 # --registry，只影响本次安装，装完用户 npm 配置一个字节都没动。
-step "2/6" "准备 Node.js 工具链" "选择 npm registry"
+step "2/7" "准备 Node.js 工具链" "选择 npm registry"
 NPM_REGISTRY="${EASEL_NPM_REGISTRY:-}"
 if [ -z "$NPM_REGISTRY" ]; then
     if npm ping --registry https://registry.npmjs.org --fetch-timeout=5000 \
@@ -402,7 +402,7 @@ fi
 NPM_REGISTRY_ARGS=(--registry "$NPM_REGISTRY")
 
 # ---- 3. 安装 easel CLI ----
-step "3/6" "安装 Easel 运行依赖" "Web · 媒体 · 浏览器发布"
+step "3/7" "安装 Easel 运行依赖" "Web · 媒体 · 浏览器发布"
 info "[1/2] 安装 Python 依赖与 easel CLI..."
 # pip 镜像：EASEL_PIP_INDEX 显式指定 > 官方源连通性探测 > 默认官方源（同 npm 逻辑）。
 # 国内直连 pypi.org 装依赖（fastapi/playwright 等）经常超时；探测失败自动回落清华源。
@@ -441,7 +441,7 @@ fi
 ok "[2/2] easel 命令可用"
 
 # ---- 4. 构建 Web 前端（Node 已装 → easel web 直接出真 UI，无需手动构建） ----
-step "4/6" "构建 Web 工作台" "React production bundle"
+step "4/7" "构建 Web 工作台" "React production bundle"
 info "构建 Web 前端..."
 if [ -d "$PROJECT_ROOT/web/frontend" ]; then
     if [ "$SETUP_MODE" = check ]; then
@@ -460,7 +460,7 @@ else
     exit 1
 fi
 
-step "5/6" "准备执行引擎设置" "Codex · OpenCode · ACP · Pi · API 仅聊天模式"
+step "5/7" "准备执行引擎设置" "Codex · OpenCode · ACP · Pi · API 仅聊天模式"
 if [ -f "$PROJECT_ROOT/.env" ]; then
     ok ".env 已存在"
 else
@@ -470,7 +470,7 @@ fi
 run_step '执行引擎初始设置' python3 -m easel.installation "$PROJECT_ROOT" api
 ok "执行引擎可稍后在 Web 设置；新安装默认 API 仅聊天模式"
 
-step "6/6" "安装并验证浏览器" "平台操作优先 Ego，其次 Chrome；Chromium 用于渲染"
+step "6/7" "安装并验证浏览器" "平台操作优先 Ego，其次 Chrome；Chromium 用于渲染"
 if [ "$SETUP_MODE" = check ]; then
     # check 模式跳过了 pip 安装，playwright 模块自然不在。这里不能当成失败，否则
     # check 模式必然在最后一步中断 —— 与上面 easel 命令那处同理。
@@ -501,6 +501,17 @@ elif python3 -m easel.browser; then
 else
     warn_collect '平台浏览器' '未找到可用的 Ego / Chrome，请安装 Chrome 或检查 Ego 安装' \
         'python3 -m playwright install chrome'
+fi
+
+# ---- 7. OpenFilm 视频制作引擎（可选；子项目已内置，缺则 npm 全局装或 npx 兜底；不阻塞安装） ----
+step "7/7" "OpenFilm 视频制作引擎" "子项目已内置；缺则 npm 全局装或 npx 兜底（可选，不阻塞安装）"
+if [ "$SETUP_MODE" = check ]; then
+    emit_action run_step 'openfilm' 'python3 skills/shared/scripts/openfilm.py check'
+elif python3 "$PROJECT_ROOT/skills/shared/scripts/openfilm.py" check >/dev/null 2>&1; then
+    ok "OpenFilm 视频制作引擎已就绪（子项目 / 全局 / npx）"
+else
+    warn_collect 'OpenFilm' '未就绪；OpenFilm 视频制作 skill 需要它（可选，不阻塞安装）' \
+        'python3 skills/shared/scripts/openfilm.py install'
 fi
 
 write_install_report

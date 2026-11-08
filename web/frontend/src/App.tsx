@@ -1,9 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
 import Sidebar from './components/Sidebar';
 import type { Page } from './components/Sidebar';
 import ChatPage from './components/ChatPage';
 import SkillPage from './components/SkillPage';
 import OutputsPage from './components/OutputsPage';
+import AssetsPage from './components/AssetsPage';
+import VideoPage from './components/VideoPage';
+import VideoStudioPanel from './components/VideoStudioPanel';
 import AccountsPage from './components/AccountsPage';
 import ProfilePage from './components/ProfilePage';
 import DashboardPage from './components/DashboardPage';
@@ -17,6 +21,8 @@ import OnboardingWizard from './components/OnboardingWizard';
 import SettingsPanel from './components/SettingsPanel';
 import { fetchStatus, fetchPersonas, streamChat, fetchLastTurn, stopChat } from './lib/api';
 import type { PersonaItem, UploadedFile, ChatQuestion } from './lib/api';
+import { OpenfilmStudioContext, useOpenfilmStudio } from './lib/useOpenfilmStudio';
+import { useConversationReferences } from './lib/useConversationReferences';
 import { questionStatus } from './lib/api';
 import { deleteSession as deleteRemoteSession } from './lib/api';
 import {
@@ -44,10 +50,27 @@ function onboardingSeen(): boolean {
   return false;
 }
 
+// 画像选择的持久化：selectedPersona 原本只在内存里，刷新/重启 App 后丢失 →
+// 用户选过的画像（如「禾城AI造物局」）被重置为「通用模式」。这里把选择落到
+// localStorage，刷新后恢复；同时 settle 只在活动会话「确有画像」时才覆盖，
+// 通用会话不再把已选画像清掉。
+const PERSONA_KEY = 'easel_persona';
+
+function loadPersona(): string {
+  try { return localStorage.getItem(PERSONA_KEY) || ''; } catch { return ''; }
+}
+
+function savePersona(name: string): void {
+  try {
+    if (name) localStorage.setItem(PERSONA_KEY, name);
+    else localStorage.removeItem(PERSONA_KEY);
+  } catch { /* ignore */ }
+}
+
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const [personas, setPersonas] = useState<PersonaItem[]>([]);
-  const [selectedPersona, setSelectedPersona] = useState('');
+  const [selectedPersona, setSelectedPersona] = useState(loadPersona());
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState('connecting');
@@ -58,6 +81,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 装完还没配模型时，首开要把用户直接带到模型设置页（安装脚本不再在终端问 Key）
   const [needModelSetup, setNeedModelSetup] = useState(false);
+
+  // 画像选择持久化：任何对 selectedPersona 的变更都落 localStorage，刷新/重启后恢复，
+  // 不再把用户已选画像（如「禾城AI造物局」）重置为「通用模式」。
+  useEffect(() => { savePersona(selectedPersona); }, [selectedPersona]);
 
   // 对话里的「产物路径 → 内容库」跳转：linkifyOutputs 把目录路径生成为
   // `#/outputs/<路径>` 锚点，这里监听 hashchange 切页并带上下文，随后清掉 hash
@@ -94,7 +121,7 @@ export default function App() {
       setSessions(sess);
       setActiveSessionId(id);
       const s = sess.find((x) => x.id === id);
-      if (s) setSelectedPersona(s.persona || '');
+      if (s?.persona) setSelectedPersona(s.persona);  // 通用会话不再清掉已持久化的画像
       try { sessionStorage.setItem(TAB_SESSION_KEY, id); } catch { /* ignore */ }
       ch?.postMessage({ type: 'claim', sessionId: id });
     };
@@ -203,6 +230,14 @@ export default function App() {
   const activeIdRef = useRef<string | null>(activeSessionId);
   useEffect(() => { activeIdRef.current = activeSessionId; }, [activeSessionId]);
 
+  // 视频预览/侧栏是否展示：由后端 has_video 驱动（本会话是否已产出有内容的视频）——
+  // 未产出视频的会话不再因「提到视频」等关键词挂载预览组件；显式视频会话
+  // （activeSession.video）不受内容状态影响仍挂载（显示「制作中」）。
+  const conversationPersona = activeSession?.persona || selectedPersona;
+  const conversationStudio = useOpenfilmStudio({ session: activeSession?.id, persona: conversationPersona,
+    enabled: currentPage === 'chat' && !!activeSession }, 6000);
+  const hasVideo = !!conversationStudio.studio?.has_video;
+
   // ---- 流式对话：状态与生命周期都放在 App（永不卸载），切页/切 ChatPage 都不中断/丢失 ----
   const [streams, setStreams] = useState<Record<string, StreamState>>({});
   const streamCtl = useRef<Record<string, AbortController>>({});
@@ -212,6 +247,11 @@ export default function App() {
   const typingBuf = useRef<Record<string, string>>({});
   const typingTimer = useRef<Record<string, ReturnType<typeof setInterval>>>({});
   const TYPING_INTERVAL = 12;          // 每 tick 间隔 ms（短回复约 83 字/秒：快且有逐字感）
+
+  // 结构化引用（右侧视频制作面板选中的元素：整片/镜头/音轨/素材）：与文本 quote 不同，
+  // 带 kind/label/detail，随消息交给 Agent 让其明确知道引用对象是什么。App 持有以便
+  // ChatPage（输入框 chip）与 VideoStudioPanel（右侧「引用」按钮）共享；发送/切会话时清空。
+  const { refs, refsFor, addRef, removeRef, clearRefs } = useConversationReferences(activeSession?.id, conversationPersona);
 
   const pumpTyping = (sessionId: string) => {
     const buf = typingBuf.current[sessionId] || '';
@@ -275,6 +315,7 @@ export default function App() {
     text: string,
     persona: string | undefined,
     attachments: UploadedFile[] = [],
+    quote?: string,
   ) => {
     const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try { sessionStorage.setItem(`easel_pending_turn:${sessionId}`, turnId); } catch { /* ignore */ }
@@ -371,8 +412,11 @@ export default function App() {
       },
       // onHeartbeat：防呆心跳（30s 静默）。只设独立的「未卡住」提示，绝不写 activity/thinking → 不顶掉真实状态。
       (note) => setStreams((p) => (p[sessionId] ? { ...p, [sessionId]: { ...p[sessionId], stillWorking: note } } : p)),
+      quote,
+      refsFor(sessionId, persona),
     );
-  }, [appendAssistant, clearStream]);
+    clearRefs();
+  }, [appendAssistant, clearStream, clearRefs, refsFor]);
 
   // 刷新/重开页面后按 eventId=0 重放当前 job，再继续实时 tail；旧任务无事件日志时退回最终快照。
   const resumePendingTurn = useCallback((sessionId: string) => {
@@ -495,6 +539,7 @@ export default function App() {
     attachments: UploadedFile[] = [],
     legacyAgentText?: string,
     truncateAt?: number,
+    quote?: string,
   ) => {
     const visible = displayText.trim();
     const agentMessage = (legacyAgentText || displayText).trim();
@@ -520,11 +565,11 @@ export default function App() {
       saveSessions(next);
       return next;
     });
-    startStream(sessionId, agentMessage, persona, attachments);
+    startStream(sessionId, agentMessage, persona, attachments, quote);
   }, [selectedPersona, startStream]);
 
-  const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[]) => {
-    sendUserAndStream(sessionId, displayText, attachments);
+  const handleSendMessage = useCallback((sessionId: string, displayText: string, attachments?: UploadedFile[], quote?: string) => {
+    sendUserAndStream(sessionId, displayText, attachments, undefined, undefined, quote);
   }, [sendUserAndStream]);
 
   // 重试/编辑重发：从该用户消息处截断（丢弃它及其之后），用 text 重新发起。
@@ -542,6 +587,15 @@ export default function App() {
   const handleUseTopic = useCallback((title: string) => {
     const prompt = `围绕当前热点「${title}」：先判断它适不适合我的账号赛道；若合适，给 2-3 个差异化的二创角度，并把你最推荐的那条写成可直接发布的文案初稿。`;
     const ns = createSession(selectedPersona || undefined);
+    setSessions((prev) => { const u = [ns, ...prev]; saveSessions(u); return u; });
+    setActiveSessionId(ns.id);
+    setCurrentPage('chat');
+    sendUserAndStream(ns.id, prompt);
+  }, [selectedPersona, sendUserAndStream]);
+  const handleMakeVideo = useCallback(() => {
+    const prompt = "用 AI 做一支视频：结合我的账号画像，从素材库取合适的图片/视频/文本素材，规划分镜与脚本，用 OpenFilm 制作，并在 Studio 里可视化预览与编辑。";
+    const ns = createSession(selectedPersona || undefined);
+    ns.video = true;   // 视频会话：对话页右侧展示 OpenFilm 制作过程（Studio 可视化）
     setSessions((prev) => { const u = [ns, ...prev]; saveSessions(u); return u; });
     setActiveSessionId(ns.id);
     setCurrentPage('chat');
@@ -603,6 +657,7 @@ export default function App() {
   }, [activeSessionId, selectedPersona]);
 
   const handleNewChat = useCallback(() => {
+    clearRefs();
     const newSession = createSession(selectedPersona || undefined);
     setSessions((prev) => {
       const updated = [newSession, ...prev];
@@ -611,16 +666,17 @@ export default function App() {
     });
     setActiveSessionId(newSession.id);
     setCurrentPage('chat');
-  }, [selectedPersona]);
+  }, [selectedPersona, clearRefs]);
 
   const handleSessionSelect = useCallback((id: string) => {
+    clearRefs();
     setActiveSessionId(id);
     const target = sessions.find(s => s.id === id);
     if (target) {
       setSelectedPersona(target.persona || '');
     }
     setCurrentPage('chat');
-  }, [sessions]);
+  }, [sessions, clearRefs]);
 
   const handleSessionDelete = useCallback((id: string) => {
     if (!window.confirm('确定删除这条对话？')) return;
@@ -715,10 +771,13 @@ export default function App() {
         return activeSession ? (
           <ChatPage
             apiDirect={apiDirect}
-            key={activeSession.id}
+            key={JSON.stringify(['chat', activeSession.id, conversationPersona])}
             session={activeSession}
+            persona={conversationPersona}
             stream={streams[activeSession.id]}
-            onSend={(displayText, attachments) => handleSendMessage(activeSession.id, displayText, attachments)}
+            refs={refs}
+            onRemoveRef={removeRef}
+            onSend={(displayText, attachments, quote) => handleSendMessage(activeSession.id, displayText, attachments, quote)}
             onStop={() => handleStopStream(activeSession.id)}
             onResend={(userIndex, displayText, attachments, legacyAgentText) => handleResend(
               activeSession.id, userIndex, displayText, attachments, legacyAgentText,
@@ -740,6 +799,7 @@ export default function App() {
                 }
               }
             }}
+            isVideoSession={videoPanel}
           />
         ) : null;
       case 'trends':
@@ -755,7 +815,11 @@ export default function App() {
       case 'skills':
         return <SkillPage persona={selectedPersona} />;
       case 'outputs':
-        return <OutputsPage jumpPath={outputsJump} onJumpHandled={clearOutputsJump} persona={selectedPersona} />;
+        return <OutputsPage key={JSON.stringify([activeSession?.id, selectedPersona])} session={activeSession?.id} jumpPath={outputsJump} onJumpHandled={clearOutputsJump} persona={selectedPersona} />;
+      case 'assets':
+        return <AssetsPage key={selectedPersona || 'generic'} persona={selectedPersona} />;
+      case 'video':
+        return <VideoPage session={activeSession?.id} persona={selectedPersona} onMakeVideo={handleMakeVideo} />;
       case 'accounts':
         return <AccountsPage persona={selectedPersona} />;
       case 'profile':
@@ -787,6 +851,31 @@ export default function App() {
     setActiveSessionId(newSession.id);
   }, [activeSessionId]);
 
+  const videoPanel =
+    currentPage === 'chat' &&
+    !!activeSession &&
+    (activeSession.video === true || hasVideo);
+
+  const [videoPanelWidth, setVideoPanelWidth] = useState(42);
+  const videoHostRef = useRef<HTMLDivElement>(null);
+  const startVspResize = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    const host = videoHostRef.current;
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    const onMove = (ev: globalThis.MouseEvent) =>
+      setVideoPanelWidth(Math.max(18, Math.min(82, 100 - ((ev.clientX - rect.left) / rect.width) * 100)));
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+  };
   return (
     <div className="app-layout">
       <Sidebar
@@ -812,9 +901,24 @@ export default function App() {
         {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (
           <SubNav current={currentPage} onNavigate={setCurrentPage} />
         )}
-        <div className="page-host">
-          {renderPage()}
-        </div>
+        <OpenfilmStudioContext.Provider value={currentPage === 'chat' ? conversationStudio : null}>
+          <div
+            ref={videoHostRef}
+            className={`page-host${videoPanel ? ' with-side' : ''}`}
+            style={videoPanel ? ({ '--vsp-width': `${videoPanelWidth}%` } as CSSProperties) : undefined}
+          >
+            {renderPage()}
+            {videoPanel && <div className="vsp-resize" onMouseDown={startVspResize} />}
+            {videoPanel && activeSession && (
+              <VideoStudioPanel
+                key={JSON.stringify(['studio', activeSession.id, conversationPersona])}
+                onAddRef={addRef}
+                session={activeSession.id}
+                persona={conversationPersona}
+              />
+            )}
+          </div>
+        </OpenfilmStudioContext.Provider>
       </main>
 
       {/* 首次使用：推荐配置画像 */}

@@ -157,6 +157,12 @@ export const IconFile = ({ size, className, strokeWidth }: P) => (
   </svg>
 );
 export const IconRefresh = IconRetry;
+export const IconExternal = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M15 3h6v6" /><path d="M10 14 21 3" />
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6" />
+  </svg>
+);
 
 export const IconFolder = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>
@@ -194,5 +200,11 @@ export const IconBookmark = ({ size, className, strokeWidth }: P) => (
 export const IconPublish = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}>
     <path d="m3 11 18-5v12L3 14v-3z" /><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+  </svg>
+);
+export const IconQuote = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}>
+    <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2-4 0-1 4-1 4-4 0-8 1-8 5v2c0 1.012.012 2 2 2 1.012 0 1-3 1-3 0 1 0 4 4 4h4Z" />
+    <path d="M13 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2-4 0-1 4-1 4-4 0-8 1-8 5v2c0 1.012.012 2 2 2 1.012 0 1-3 1-3 0 1 0 4 4 4h4Z" />
   </svg>
 );

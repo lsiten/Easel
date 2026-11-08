@@ -31,6 +31,15 @@ function appendPersona(url: string, persona?: string): string {
   return `${url}${sep}persona=${encodeURIComponent(persona)}`;
 }
 
+/** 给 OpenFilm 接口 URL 追加 ?session=&persona=（按会话隔离视频项目）；两者皆空时原样返回。
+ *  后端据此用 _eff_sk(session, persona) 解析出与聊天同一的会话 key，取本会话自己的视频项目。 */
+function appendOpenfilmSession(url: string, session?: string, persona?: string): string {
+  let u = url;
+  if (session) u += `${u.includes('?') ? '&' : '?'}session=${encodeURIComponent(session)}`;
+  if (persona) u += `${u.includes('?') ? '&' : '?'}persona=${encodeURIComponent(persona)}`;
+  return u;
+}
+
 export interface StatusResponse {
   gateway: boolean;
   transport?: string;
@@ -147,6 +156,8 @@ export interface OutputNode {
   fileCount?: number;        // 仅 dir：递归文件数
   meta?: OutputMeta;         // 仅顶层项目 dir
   external?: boolean;        // 外部只读内容源（本地知识库）：前端隐藏删除、后端拒写/删
+  openfilmProject?: boolean; // 该视频项目可由 openfilm Studio 直接编辑（含 film.html）
+  assets?: boolean;          // 素材库节点（@assets/…）：懒加载/媒体走 /api/assets/*，只读、不可删
 }
 
 /** @deprecated 用 OutputNode（type==='file'）。保留别名减少改动面。 */
@@ -318,9 +329,62 @@ export function profileBuildStatus(name: string): Promise<ProfileBuildStatus> {
   return request<ProfileBuildStatus>(`/api/profile/build/status/${encodeURIComponent(name)}`);
 }
 
-export function fetchOutputs(persona?: string): Promise<OutputNode[]> {
-  // persona 有知识库聚焦时，后端只返回该画像命中的内容源子节点（通用/空=全量）。
-  return request<OutputNode[]>(persona ? `/api/outputs?persona=${encodeURIComponent(persona)}` : '/api/outputs');
+export function fetchOutputs(persona?: string, signal?: AbortSignal): Promise<OutputNode[]> {
+  // 本地产物按画像归属隔离，外部内容源按知识库聚焦过滤；通用/空=全量。
+  return request<OutputNode[]>(appendPersona('/api/outputs', persona), { signal });
+}
+
+/** openfilm Studio 能力：
+ * studio=编辑视角（editor，带 timeline）→ 右侧侧边栏 VideoStudioPanel；
+ * film=film 预览（播放、无 timeline）；player=player 模式（播放/暂停+进度、默认暂停）→ 消息内联预览（创作产物）；
+ * 二者按会话/项目独立、不被 open 广播翻转；capability=探测结果；
+ * rev=film 内容指纹（mtime），面板据此在内容变化时重载预览 iframe（实时反映制作过程）。 */
+export interface OpenfilmStudioInfo {
+  studio: string;
+  readonly topic?: string;
+  editor?: string;
+  film?: string;
+  /** 消息内联预览 = player 模式（OpenFilm 播放/暂停 + 进度条、默认暂停；替代 film 的自动播放）。 */
+  player?: string;
+  available: boolean;
+  openfilm?: string;
+  runner?: string[];
+  error?: string;
+  rev?: string;
+  /** 本会话是否已产出（有真实内容的）视频：false 则前端不挂载视频预览/侧栏，避免无视频会话也出现预览。 */
+  has_video?: boolean;
+}
+export function fetchOpenfilmStudio(session: string | undefined, persona: string | undefined, signal?: AbortSignal): Promise<OpenfilmStudioInfo> {
+  return request<OpenfilmStudioInfo>(appendOpenfilmSession('/api/openfilm/studio', session, persona), { signal });
+}
+
+export interface OpenfilmStudioLaunchResult {
+  launched: boolean;
+  topic: string;
+  reason?: string;
+}
+export function launchOpenfilmStudio(topic: string | undefined, session: string | undefined, persona: string | undefined): Promise<OpenfilmStudioLaunchResult> {
+  return request<OpenfilmStudioLaunchResult>('/api/openfilm/studio/launch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ topic: topic ?? null, session: session ?? null, persona: persona ?? null }),
+  });
+}
+
+/** 结构化引用：右侧视频制作面板里选中的元素（整片/镜头/音轨/品牌轨道/素材），随消息交给 Agent。 */
+export interface Reference {
+  kind: string;      // openfilm-project | openfilm-scene | openfilm-track | asset | ...
+  id: string;        // 稳定标识
+  label: string;     // 展示名
+  detail?: string;   // 结构化内容（路径/时间/画面文字等），供 Agent 据此理解引用对象
+}
+
+export interface OpenfilmRefsInfo {
+  refs: Reference[];
+  topic?: string;
+}
+export function fetchOpenfilmRefs(session: string | undefined, persona: string | undefined, signal?: AbortSignal): Promise<OpenfilmRefsInfo> {
+  return request<OpenfilmRefsInfo>(appendOpenfilmSession('/api/openfilm/refs', session, persona), { signal });
 }
 
 /** 懒加载外部内容源（本地知识库）某层子节点；路径形如 @<source>/<子路径>。 */
@@ -334,6 +398,86 @@ export function fetchKbScope(persona?: string): Promise<{ focused: boolean; patt
   return persona
     ? request<{ focused: boolean; patterns: string[] }>(`/api/persona/${encodeURIComponent(persona)}/kb-scope`)
     : Promise.resolve({ focused: false, patterns: [] });
+}
+
+// ── 素材库（每账号素材源 → 按内容理解整理 → 供视频/文章创作取用）：随画像，仅本画像素材库 ──
+export interface AssetsStatus {
+  profile: string; registered: boolean; sources: string[]; registered_all: number;
+  organized: number; categories: number; asset_dir: string;
+}
+export interface AssetsItem {
+  name: string; kind: string; category: string; tags: string[]; summary: string; source: string; mtime?: number;
+}
+
+/** 素材库顶层树（分类目录 + 文件计数），随画像；未配置返回 null。 */
+export function fetchAssetsTree(persona?: string): Promise<OutputNode | null> {
+  return request<OutputNode | null>(persona ? `/api/assets/tree?persona=${encodeURIComponent(persona)}` : '/api/assets/tree');
+}
+/** 素材库某层子节点（懒加载，只读；@assets/<子路径> 经后端防穿越）。 */
+export function fetchAssetsChildren(path: string, persona?: string): Promise<OutputNode[]> {
+  const base = `/api/assets/children/${path.split('/').map(encodeURIComponent).join('/')}`;
+  return request<OutputNode[]>(persona ? `${base}?persona=${encodeURIComponent(persona)}` : base);
+}
+/** 素材库文件原样 URL（媒体/文本预览）；随画像。 */
+export function assetsMediaUrl(path: string, persona?: string): string {
+  const base = `${BASE}/api/assets/media/${path.split('/').map(encodeURIComponent).join('/')}`;
+  return persona ? `${base}?persona=${encodeURIComponent(persona)}` : base;
+}
+/** 素材库能力/状态：该画像是否已登记素材源、已整理多少素材、多少分类。 */
+export function assetsStatus(persona?: string): Promise<AssetsStatus> {
+  return request<AssetsStatus>(persona ? `/api/assets/check?persona=${encodeURIComponent(persona)}` : '/api/assets/check');
+}
+export function fetchAssetsSources(persona?: string): Promise<{ profile: string; sources: string[] }> {
+  return request<{ profile: string; sources: string[] }>(persona ? `/api/assets/sources?persona=${encodeURIComponent(persona)}` : '/api/assets/sources');
+}
+/** 登记一个素材源目录到当前画像素材库。 */
+export function assetsAdd(directory: string, persona?: string): Promise<{ added: string[]; already: string[]; invalid: string[]; sources: string[] }> {
+  return request('/api/assets/sources' + (persona ? `?persona=${encodeURIComponent(persona)}` : ''), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ directory }),
+  });
+}
+export interface AssetOrganizationJob {
+  readonly id: string;
+  readonly profile: string;
+  readonly status: 'running' | 'done' | 'failed';
+  readonly total: number;
+  readonly completed: number;
+  readonly placed: number;
+  readonly dry_run: boolean;
+  readonly error: string;
+}
+/** Agent 理解图片、视频和文本后整理；后台执行，进度随画像恢复。 */
+export function assetsOrganize(dryRun = false, persona?: string): Promise<AssetOrganizationJob> {
+  return request('/api/assets/organize' + (persona ? `?persona=${encodeURIComponent(persona)}` : ''), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dry_run: dryRun }),
+  });
+}
+export function fetchAssetOrganization(persona: string, signal?: AbortSignal): Promise<AssetOrganizationJob | null> {
+  return request(`/api/assets/organize?persona=${encodeURIComponent(persona)}`, { signal });
+}
+/** 按主题/类型检索当前画像素材库（供视频/文章创作取用）。 */
+export function assetsQuery(what: string, kind?: string, limit = 10, persona?: string): Promise<AssetsItem[]> {
+  const q = new URLSearchParams({ what, limit: String(limit) });
+  if (kind) q.set('kind', kind);
+  if (persona) q.set('persona', persona);
+  return request<AssetsItem[]>(`/api/assets/query?${q.toString()}`);
+}
+
+/** 注销一个已登记的素材源目录。 */
+export function assetsRemove(directory: string, persona?: string): Promise<{ removed: boolean; sources: string[] }> {
+  const base = `/api/assets/sources/${directory.split('/').map(encodeURIComponent).join('/')}`;
+  return request(base + (persona ? `?persona=${encodeURIComponent(persona)}` : ''), { method: 'DELETE' });
+}
+
+// ── 素材源目录选择器：点击选择本机目录（后端 /api/assets/pick-dir 只读浏览）──
+export interface DirEntry { name: string; path: string; }
+export interface DirListing {
+  path: string; name: string; parent: string; dirs: DirEntry[]; quick: DirEntry[];
+}
+/** 列出本机某层子目录（供「点击选择目录」导航，只读浏览；path 空则从主目录起步）。 */
+export function fetchDirEntries(path?: string): Promise<DirListing> {
+  const base = `/api/assets/pick-dir${path ? `?path=${encodeURIComponent(path)}` : ''}`;
+  return request<DirListing>(base);
 }
 
 // ── 知识库能力（集成项目 Otter Wiki / llm-wiki）：查询 / 沉淀，随画像聚焦 ──
@@ -690,6 +834,8 @@ export function streamChat(
   attachments: UploadedFile[] = [],
   onQuestion?: (q: ChatQuestion) => void,
   onHeartbeat?: (note: string) => void,
+  quote?: string,
+  references?: Reference[],
 ): AbortController {
   const controller = new AbortController();
   let lastEventId = 0;
@@ -783,7 +929,7 @@ export function streamChat(
         const res = first
           ? await fetch(`${BASE}/api/chat/stream`, {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments }),
+              body: JSON.stringify({ message, persona: persona || undefined, sessionId, turnId, attachments, quote: quote || undefined, references: references?.length ? references : undefined }),
               signal: controller.signal,
             })
           : await fetch(`${BASE}/api/chat/jobs/${encodeURIComponent(turnId || '')}/stream?after=${lastEventId}`, {

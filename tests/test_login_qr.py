@@ -788,14 +788,47 @@ def test_zhihu_runner_handles_launch_failure_or_login_during_capture(tmp_path, m
 
 
 def web_functions():
+    """把登录/状态相关 web 函数连同其完整依赖闭包抽到隔离 env 里执行。
+
+    早期版本只抽 3 个目标函数，缺依赖（_pk/_login_dir/…）→ NameError。这里按 AST 解析出
+    目标函数的传递依赖闭包并一起 exec，常量从真实 web.app 模块取真值；可变状态（锁/进程/
+    缓存）给独立实例，测试用 env.update(...) 注入，不污染真实模块。"""
+    import web.app as mod
     tree = ast.parse((ROOT / "web/app.py").read_text(encoding="utf-8"))
-    names = {"api_login_start", "_start_login", "_login_status"}
-    nodes = [node for node in tree.body
-             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names]
+    defs = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defs[node.name] = node
+    targets = {"api_login_start", "_start_login", "_login_status"}
+    closure = set(targets)
+    changed = True
+    while changed:
+        changed = False
+        for name in list(closure):
+            node = defs.get(name)
+            if node is None:
+                continue
+            for ref in ast.walk(node):
+                if isinstance(ref, ast.Name) and ref.id in defs and ref.id not in closure:
+                    closure.add(ref.id)
+                    changed = True
+    nodes = [defs[name] for name in closure if name in defs]
     for node in nodes:
         node.decorator_list = []
-    env = {"json": json, "subprocess": subprocess, "sys": sys, "asyncio": asyncio,
-           "_LOGIN_START_LOCKS": {}}
+    constants = ["BROWSER_PROFILES", "HTTPException", "LOGIN_DIR", "LOGIN_TIMEOUT",
+                 "PROJECT_ROOT", "SHARED_SCRIPTS", "WECHAT_CONFIG_YAML", "WECHAT_WEB_ACCOUNT",
+                 "json", "os", "subprocess", "sys", "asyncio", "threading", "Path",
+                 "valid_persona_name", "profile_exists"]
+    env = {"__name__": "test_web_functions"}
+    for name in constants:
+        env[name] = getattr(mod, name)
+    # 可变状态给独立实例，避免污染真实模块（测试用 env.update 注入）
+    env["_LOGIN_START_LOCKS"] = {}
+    env["_WHOAMI_CACHE"] = {}
+    env["_WHOAMI_LOCK"] = threading.Lock()
+    env["_WHOAMI_TASKS"] = {}
+    env["LOGIN_PROCESSES"] = {}
+    env["LOGIN_RUNNERS"] = getattr(mod, "LOGIN_RUNNERS")
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "web/app.py", "exec"), env)
     return env
 
@@ -805,7 +838,7 @@ def test_web_detects_exited_login_even_after_qr_ready(tmp_path, state):
     env = web_functions()
     login_state.write_status(str(tmp_path / "zhihu.json"), state)
     (tmp_path / "zhihu.png").write_bytes(b"stale")
-    env.update(LOGIN_DIR=tmp_path, LOGIN_PROCESSES={"zhihu": SimpleNamespace(poll=lambda: 1)})
+    env.update(LOGIN_DIR=tmp_path, LOGIN_PROCESSES={"_general::zhihu": SimpleNamespace(poll=lambda: 1)})
     status = env["_login_status"]("zhihu")
     assert status["state"] == "error"
     assert status["qr"] == ""
@@ -838,8 +871,8 @@ def test_repeated_web_login_preserves_existing_process_and_qr():
     env = web_functions()
     status = {"state": "qr_ready", "qr": "_login/zhihu.png"}
     env.update(LOGIN_RUNNERS={"zhihu": {"backend": "web", "wp": "zhihu"}},
-               LOGIN_PROCESSES={"zhihu": SimpleNamespace(poll=lambda: None)},
-               _login_status=lambda platform: status)
+               LOGIN_PROCESSES={"_general::zhihu": SimpleNamespace(poll=lambda: None)},
+               _login_status=lambda platform, persona="": status)
     assert asyncio.run(env["api_login_start"]("zhihu")) == {"mode": "qr", **status}
 
 
@@ -856,7 +889,7 @@ def test_web_login_sets_child_utf8_without_changing_parent_env(tmp_path, monkeyp
                LOGIN_PROCESSES={}, LOGIN_DIR=tmp_path, SHARED_SCRIPTS=SCRIPTS,
                PROJECT_ROOT=ROOT, LOGIN_TIMEOUT=180, _WHOAMI_LOCK=threading.Lock(),
                _WHOAMI_CACHE={}, _proxy_env=lambda: original.copy(),
-               _login_status=lambda platform: {"state": "qr_ready", "qr": ""},
+               _login_status=lambda platform, persona="": {"state": "qr_ready", "qr": ""},
                asyncio=SimpleNamespace(sleep=sleep, Lock=asyncio.Lock))
     asyncio.run(env["api_login_start"]("zhihu"))
     child_env = popen.call_args.kwargs["env"]
