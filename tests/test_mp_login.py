@@ -1,50 +1,59 @@
 """公众号重复登录及异常状态回归测试，不启动真实浏览器。"""
-import ast
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+import pytest
+
+import web.app as web
+
 ROOT = Path(__file__).resolve().parents[1]
 
-def load_web_functions():
-    tree = ast.parse((ROOT / 'web/app.py').read_text(encoding='utf-8'))
-    names = {'api_mp_login_start', '_stop_mp_login_on_shutdown'}
-    nodes = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in names]
-    for node in nodes:
-        node.decorator_list = []
-    env = {'subprocess': subprocess}
-    exec(compile(ast.Module(body=nodes, type_ignores=[]), 'web/app.py', 'exec'), env)
-    return env
+
+def test_repeated_start_preserves_existing_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    process = Mock()
+    process.poll.return_value = None
+    qr = tmp_path / "wechat-oa-mp.png"
+    qr.write_bytes(b"existing-qr")
+    (tmp_path / "wechat-oa-mp.json").write_text('{"state":"qr_ready"}', encoding="utf-8")
+    monkeypatch.setattr(web, "LOGIN_DIR", tmp_path)
+    monkeypatch.setattr(web, "LOGIN_PROCESSES", {"_general::wechat-oa-mp": process})
+    launch = Mock(side_effect=AssertionError("An active login must not launch a second browser"))
+    monkeypatch.setattr(web.subprocess, "Popen", launch)
+
+    for _ in range(2):
+        result = asyncio.run(web.api_mp_login_start("wechat-oa"))
+        assert result["mode"] == "qr"
+        assert result["state"] == "qr_ready"
+        assert result["qr"] == "_login/wechat-oa-mp.png"
+    assert qr.read_bytes() == b"existing-qr"
+    launch.assert_not_called()
+
+
+@pytest.mark.parametrize("persona", ["", "named-account"])
+def test_shutdown_reaps_login_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, persona: str,
+) -> None:
+    process = Mock()
+    process.poll.return_value = None
+    monkeypatch.setattr(web, "LOGIN_DIR", tmp_path)
+    monkeypatch.setattr(web, "profile_exists", lambda name: name == "named-account")
+    monkeypatch.setattr(web, "LOGIN_PROCESSES", {f"{persona or '_general'}::wechat-oa-mp": process})
+
+    web._stop_mp_login_on_shutdown()
+
+    process.terminate.assert_called_once()
+    process.wait.assert_called_once_with(timeout=5)
+    assert web.LOGIN_PROCESSES == {}
+    marker = tmp_path / persona / "wechat-oa-mp.json"
+    assert json.loads(marker.read_text(encoding="utf-8"))["state"] == "expired"
+
 
 class MpLoginTests(unittest.TestCase):
-    def test_repeated_start_preserves_existing_session(self):
-        env = load_web_functions()
-        proc = Mock()
-        proc.poll.return_value = None
-        status = {'state': 'qr_ready', 'qr': '_login/wechat-oa-mp.png'}
-        env.update(LOGIN_RUNNERS={'wechat-oa': {'backend': 'wechat-oa'}},
-                   LOGIN_PROCESSES={'wechat-oa-mp': proc}, _mp_login_status=lambda: status)
-        # 文件目录与启动依赖未提供；复用会话不应碰触它们。
-        for _ in range(2):
-            self.assertEqual(asyncio.run(env['api_mp_login_start']('wechat-oa')), {'mode': 'qr', **status})
-
-    def test_shutdown_reaps_login_process(self):
-        env = load_web_functions()
-        proc = Mock()
-        proc.poll.return_value = None
-        marker = Mock()
-        env.update(LOGIN_PROCESSES={'wechat-oa-mp': proc}, _write_login_marker=marker)
-        env['_stop_mp_login_on_shutdown']()
-        proc.terminate.assert_called_once()
-        proc.wait.assert_called_once_with(timeout=5)
-        self.assertEqual(env['LOGIN_PROCESSES'], {})
-        self.assertEqual(marker.call_args.args[1], 'expired')
-
     def test_browser_failure_writes_error_state(self):
         script = ROOT / 'skills/shared/scripts/weixin_mp_stats.py'
         spec = importlib.util.spec_from_file_location('mp_login_under_test', script)

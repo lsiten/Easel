@@ -28,7 +28,7 @@ def test_login_start_returns_without_waiting_for_qr(tmp_path, monkeypatch, platf
     assert result["qr"] == ""
     assert "二维码" in result["message"]
     launch.assert_called_once()
-    key = "wechat-oa-mp" if platform == "wechat-oa" else platform
+    key = "_general::wechat-oa-mp" if platform == "wechat-oa" else f"_general::{platform}"
     assert web.LOGIN_PROCESSES[key] is process
     assert launch.call_args.kwargs["stdout"].closed
 
@@ -62,7 +62,7 @@ def test_zhihu_restart_exits_old_runner_before_removing_qr(tmp_path, monkeypatch
         order.append("wait")
 
     old.wait.side_effect = wait
-    monkeypatch.setattr(web, "LOGIN_PROCESSES", {"zhihu": old})
+    monkeypatch.setattr(web, "LOGIN_PROCESSES", {"_general::zhihu": old})
     new = SimpleNamespace(poll=lambda: None)
     def launch(*args, **kwargs):
         assert not qr.exists()
@@ -74,7 +74,7 @@ def test_zhihu_restart_exits_old_runner_before_removing_qr(tmp_path, monkeypatch
     assert order == ["terminate", "wait", "launch"]
     assert result["state"] == "starting"
     assert result["qr"] == ""
-    assert web.LOGIN_PROCESSES["zhihu"] is new
+    assert web.LOGIN_PROCESSES["_general::zhihu"] is new
 
 
 def test_zhihu_restart_keeps_old_qr_if_runner_cannot_exit(tmp_path, monkeypatch):
@@ -85,7 +85,7 @@ def test_zhihu_restart_keeps_old_qr_if_runner_cannot_exit(tmp_path, monkeypatch)
     old = Mock()
     old.poll.return_value = None
     old.wait.side_effect = web.subprocess.TimeoutExpired("login", 8)
-    monkeypatch.setattr(web, "LOGIN_PROCESSES", {"zhihu": old})
+    monkeypatch.setattr(web, "LOGIN_PROCESSES", {"_general::zhihu": old})
     launch = Mock()
     monkeypatch.setattr(web.subprocess, "Popen", launch)
     with pytest.raises(web.HTTPException) as failure:
@@ -105,7 +105,7 @@ def test_login_restart_reaps_old_runner_before_replacing_qr(tmp_path, monkeypatc
     process = Mock()
     process.poll.return_value = None
     process.wait.side_effect = lambda **kwargs: qr.exists() or pytest.fail("removed before exit")
-    monkeypatch.setattr(web, "LOGIN_PROCESSES", {platform: process})
+    monkeypatch.setattr(web, "LOGIN_PROCESSES", {f"_general::{platform}": process})
     def launch(*args, **kwargs):
         assert not qr.exists()
         process.wait.assert_called_once_with(timeout=8)
@@ -118,7 +118,7 @@ def test_login_restart_reaps_old_runner_before_replacing_qr(tmp_path, monkeypatc
 @pytest.mark.parametrize("state", ["starting", "qr_ready", "scanned"])
 def test_mp_exited_runner_always_terminates_polling(tmp_path, monkeypatch, state):
     monkeypatch.setattr(web, "LOGIN_DIR", tmp_path)
-    monkeypatch.setattr(web, "LOGIN_PROCESSES", {"wechat-oa-mp": SimpleNamespace(poll=lambda: 1)})
+    monkeypatch.setattr(web, "LOGIN_PROCESSES", {"_general::wechat-oa-mp": SimpleNamespace(poll=lambda: 1)})
     (tmp_path / "wechat-oa-mp.json").write_text(f'{{"state":"{state}"}}')
     (tmp_path / "wechat-oa-mp.png").write_bytes(b"old")
     status = web._mp_login_status()

@@ -77,33 +77,24 @@ if ($env:Path -ne $expectedPath) { throw 'Process PATH was lost or registry PATH
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_all_non_ascii_ps1_files_keep_bom() -> None:
+@pytest.mark.parametrize("script", [
+    PROJECT_ROOT / rel
+    for rel in subprocess.check_output(
+        ["git", "ls-files", "*.ps1"], cwd=PROJECT_ROOT, text=True, timeout=60,
+    ).splitlines()
+    if "vendor/" not in rel
+])
+def test_all_non_ascii_ps1_files_keep_bom(script: Path) -> None:
     """含非 ASCII 字符的 .ps1 必须带 UTF-8 BOM。
 
     PS 5.1 没有 BOM 时按系统 ANSI 代码页解析，中文字符串会乱码甚至报语法错误。
     本仓库每个 .ps1 都带中文注释，所以这条对全部文件生效 —— 新增 ps_tolerance_probe.ps1
     时就漏了 BOM，而它恰恰要在 CI 的 5.1 下运行，是 PSScriptAnalyzer 替我抓到的。
     """
-    import subprocess
-
-    out = subprocess.run(["git", "ls-files", "*.ps1"], cwd=PROJECT_ROOT,
-                         capture_output=True, text=True, timeout=60).stdout
-    checked = 0
-    for rel in out.split():
-        if "vendor/" in rel:
-            continue
-        full = PROJECT_ROOT / rel
-        if not full.is_file():
-            continue  # 已从工作树删除但仍在 git 索引里的文件（如 scripts/gateway.ps1）
-        data = full.read_bytes()
-        try:
-            data.decode("ascii")
-            continue        # 纯 ASCII 文件不需要 BOM
-        except UnicodeDecodeError:
-            pass
-        assert data[:3] == b"\xef\xbb\xbf", f"{rel} 含非 ASCII 字符，必须带 UTF-8 BOM"
-        checked += 1
-    assert checked >= 2, f"只检查到 {checked} 个文件，git ls-files 可能失效了"
+    data = script.read_bytes()
+    assert data.isascii() or data.startswith(b"\xef\xbb\xbf"), (
+        f"{script.relative_to(PROJECT_ROOT)} 含非 ASCII 字符，必须带 UTF-8 BOM"
+    )
 
 
 def test_no_powershell7_only_syntax() -> None:

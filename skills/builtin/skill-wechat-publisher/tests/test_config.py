@@ -66,6 +66,10 @@ def test_unified_config_reads_wechat_publisher_yaml(tmp_path, monkeypatch):
 
 def test_load_env_reads_unified_image_and_integration_config(tmp_path, monkeypatch):
     """load_env() should export unified YAML settings as process env fallbacks."""
+    import config
+
+    # load_env writes directly, including keys absent before this test.
+    monkeypatch.setattr(config.os, "environ", dict(config.os.environ))
     for key in (
         "WECHATSYNC_MCP_TOKEN",
         "OPENAI_API_KEY",
@@ -100,8 +104,6 @@ def test_load_env_reads_unified_image_and_integration_config(tmp_path, monkeypat
         integrations:
           wechatsync_mcp_token: "sync_token"
     """), encoding="utf-8")
-
-    import config
 
     monkeypatch.setattr(config, "_config_path", lambda: yaml_path)
     config.load_env()

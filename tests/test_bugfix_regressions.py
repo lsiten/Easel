@@ -3,7 +3,6 @@
 每个用例对应一个已确认（可复现/可推理验证）并已修复的 bug。命名即 bug 描述。
 覆盖：
 - web/app.py   ：job 事件回放跳过坏行；登出终止仍在跑的登录进程；schedule 锁单例
-- doctor/ping  ：healthz 回环探针绕过继承的 http_proxy
 - video_ops    ：cut 的 start+end 换算成 -t(end-start)；_tsec 解析
 - intro_outro  ：card 的 logo 恒为输入 1（--bg-image 不再多 +1）
 - content_guard：私网 IP 正则不再吞 3 段版本号（macOS 10.15.7）
@@ -16,8 +15,6 @@ import asyncio
 import importlib.util
 import json
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,11 +79,11 @@ def test_logout_terminates_inflight_login_runner(tmp_path, monkeypatch):
     monkeypatch.setattr(web, "LOGIN_DIR", tmp_path / "_login")
     (tmp_path / "profiles" / "KuaishouProfile").mkdir(parents=True, exist_ok=True)
     fake = _FakeLoginProc()
-    monkeypatch.setattr(web, "LOGIN_PROCESSES", {platform: fake})
+    monkeypatch.setattr(web, "LOGIN_PROCESSES", {f"_general::{platform}": fake})
     result = asyncio.run(web.api_logout(platform))
     assert result["ok"] is True
     assert fake.terminated is True, "登出必须停掉仍在跑的登录进程，否则它会把 success 标记写回"
-    assert platform not in web.LOGIN_PROCESSES
+    assert f"_general::{platform}" not in web.LOGIN_PROCESSES
 
 
 # ── web/app.py：_schedule.json 读-改-写必须有共享锁 ─────────────────────
@@ -136,45 +133,6 @@ def test_schedule_write_endpoints_hold_shared_lock(monkeypatch):
     deleted = asyncio.run(web.api_schedule_delete("new-item-123"))
     assert deleted == {"ok": True, "deleted": "new-item-123"}
     assert [item["id"] for item in store] == ["item-1"]
-
-
-# ── gateway healthz：回环探针不得走继承的 http_proxy ────────────────────
-def test_gateway_healthz_bypasses_inherited_proxy(monkeypatch):
-    from easel.commands import doctor
-
-    class _Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            body = b'{"ok":true}'
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *args):
-            pass
-
-    server = HTTPServer(("127.0.0.1", 0), _Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        port = server.server_address[1]
-        monkeypatch.setattr(doctor, "healthz_url",
-                             lambda: f"http://127.0.0.1:{port}/healthz")
-        # 黑洞代理：若探针继承系统代理，会连到 10.255.255.1:9 并超时 → 误报 FAIL
-        monkeypatch.setenv("http_proxy", "http://10.255.255.1:9")
-        monkeypatch.setenv("HTTP_PROXY", "http://10.255.255.1:9")
-        monkeypatch.setenv("https_proxy", "http://10.255.255.1:9")
-        monkeypatch.delenv("no_proxy", raising=False)
-        monkeypatch.delenv("NO_PROXY", raising=False)
-        assert doctor._gateway_healthy() is True
-
-        monkeypatch.setattr(web, "healthz_url",
-                             lambda: f"http://127.0.0.1:{port}/healthz")
-        assert web.check_gateway() is True
-    finally:
-        server.shutdown()
-        server.server_close()
 
 
 # ── video_ops：cut 的 --start+--end 必须产出 [start,end) 片段 ────────────

@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from anyio.lowlevel import checkpoint
 from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "web"))
@@ -23,7 +24,7 @@ def test_concurrent_refreshes_share_one_fetch(monkeypatch):
     async def scenario():
         started, finish = asyncio.Event(), asyncio.Event()
         calls = []
-        async def fetch(platform):
+        async def fetch(platform, persona=""):
             calls.append(platform)
             started.set()
             await finish.wait()
@@ -31,13 +32,12 @@ def test_concurrent_refreshes_share_one_fetch(monkeypatch):
 
         monkeypatch.setattr(web, "_fetch_analytics", fetch)
         first = asyncio.create_task(web.api_analytics("xiaohongshu"))
-        await started.wait()
+        await asyncio.wait_for(started.wait(), timeout=1)
         second = asyncio.create_task(web.api_analytics("xiaohongshu"))
-        await asyncio.sleep(0)
+        await checkpoint()
         finish.set()
         assert await first == await second == {"platform": "xiaohongshu"}
         assert calls == ["xiaohongshu"]
-        await asyncio.sleep(0)
         assert web._analytics_inflight == {}
         assert await web.api_analytics("xiaohongshu") == {"platform": "xiaohongshu"}
         assert calls == ["xiaohongshu", "xiaohongshu"]
@@ -47,18 +47,19 @@ def test_concurrent_refreshes_share_one_fetch(monkeypatch):
 
 def test_cancelled_client_does_not_cancel_shared_fetch(monkeypatch):
     async def scenario():
-        finish = asyncio.Event()
-        async def fetch(platform):
+        started, finish = asyncio.Event(), asyncio.Event()
+        async def fetch(platform, persona=""):
+            started.set()
             await finish.wait()
             return {"platform": platform}
 
         monkeypatch.setattr(web, "_fetch_analytics", fetch)
         client = asyncio.create_task(web.api_analytics("xiaohongshu"))
-        await asyncio.sleep(0)
+        await asyncio.wait_for(started.wait(), timeout=1)
         client.cancel()
         with pytest.raises(asyncio.CancelledError):
             await client
-        assert not web._analytics_inflight["xiaohongshu"].cancelled()
+        assert not web._analytics_inflight["_general::xiaohongshu"].cancelled()
         other = asyncio.create_task(web.api_analytics("xiaohongshu"))
         finish.set()
         assert await other == {"platform": "xiaohongshu"}
@@ -68,14 +69,13 @@ def test_cancelled_client_does_not_cancel_shared_fetch(monkeypatch):
 
 def test_failed_refresh_can_be_retried(monkeypatch):
     async def scenario():
-        async def fetch(platform):
+        async def fetch(platform, persona=""):
             raise HTTPException(502, "Unavailable")
 
         monkeypatch.setattr(web, "_fetch_analytics", fetch)
         for attempt in range(2):
             with pytest.raises(HTTPException):
                 await web.api_analytics("xiaohongshu")
-            await asyncio.sleep(0)
             assert web._analytics_inflight == {}
 
     asyncio.run(scenario())
@@ -180,6 +180,9 @@ def test_platform_profile_url_from_persona_is_passed_to_fetch(monkeypatch):
     # 主修复：csdn/juejin 应把画像 platforms.md 里配好的「本人主页」透传给 account_stats（--profile-url），
     # 直连本人主页、绕过会误抓推荐作者的自动解析。
     captured = {}
+    monkeypatch.setattr(web, "load_profile_text", lambda name: (
+        "## CSDN\n主页：<https://blog.csdn.net/test-author>\n" if name == "test-profile" else ""
+    ))
     def _runner(cmd, env, timeout):
         captured["cmd"] = cmd
         return subprocess.CompletedProcess([], 0, json.dumps({
@@ -187,7 +190,7 @@ def test_platform_profile_url_from_persona_is_passed_to_fetch(monkeypatch):
             "following": None, "posts": None, "metrics": [], "notes": [],
         }), "")
     monkeypatch.setattr(web, "_run_analytics_command", _runner)
-    out = asyncio.run(web._fetch_analytics("csdn", "水獭比特"))
+    out = asyncio.run(web._fetch_analytics("csdn", "test-profile"))
     assert out["loggedIn"] is False
     assert "--profile-url" in captured["cmd"]
-    assert "https://blog.csdn.net/Lsiten" in captured["cmd"]
+    assert "https://blog.csdn.net/test-author" in captured["cmd"]
