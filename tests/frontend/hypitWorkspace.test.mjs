@@ -112,6 +112,40 @@ test('malformed HypiHub pricing disables Build without showing a fake receipt', 
   view.unmount();
 });
 
+test('local and BYOK Build requests carry the internal pricing receipt', async () => {
+  for (const readiness of [
+    { ready: true, engine: 'hypit', route: 'local' },
+    { ready: true, engine: 'hypit', provider: { route: 'byok' } },
+  ]) {
+    const { view, tree } = await loadedWorkspace(readiness);
+    const buildButton = nodes(tree, 'button').find(item => String(item.props.children).includes('开始 Sample Build'));
+    assert.ok(buildButton);
+    buildButton.props.onClick();
+    await settle();
+    const request = view.pending.at(-1);
+    assert.equal(request.url.pathname, '/api/hypit/runs');
+    const body = JSON.parse(request.options.body);
+    assert.equal(body.pricing.pricing_id, 'hypit-sample-1');
+    assert.equal(body.pricing.kind, 'sample');
+    request.reply({ id: 'run-1', run_id: 'run-1', session_id: scope.session, profile_id: scope.persona, state: 'planned' });
+    view.unmount();
+  }
+});
+
+test('HypiHub approval IDs do not unlock Full Build without approved state', async () => {
+  const { view, tree } = await loadedWorkspace({ ready: true, engine: 'hypit', provider: { route: 'hypihub' }, approval: { approval_id: 'approval-pending', approved: false } });
+  const fullToggle = nodes(tree, 'button').find(item => item.props.children === 'Full');
+  assert.ok(fullToggle);
+  fullToggle.props.onClick();
+  const fullTree = view.render(scope);
+  const text = JSON.stringify(fullTree);
+  assert.match(text, /需要批准/);
+  const buildButton = nodes(fullTree, 'button').find(item => String(item.props.children).includes('开始 Full Build'));
+  assert.ok(buildButton);
+  assert.equal(buildButton.props.disabled, true);
+  view.unmount();
+});
+
 test('failed Build output remains visible with its actionable error', async () => {
   const { view, tree } = await loadedWorkspace({ ready: true, engine: 'hypit', route: 'local' });
   const buildButton = nodes(tree, 'button').find(item => String(item.props.children).includes('开始 Sample Build'));

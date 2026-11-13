@@ -137,7 +137,7 @@ function readinessMessage(value: HypitReadiness | null | undefined): string {
 
 function approvalLabel(value: unknown): string {
   const record = asRecord(value);
-  if (record.approved === true || record.approval_state === 'approved' || record.state === 'approved' || typeof record.approval_id === 'string' && record.approval_id) return '已批准';
+  if (record.approved === true || record.approval_state === 'approved' || record.state === 'approved' || record.status === 'approved') return '已批准';
   return '需要批准';
 }
 
@@ -218,9 +218,8 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
   const provider = asRecord(readinessRecord.provider);
   const providerApproval = asRecord(readinessRecord.approval || asRecord(pricing).approval);
   const needsPaidApproval = route === 'hypihub';
-  const providerApprovalState = providerApproval.approval_state || providerApproval.state || readinessRecord.approval_state || provider.approval_state;
-  const hasPaidApproval = providerApproval.approved === true || (typeof providerApproval.approval_id === 'string' && providerApproval.approval_id.length > 0) || providerApprovalState === 'approved';
-  const pricingReady = route !== 'hypihub' || pricing !== null;
+  const hasPaidApproval = providerApproval.approved === true || providerApproval.approval_state === 'approved' || providerApproval.state === 'approved' || providerApproval.status === 'approved' || readinessRecord.approval_state === 'approved' || provider.approval_state === 'approved';
+  const pricingReady = pricing !== null;
   const canBuild = !!scope && readiness.data?.ready === true && pricingReady && (!needsPaidApproval || hasPaidApproval) && (buildKind === 'sample' || approvalState === 'approved');
 
   const refreshRun = useCallback(async (runId: string, currentScope: HypitScope) => {
@@ -257,7 +256,7 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
       const fingerprint = selected && typeof selected.sample_fingerprint === 'string' ? selected.sample_fingerprint : undefined;
       const planned = await planHypitRun(scope, {
         kind: buildKind,
-        ...(route === 'hypihub' && pricing ? { pricing } : {}),
+        pricing,
         input_fingerprint: fingerprint,
       });
       if (actionGeneration !== generation.current) return;
