@@ -424,8 +424,37 @@ export function fetchHypitReports(runId: string, scope: HypitScope, signal?: Abo
 export function fetchHypitArtifacts(runId: string, scope: HypitScope, signal?: AbortSignal) { return request<{ run_id: string; artifacts: Array<{ name: string; kind: string }> }>(`/api/hypit/runs/${encodeURIComponent(runId)}/artifacts?${hypitQuery(scope)}`, { signal }); }
 /** Import one explicitly selected Hypit artifact into the account-scoped content library. */
 export function importHypitArtifact(runId: string, scope: HypitScope, artifact: string) { return request<{ imported: boolean; name?: string }>(`/api/hypit/runs/${encodeURIComponent(runId)}/artifacts/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...scope, run_id: runId, artifact }) }); }
-export function fetchHypitStudio(scope: HypitScope, signal?: AbortSignal) { return request<{ available: boolean; studio: string; scoped: boolean }>(`/api/hypit/studio?${hypitQuery(scope)}`, { signal }); }
-export function launchHypitStudio(scope: HypitScope, topic?: string) { return request<{ launched: boolean; scoped: boolean }>('/api/hypit/studio/launch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...scope, topic: topic ?? null, action: 'launch' }) }); }
+export interface HypitStudioInfo {
+  available: boolean;
+  studio: string;
+  external_url: string;
+  scoped: boolean;
+  run_id: string;
+  session_id: string;
+  profile_id: string;
+  token?: string;
+  nonce?: string;
+  expires_at?: number;
+  frame_ancestors?: string;
+  engine: 'hypit';
+  source: 'easel';
+}
+export function fetchHypitStudio(scope: HypitScope, signal?: AbortSignal, runId?: string) {
+  const suffix = runId ? `&run_id=${encodeURIComponent(runId)}` : '';
+  return request<HypitStudioInfo>(`/api/hypit/studio?${hypitQuery(scope)}${suffix}`, { signal });
+}
+export function launchHypitStudio(scope: HypitScope, topic?: string, studio?: Pick<HypitStudioInfo, 'run_id' | 'token' | 'nonce'>, action: 'launch' | 'open' | 'refresh' | 'cancel' = 'launch') {
+  return request<{ launched: boolean; scoped: boolean; action: string; state: string }>('/api/hypit/studio/launch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...scope, topic: topic ?? null, action, run_id: studio?.run_id ?? null, token: studio?.token ?? null, nonce: studio?.nonce ?? null, engine: 'hypit', source: 'easel' }),
+  });
+}
+export function handshakeHypitStudio(scope: HypitScope, studio: Pick<HypitStudioInfo, 'run_id' | 'token' | 'nonce'>) {
+  return request<{ accepted: boolean; nonce: string }>('/api/hypit/studio/handshake', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...scope, ...studio, action: 'handshake', engine: 'hypit', source: 'easel' }),
+  });
+}
 
 // ── 素材库（每账号素材源 → 按内容理解整理 → 供视频/文章创作取用）：随画像，仅本画像素材库 ──
 export interface AssetsStatus {

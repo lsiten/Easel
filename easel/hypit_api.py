@@ -3,11 +3,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from .hypit_lifecycle import HypitLifecycle, LifecycleError, LifecycleRecord
 from .hypit_variants import HypitVariantStore, VariantError, VariantNotFoundError
 from .video_artifact_boundary import ArtifactBoundaryError, import_artifacts
+from .hypit_studio import (embed_url, frame_ancestors, issue_token, license_available,
+                          origin_allowed, policy_for_url, studio_url, validate_token)
 
 ROOT = Path(__file__).resolve().parents[1] / "outputs" / "_hypit"
 LIFECYCLE = HypitLifecycle(ROOT / "runs")
@@ -43,6 +45,11 @@ class ActionRequest(Scope):
 class StudioRequest(Scope):
     topic: str | None = None
     action: str = "launch"
+    run_id: str | None = None
+    token: str | None = None
+    nonce: str | None = None
+    engine: str = "hypit"
+    source: str = "easel"
 
 class AnalysisRequest(Scope):
     run_id: str | None = None
@@ -264,11 +271,117 @@ def approve_variant(variant_id: str, req: Scope):
     try: return _safe(VARIANTS.approve_sample(variant_id).to_dict())
     except VariantError as exc: raise HTTPException(409, str(exc)) from exc
 
+def _studio_origin_allowed(request: Request) -> None:
+    origin = request.headers.get("origin")
+    if not origin_allowed(origin):
+        raise HTTPException(403, "studio origin is not allowlisted")
+
+
+def _studio_authorize(request: Request, req: StudioRequest) -> LifecycleRecord:
+    if not req.run_id:
+        raise HTTPException(403, "studio run required")
+    _studio_origin_allowed(request)
+    try:
+        record = _get(req.run_id, req)
+    except HTTPException:
+        raise
+    if not _studio_ready(record):
+        raise HTTPException(403, "studio run is not ready")
+    if not license_available():
+        raise HTTPException(403, "Hypit Studio license unavailable")
+    if not policy_for_url(studio_url()):
+        raise HTTPException(403, "studio origin is not allowlisted")
+    return record
+
+
+def _studio_scope_record(run_id: str | None, scope: Scope) -> LifecycleRecord | None:
+    if not run_id:
+        return None
+    return _get(run_id, scope)
+
+
+def _studio_ready(record: LifecycleRecord) -> bool:
+    """A run must still belong to the requested session and be in a usable state."""
+    return record.state in {"planned", "running", "built", "succeeded", "failed"}
+
+
+def _studio_payload(scope: Scope, run_id: str | None, request: Request) -> dict[str, Any]:
+    """Issue one scoped Studio URL only after run, readiness, license and origin checks."""
+    url = studio_url()
+    result: dict[str, Any] = {
+        "session_id": scope.session_id,
+        "profile_id": scope.profile_id,
+        "run_id": run_id or "",
+        "available": False,
+        "studio": "",
+        "external_url": url,
+        "scoped": True,
+        "engine": "hypit",
+        "source": "easel",
+        "frame_ancestors": frame_ancestors(),
+    }
+    if not run_id:
+        return result
+    rec = _studio_scope_record(run_id, scope)
+    if rec is None or not _studio_ready(rec):
+        return result
+    if not license_available() or not url or not policy_for_url(url):
+        return result
+    issued = issue_token(run_id=run_id, profile_id=scope.profile_id, session_id=scope.session_id)
+    result.update({
+        "available": True,
+        "studio": embed_url(url, issued["token"], run_id),
+        "external_url": url,
+        "token": issued["token"],
+        "nonce": issued["claims"]["nonce"],
+        "expires_at": issued["claims"]["exp"],
+        "run_id": run_id,
+    })
+    return result
+
+
 @router.get("/studio")
-def studio(session_id: str = Query(...), profile_id: str = Query(...)):
-    return {"session_id": session_id, "profile_id": profile_id, "available": False, "studio": "", "scoped": True}
+def studio(request: Request, response: Response, session_id: str = Query(...), profile_id: str = Query(...), run_id: str | None = Query(default=None)):
+    response.headers["Content-Security-Policy"] = frame_ancestors()
+    return _studio_payload(Scope(session_id=session_id, profile_id=profile_id), run_id, request)
+
+
+@router.post("/studio/handshake")
+def studio_handshake(request: Request, req: StudioRequest):
+    if req.action != "handshake" or not req.run_id or not req.token or not req.nonce:
+        raise HTTPException(400, "handshake requires run_id and token")
+    if req.engine != "hypit" or req.source != "easel":
+        raise HTTPException(403, "studio identity mismatch")
+    rec = _studio_authorize(request, req)
+    try:
+        claims = validate_token(req.token, run_id=req.run_id, profile_id=req.profile_id, session_id=req.session_id, nonce=req.nonce)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    return {"accepted": True, "run_id": req.run_id, "session_id": req.session_id, "profile_id": req.profile_id, "engine": claims["engine"], "source": claims["source"], "nonce": claims["nonce"]}
+
 
 @router.post("/studio/launch")
-def studio_launch(req: StudioRequest):
-    if req.action not in {"launch", "status", "control"}: raise HTTPException(400, "invalid studio action")
-    return {"session_id": req.session_id, "profile_id": req.profile_id, "launched": False, "reason": "openfilm delegation required", "scoped": True}
+def studio_launch(request: Request, req: StudioRequest):
+    if req.action not in {"launch", "status", "control", "refresh", "open", "cancel"}:
+        raise HTTPException(400, "invalid studio action")
+    if req.engine != "hypit" or req.source != "easel":
+        raise HTTPException(403, "studio identity mismatch")
+    if not req.run_id or not req.token or not req.nonce:
+        raise HTTPException(403, "studio token and nonce required")
+    rec = _studio_authorize(request, req)
+    try:
+        claims = validate_token(req.token, run_id=req.run_id, profile_id=req.profile_id, session_id=req.session_id, nonce=req.nonce)
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    if req.action == "cancel":
+        rec = LIFECYCLE.cancel(req.run_id)
+    return {"session_id": req.session_id, "profile_id": req.profile_id, "run_id": req.run_id,
+            "launched": req.action in {"launch", "open"}, "action": req.action, "engine": claims["engine"],
+            "source": claims["source"], "scoped": True, "state": rec.state}
+
+
+@router.post("/studio/control")
+def studio_control(request: Request, req: StudioRequest):
+    if req.action not in {"control", "refresh", "open", "cancel"}:
+        raise HTTPException(400, "invalid studio action")
+    return studio_launch(request, req)
