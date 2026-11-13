@@ -101,7 +101,13 @@ def fetch_reference(url: str, *, opener: Callable[..., Any] | None = None, resol
     if max_bytes <= 0 or max_redirects < 0:
         raise ValueError("invalid fetch limits")
     current = validate_reference_url(url, resolver=resolver)
-    open_fn = opener or urllib.request.urlopen
+    if opener is None:
+        class _NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+        open_fn = urllib.request.build_opener(_NoRedirect()).open
+    else:
+        open_fn = opener
     for _ in range(max_redirects + 1):
         response = open_fn(current, timeout=30)
         try:
@@ -143,7 +149,7 @@ def validate_video_metadata(*, byte_size: int, duration_seconds: float, width: i
 
 def redact(value: Any) -> Any:
     """Recursively remove credentials, cookies, absolute paths and query secrets."""
-    secret = re.compile(r"(?i)(bearer\s+|api[_ -]?key\s*[=:]\s*|token\s*[=:]\s*|password\s*[=:]\s*|cookie\s*[=:]\s*)[^\s,;]+")
+    secret = re.compile(r"(?i)(bearer\s+|(?:client[_ -]?secret|api[_ -]?key|secret|token|password|cookie|credential)\s*[=:]\s*)[^\s,;]+")
     path = re.compile(r"(?:/Users/|/home/|/tmp/|[A-Za-z]:\\)[^\s,;]+")
     if isinstance(value, str):
         return path.sub("[PATH_REDACTED]", secret.sub("[REDACTED]", value))

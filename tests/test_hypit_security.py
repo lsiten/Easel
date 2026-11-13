@@ -54,3 +54,30 @@ def test_license_gate_is_local_single_org(monkeypatch):
     assert license_gate(attribution="Hypit replication powered by Easel")["scope"] == "local-single-org"
     with pytest.raises(LicenseError):
         license_gate(attribution="Hypit replication powered by Easel", multi_tenant=True)
+
+
+def test_redirects_are_explicitly_bounded_and_revalidated(monkeypatch):
+    from easel.hypit_security import fetch_reference
+
+    class Response:
+        def __init__(self, status, headers, body=b""):
+            self.status, self.headers, self.body = status, headers, body
+        def read(self, n=-1):
+            value, self.body = self.body, b""
+            return value
+        def close(self):
+            pass
+
+    monkeypatch.setenv("EASEL_VIDEO_REFERENCE_HOSTS", "example.com")
+    seen = []
+    def opener(url, timeout=30):
+        seen.append(url)
+        return Response(302, {"Location": "https://example.com/next"})
+    with pytest.raises(ReferenceURLBlocked, match="too many redirects"):
+        fetch_reference("https://example.com/start", opener=opener, resolver=_public_resolver, max_redirects=3)
+    assert len(seen) == 4
+
+
+def test_redaction_masks_key_value_secret_forms():
+    value = redact("client_secret=abc secret=def api_key=ghi Bearer jkl")
+    assert "abc" not in value and "def" not in value and "ghi" not in value and "jkl" not in value
