@@ -124,6 +124,7 @@ def import_artifacts(*, source_root: Path | str, destination_root: Path | str, s
         raise ArtifactBoundaryError("manifest artifacts must be a list")
     records: list[ArtifactRecord] = []
     staged: list[tuple[Path, Path]] = []
+    destinations: set[Path] = set()
     try:
         for entry in entries:
             kind, rel, expected = _validate_entry(entry, source_engine=source_engine, target_profile=target_profile)
@@ -136,6 +137,8 @@ def import_artifacts(*, source_root: Path | str, destination_root: Path | str, s
             out_rel = Path("derived") / target_profile / kind / Path(rel).name
             dst = (dest_root / out_rel).resolve()
             if not dst.is_relative_to(dest_root): raise ArtifactBoundaryError("destination escapes root")
+            if dst in destinations: raise ArtifactBoundaryError("duplicate artifact destination")
+            destinations.add(dst)
             if dst.exists(): raise ArtifactBoundaryError("refusing to overwrite existing artifact")
             dst.parent.mkdir(parents=True, exist_ok=True)
             tmp = Path(tempfile.mkstemp(prefix=".artifact-", dir=dst.parent)[1])
@@ -156,21 +159,33 @@ def export_artifacts(*, source_root: Path | str, destination_root: Path | str, s
     if source_engine not in ENGINES or not _safe_scope(target_profile): raise ArtifactBoundaryError("invalid engine or target profile")
     src_root, dst_root = Path(source_root).resolve(), Path(destination_root).resolve()
     result: list[ArtifactRecord] = []
-    for record in records:
-        if not isinstance(record, ArtifactRecord) or record.source_engine != source_engine or record.target_profile != target_profile:
-            raise ArtifactBoundaryError("record provenance mismatch")
-        rel = _safe_relative(record.path)
-        if record.kind == "manifest" and rel.endswith("film.html"):
-            raise ArtifactBoundaryError("implicit Hypit to film.html conversion is forbidden")
-        src = (src_root / rel).resolve()
-        if not src.is_file() or not src.is_relative_to(src_root): raise ArtifactBoundaryError("artifact path escapes source root")
-        if _checksum(src) != record.checksum: raise ArtifactBoundaryError("artifact checksum mismatch")
-        dst = (dst_root / rel).resolve()
-        if dst.exists(): raise ArtifactBoundaryError("refusing to overwrite existing artifact")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        result.append(record)
-    return result
+    staged: list[tuple[Path, Path]] = []
+    destinations: set[Path] = set()
+    try:
+        for record in records:
+            if not isinstance(record, ArtifactRecord) or record.source_engine != source_engine or record.target_profile != target_profile:
+                raise ArtifactBoundaryError("record provenance mismatch")
+            rel = _safe_relative(record.path)
+            if record.kind == "manifest" and rel.endswith("film.html"):
+                raise ArtifactBoundaryError("implicit Hypit to film.html conversion is forbidden")
+            src = (src_root / rel).resolve()
+            if not src.is_file() or not src.is_relative_to(src_root): raise ArtifactBoundaryError("artifact path escapes source root")
+            if _checksum(src) != record.checksum: raise ArtifactBoundaryError("artifact checksum mismatch")
+            dst = (dst_root / rel).resolve()
+            if dst in destinations: raise ArtifactBoundaryError("duplicate artifact destination")
+            destinations.add(dst)
+            if dst.exists(): raise ArtifactBoundaryError("refusing to overwrite existing artifact")
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = Path(tempfile.mkstemp(prefix=".artifact-export-", dir=dst.parent)[1])
+            shutil.copy2(src, tmp)
+            staged.append((tmp, dst))
+            result.append(record)
+        for tmp, dst in staged: os.replace(tmp, dst)
+        return result
+    except Exception:
+        for tmp, _ in staged: tmp.unlink(missing_ok=True)
+        for _, dst in staged: dst.unlink(missing_ok=True)
+        raise
 
 
 def import_native_sources(*, source_root: Path | str, destination_root: Path | str,
@@ -184,7 +199,7 @@ def import_native_sources(*, source_root: Path | str, destination_root: Path | s
         raise ArtifactBoundaryError("native sources must be project, source, or run")
     src_root, dst_root = Path(source_root).resolve(), Path(destination_root).resolve()
     result: dict[str, str] = {}
-    staged: list[tuple[Path, Path]] = []
+    staged: list[tuple[Path, Path, Path]] = []
     try:
         for name, raw in sources.items():
             rel = _safe_relative(str(raw))
@@ -196,12 +211,15 @@ def import_native_sources(*, source_root: Path | str, destination_root: Path | s
             dst.parent.mkdir(parents=True, exist_ok=True)
             tmp = Path(tempfile.mkdtemp(prefix=".native-", dir=dst.parent))
             shutil.copytree(src, tmp / name)
-            staged.append((tmp / name, dst))
+            staged.append((tmp / name, dst, tmp))
             result[name] = dst.relative_to(dst_root).as_posix()
-        for tmp, dst in staged: os.replace(tmp, dst)
+        for child, dst, parent in staged:
+            os.replace(child, dst)
+            parent.rmdir()
         return result
     except Exception:
-        for tmp, dst in staged:
-            shutil.rmtree(tmp, ignore_errors=True)
+        for child, dst, parent in staged:
+            shutil.rmtree(child, ignore_errors=True)
+            parent.rmdir() if parent.exists() and not any(parent.iterdir()) else None
             dst.unlink(missing_ok=True)
         raise
