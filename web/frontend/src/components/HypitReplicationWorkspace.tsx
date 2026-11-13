@@ -35,7 +35,12 @@ const asRecord = (value: unknown): UnknownRecord => value && typeof value === 'o
 const stringList = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 const normalizeVariants = (value: unknown): { variants: HypitVariant[] } => {
   const record = asRecord(value);
-  return { variants: Array.isArray(record.variants) ? record.variants.filter(item => item && typeof item === 'object') as HypitVariant[] : [] };
+  const variants = Array.isArray(record.variants) ? record.variants.map(item => {
+    const clean = asRecord(safeData(item));
+    if (typeof clean.variant_id !== 'string' || !clean.variant_id) return null;
+    return { ...clean, variant_id: clean.variant_id, approval_state: typeof clean.approval_state === 'string' ? clean.approval_state : 'pending' } as HypitVariant;
+  }).filter((item): item is HypitVariant => item !== null) : [];
+  return { variants };
 };
 
 function safeText(value: unknown, fallback = '—'): string {
@@ -44,6 +49,11 @@ function safeText(value: unknown, fallback = '—'): string {
     .replace(/(?:bearer\s+|api[_ -]?key\s*[=:]\s*|token\s*[=:]\s*|password\s*[=:]\s*)[^\s,;]+/gi, '[已隐藏]')
     .replace(/(?:\/Users\/|\/home\/|[A-Za-z]:\\|\/tmp\/)[^\s,;]+/g, '[路径已隐藏]');
   return text.length > 180 ? `${text.slice(0, 177)}…` : text;
+}
+
+function safeError(error: unknown, fallback: string): string {
+  const text = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return text ? safeText(text, fallback) : fallback;
 }
 
 function safeData(value: unknown): unknown {
@@ -136,13 +146,13 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
     if (current !== generation.current) return;
     const apply = <T,>(result: PromiseSettledResult<T>, setter: (state: LoadState<T>) => void) => {
       if (result.status === 'fulfilled') setter({ status: 'ready', data: result.value, error: '' });
-      else setter({ status: 'error', data: null, error: result.reason instanceof Error ? result.reason.message : '请求失败' });
+      else setter({ status: 'error', data: null, error: safeError(result.reason, '请求失败') });
     };
     apply(results[0], setReadiness);
     apply(results[1], setSamplePricing);
     apply(results[2], setFullPricing);
     if (results[3].status === 'fulfilled') setVariants({ status: 'ready', data: normalizeVariants(results[3].value), error: '' });
-    else setVariants({ status: 'error', data: null, error: results[3].reason instanceof Error ? results[3].reason.message : '请求失败' });
+    else setVariants({ status: 'error', data: null, error: safeError(results[3].reason, '请求失败') });
   }, [scope]);
 
   useEffect(() => { void load(); return () => { generation.current += 1; }; }, [load]);
@@ -172,7 +182,7 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
       if (artifactResult.status === 'fulfilled') setArtifacts(Array.isArray(artifactResult.value.artifacts) ? artifactResult.value.artifacts : []);
     } catch (error) {
       if (requestGeneration !== generation.current) return;
-      setRun({ status: 'error', data: null, error: error instanceof Error ? error.message : '运行状态加载失败' });
+      setRun({ status: 'error', data: null, error: safeError(error, '运行状态加载失败') });
     }
   }, []);
 
@@ -185,42 +195,48 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
 
   const build = async () => {
     if (!scope || !pricing || !canBuild) return;
+    const actionGeneration = generation.current;
     setBusy('build'); setRunError(''); setNotice('');
     try {
       const fingerprint = selected && typeof selected.sample_fingerprint === 'string' ? selected.sample_fingerprint : undefined;
       const planned = await planHypitRun(scope, { kind: buildKind, pricing, input_fingerprint: fingerprint });
+      if (actionGeneration !== generation.current) return;
       setRun({ status: 'ready', data: planned, error: '' });
       const runId = planned.id || planned.run_id;
       if (runId) {
         try { await startHypitRun(String(runId), scope); } catch { /* A planned run remains inspectable when the worker is unavailable. */ }
+        if (actionGeneration !== generation.current) return;
         await refreshRun(String(runId), scope);
       }
-    } catch (error) { setRunError(error instanceof Error ? error.message : '无法创建 Build'); }
-    finally { setBusy(''); }
+    } catch (error) { if (actionGeneration === generation.current) setRunError(safeError(error, '无法创建 Build')); }
+    finally { if (actionGeneration === generation.current) setBusy(''); }
   };
 
   const retry = async () => {
     if (!scope || !run.data) return;
     const runId = run.data.id || run.data.run_id;
     if (!runId) return;
+    const actionGeneration = generation.current;
     setBusy('retry');
-    try { const result = await rerunHypitRun(String(runId), scope); setRun({ status: 'ready', data: result, error: '' }); await refreshRun(String(runId), scope); }
-    catch (error) { setRunError(error instanceof Error ? error.message : '重试失败'); }
-    finally { setBusy(''); }
+    try { const result = await rerunHypitRun(String(runId), scope); if (actionGeneration !== generation.current) return; setRun({ status: 'ready', data: result, error: '' }); await refreshRun(String(runId), scope); }
+    catch (error) { if (actionGeneration === generation.current) setRunError(safeError(error, '重试失败')); }
+    finally { if (actionGeneration === generation.current) setBusy(''); }
   };
 
   const cancel = async () => {
     if (!scope || !run.data) return;
     const runId = run.data.id || run.data.run_id;
     if (!runId) return;
+    const actionGeneration = generation.current;
     setBusy('cancel');
-    try { const result = await cancelHypitRun(String(runId), scope); setRun({ status: 'ready', data: result, error: '' }); await refreshRun(String(runId), scope); }
-    catch (error) { setRunError(error instanceof Error ? error.message : '取消失败'); }
-    finally { setBusy(''); }
+    try { const result = await cancelHypitRun(String(runId), scope); if (actionGeneration !== generation.current) return; setRun({ status: 'ready', data: result, error: '' }); await refreshRun(String(runId), scope); }
+    catch (error) { if (actionGeneration === generation.current) setRunError(safeError(error, '取消失败')); }
+    finally { if (actionGeneration === generation.current) setBusy(''); }
   };
 
   const createVariant = async () => {
     if (!scope) return;
+    const actionGeneration = generation.current;
     setBusy('variant'); setNotice('');
     try {
       const created = await createHypitVariant(scope, {
@@ -229,31 +245,39 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
         analysis: { motion: 'unknown' }, timeline: { scenes: [] },
         selected_anchors: [], selected_assets: [], reference_evidence: [],
       });
-      setVariants(previous => ({ status: 'ready', data: { variants: [...(previous.data?.variants || []), created] }, error: '' }));
-      setSelectedVariant(created.variant_id); setVariantDraft(''); setNotice(`已创建变体 ${created.variant_id}`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : '变体创建失败'); }
-    finally { setBusy(''); }
+      if (actionGeneration !== generation.current) return;
+      const cleanCreated = normalizeVariants({ variants: [created] }).variants[0];
+      if (!cleanCreated) throw new Error('变体响应格式无效');
+      setVariants(previous => ({ status: 'ready', data: { variants: [...(previous.data?.variants || []), cleanCreated] }, error: '' }));
+      setSelectedVariant(cleanCreated.variant_id); setVariantDraft(''); setNotice(`已创建变体 ${cleanCreated.variant_id}`);
+    } catch (error) { if (actionGeneration === generation.current) setNotice(safeError(error, '变体创建失败')); }
+    finally { if (actionGeneration === generation.current) setBusy(''); }
   };
 
   const approve = async () => {
     if (!scope || !selected) return;
+    const actionGeneration = generation.current;
     setBusy('approve'); setNotice('');
     try {
       const approved = await approveHypitVariant(selected.variant_id, scope);
-      setVariants(previous => ({ status: 'ready', data: { variants: (previous.data?.variants || []).map(item => item.variant_id === approved.variant_id ? approved : item) }, error: '' }));
+      if (actionGeneration !== generation.current) return;
+      const cleanApproved = normalizeVariants({ variants: [approved] }).variants[0];
+      if (!cleanApproved) throw new Error('批准响应格式无效');
+      setVariants(previous => ({ status: 'ready', data: { variants: (previous.data?.variants || []).map(item => item.variant_id === cleanApproved.variant_id ? cleanApproved : item) }, error: '' }));
       setNotice('样例已批准，完整 Build 已解锁。');
-    } catch (error) { setNotice(error instanceof Error ? error.message : '样例批准失败'); }
-    finally { setBusy(''); }
+    } catch (error) { if (actionGeneration === generation.current) setNotice(safeError(error, '样例批准失败')); }
+    finally { if (actionGeneration === generation.current) setBusy(''); }
   };
 
   const importArtifact = async (artifact: { name: string; kind: string }) => {
     if (!scope || !run.data) return;
     const runId = run.data.id || run.data.run_id;
     if (!runId) return;
+    const actionGeneration = generation.current;
     setBusy(`import:${artifact.name}`); setNotice('');
-    try { await importHypitArtifact(String(runId), scope, artifact.name); setNotice(`已导入 ${safeText(artifact.name)} 到内容库。`); }
-    catch (error) { setNotice(error instanceof Error ? error.message : '产物导入失败'); }
-    finally { setBusy(''); }
+    try { await importHypitArtifact(String(runId), scope, artifact.name); if (actionGeneration === generation.current) setNotice(`已导入 ${safeText(artifact.name)} 到内容库。`); }
+    catch (error) { if (actionGeneration === generation.current) setNotice(safeError(error, '产物导入失败')); }
+    finally { if (actionGeneration === generation.current) setBusy(''); }
   };
 
   if (!scope) return <section className="hypit-workspace hypit-empty-scope" aria-label="Hypit 复制工作台"><IconVideo size={18} /><div><strong>Hypit 复制工作台</strong><p>请选择账号并打开一个会话后开始分析。</p></div></section>;

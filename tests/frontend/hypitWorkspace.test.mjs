@@ -33,3 +33,22 @@ test('workspace keeps Hypit requests scoped and renders malformed variant data s
   view.unmount();
 });
 
+test('replication action APIs preserve scope and explicit artifact selection', () => {
+  const scope = { session_id: 's', profile_id: 'p' };
+  for (const [exportName, args, expectedPath] of [
+    ['startHypitRun', ['run 1', scope], '/api/hypit/runs/run%201/run'],
+    ['approveHypitVariant', ['variant 1', scope], '/api/hypit/variants/variant%201/approve'],
+    ['importHypitArtifact', ['run 1', scope, 'sample.mp4'], '/api/hypit/runs/run%201/artifacts/import'],
+  ]) {
+    const view = setup('lib/api.ts', exportName);
+    view.render(args);
+    const request = view.pending[0];
+    assert.equal(request.url.pathname, expectedPath);
+    const body = JSON.parse(request.options.body);
+    assert.equal(body.session_id, scope.session_id);
+    assert.equal(body.profile_id, scope.profile_id);
+    if (exportName === 'importHypitArtifact') assert.equal(body.artifact, 'sample.mp4');
+    view.unmount();
+  }
+});
+

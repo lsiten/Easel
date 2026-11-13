@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from .hypit_lifecycle import HypitLifecycle, LifecycleError, LifecycleRecord
 from .hypit_variants import HypitVariantStore, VariantError, VariantNotFoundError
+from .video_artifact_boundary import ArtifactBoundaryError, import_artifacts
 
 ROOT = Path(__file__).resolve().parents[1] / "outputs" / "_hypit"
 LIFECYCLE = HypitLifecycle(ROOT / "runs")
@@ -53,6 +54,10 @@ class TimelineRequest(Scope):
     timeline: dict[str, Any] | None = None
     data: dict[str, Any] | None = None
 
+class ArtifactImportRequest(Scope):
+    run_id: str
+    artifact: str = Field(min_length=1, max_length=512)
+
 def _scope(rec: LifecycleRecord, scope: Scope) -> None:
     if rec.session_id != scope.session_id or rec.profile_id != scope.profile_id:
         raise HTTPException(403, "session/profile scope mismatch")
@@ -82,6 +87,8 @@ def _record(rec: LifecycleRecord) -> dict[str, Any]:
     return _safe(rec.as_dict())
 
 def _get(run_id: str, scope: Scope) -> LifecycleRecord:
+    if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", run_id):
+        raise HTTPException(404, "run not found")
     try: rec = LIFECYCLE.get(run_id)
     except Exception as exc: raise HTTPException(404, "run not found") from exc
     _scope(rec, scope)
@@ -157,6 +164,14 @@ def rerun_run(run_id: str, req: ActionRequest):
     except LifecycleError as exc: raise HTTPException(409, str(exc)) from exc
     return _record(rec)
 
+@router.post("/runs/{run_id}/run")
+def start_run(run_id: str, req: ActionRequest):
+    """Start a planned run after the caller's session/profile scope is verified."""
+    if req.run_id and req.run_id != run_id: raise HTTPException(400, "run_id mismatch")
+    _get(run_id, req)
+    try: return _record(LIFECYCLE.run(run_id))
+    except LifecycleError as exc: raise HTTPException(409, str(exc)) from exc
+
 @router.post("/runs/{run_id}/analysis")
 def run_analysis(run_id: str, req: AnalysisRequest):
     if req.run_id and req.run_id != run_id:
@@ -193,6 +208,35 @@ def run_artifacts(run_id: str, session_id: str = Query(...), profile_id: str = Q
     rec = _get(run_id, Scope(session_id=session_id, profile_id=profile_id))
     return {"run_id": run_id, "artifacts": [{"name": Path(p).name, "kind": "artifact"} for p in rec.outputs]}
 
+@router.post("/artifacts/import")
+def import_artifact(req: ArtifactImportRequest):
+    """Import one declared derived Hypit artifact into the shared output surface."""
+    rec = _get(req.run_id, req)
+    if rec.state != "succeeded": raise HTTPException(409, f"artifacts unavailable while {rec.state}")
+    source_root = ROOT / "runs" / req.run_id
+    candidates = []
+    for raw in rec.outputs:
+        path = Path(raw).expanduser().resolve()
+        try: relative = path.relative_to(source_root.resolve()).as_posix()
+        except ValueError: continue
+        if path.is_file() and path.name == req.artifact: candidates.append((path, relative))
+    if len(candidates) != 1: raise HTTPException(404, "artifact not found")
+    path, relative = candidates[0]
+    import hashlib
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    kind = {".mp4": "mp4", ".png": "thumbnail", ".jpg": "thumbnail", ".jpeg": "thumbnail", ".webp": "thumbnail", ".md": "brief", ".txt": "brief", ".html": "report", ".pdf": "report", ".json": "report"}.get(path.suffix.lower())
+    if not kind: raise HTTPException(400, "unsupported artifact type")
+    manifest = {"artifacts": [{"kind": kind, "path": relative, "checksum": digest, "attribution": "Hypit derived artifact"}]}
+    try:
+        records = import_artifacts(source_root=source_root, destination_root=ROOT.parent, source_engine="hypit", target_profile=req.profile_id, manifest=manifest)
+    except ArtifactBoundaryError as exc: raise HTTPException(400, str(exc)) from exc
+    return {"imported": True, "run_id": req.run_id, "artifact": _safe(records[0].to_dict())}
+
+@router.post("/runs/{run_id}/artifacts/import")
+def import_run_artifact(run_id: str, req: ArtifactImportRequest):
+    if req.run_id != run_id: raise HTTPException(400, "run_id mismatch")
+    return import_artifact(req)
+
 @router.post("/variants")
 def create_variant(req: VariantRequest):
     try: rec = VARIANTS.create_variant(**req.model_dump())
@@ -209,6 +253,16 @@ def get_variant(variant_id: str, session_id: str = Query(...), profile_id: str =
     except VariantNotFoundError as exc: raise HTTPException(404, "variant not found") from exc
     if (rec.session_id, rec.profile_id) != (session_id, profile_id): raise HTTPException(403, "session/profile scope mismatch")
     return _safe(rec.to_dict())
+
+@router.post("/variants/{variant_id}/approve")
+def approve_variant(variant_id: str, req: Scope):
+    """Approve the current sample fingerprint for one scoped variant."""
+    try: rec = VARIANTS.get(variant_id)
+    except VariantNotFoundError as exc: raise HTTPException(404, "variant not found") from exc
+    if (rec.session_id, rec.profile_id) != (req.session_id, req.profile_id):
+        raise HTTPException(403, "session/profile scope mismatch")
+    try: return _safe(VARIANTS.approve_sample(variant_id).to_dict())
+    except VariantError as exc: raise HTTPException(409, str(exc)) from exc
 
 @router.get("/studio")
 def studio(session_id: str = Query(...), profile_id: str = Query(...)):
