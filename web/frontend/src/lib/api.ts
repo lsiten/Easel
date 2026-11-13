@@ -403,11 +403,53 @@ export function fetchKbScope(persona?: string): Promise<{ focused: boolean; patt
 // ── Hypit replication API (session/profile scoped) ──
 export interface HypitScope { session_id: string; profile_id: string }
 export interface HypitRun { id: string; run_id?: string; profile_id: string; session_id: string; state: string; [key: string]: unknown }
-export interface HypitPricing extends HypitScope { kind: string; units: number; unit_cost: number; estimated_cost: number; pricing_id: string; valid_until: number }
+export type HypitProviderRoute = 'local' | 'byok' | 'hypihub';
+export interface HypitProvider {
+  route: HypitProviderRoute | string;
+  provider_id?: string;
+  model_id?: string;
+  credential_id?: string;
+  [key: string]: unknown;
+}
+export interface HypitApproval {
+  approved?: boolean;
+  approval_id?: string;
+  pricing_id?: string;
+  scope?: string;
+  approved_at?: string;
+  [key: string]: unknown;
+}
+export interface HypitReadiness {
+  ready: boolean;
+  engine: string;
+  provider?: HypitProvider;
+  route?: HypitProviderRoute | string;
+  provider_route?: HypitProviderRoute | string;
+  runtime_requirements?: unknown;
+  requirements?: unknown;
+  runtime?: unknown;
+  message?: string;
+  reason?: string;
+  approval?: HypitApproval | null;
+  [key: string]: unknown;
+}
+export interface HypitPricing extends HypitScope {
+  kind: string;
+  units?: number;
+  unit_cost?: number;
+  estimated_units?: number;
+  estimated_cost?: number;
+  currency?: string;
+  pricing_id?: string;
+  valid_until?: number | string;
+  provider_id?: string;
+  approval?: HypitApproval | null;
+  [key: string]: unknown;
+}
 export interface HypitVariant extends HypitScope { variant_id: string; parent_variant_id?: string | null; approval_state: string; [key: string]: unknown }
 export interface HypitLogs { run_id: string; offset: number; limit: number; logs: string[]; next_offset: number }
 const hypitQuery = (scope: HypitScope) => `session_id=${encodeURIComponent(scope.session_id)}&profile_id=${encodeURIComponent(scope.profile_id)}`;
-export function fetchHypitReadiness(scope: HypitScope, signal?: AbortSignal) { return request<{ ready: boolean; engine: string }>(`/api/hypit/readiness?engine=hypit&${hypitQuery(scope)}`, { signal }); }
+export function fetchHypitReadiness(scope: HypitScope, signal?: AbortSignal) { return request<HypitReadiness>(`/api/hypit/readiness?engine=hypit&${hypitQuery(scope)}`, { signal }); }
 export function fetchHypitPricing(scope: HypitScope, kind = 'sample', units = 1, signal?: AbortSignal) { return request<HypitPricing>(`/api/hypit/pricing?engine=hypit&${hypitQuery(scope)}&kind=${encodeURIComponent(kind)}&units=${units}`, { signal }); }
 export function planHypitRun(scope: HypitScope, body: { kind?: string; pricing?: unknown; checkpoint?: unknown; input_fingerprint?: string } = {}) { return request<HypitRun>('/api/hypit/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...scope, ...body }) }); }
 export function fetchHypitRun(runId: string, scope: HypitScope, signal?: AbortSignal) { return request<HypitRun>(`/api/hypit/runs/${encodeURIComponent(runId)}?${hypitQuery(scope)}`, { signal }); }
