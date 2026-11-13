@@ -76,6 +76,8 @@ class HypitLifecycle:
         self.clock = clock
         self.max_active_per_profile = max_active_per_profile
         self.timeout_seconds = min(int(timeout_seconds), 7200)
+        if self.timeout_seconds <= 0:
+            raise LifecycleError("timeout_seconds must be positive")
         self._lock = threading.RLock()
         self._cancel: dict[str, threading.Event] = {}
 
@@ -104,6 +106,16 @@ class HypitLifecycle:
     def plan(self, profile_id: str, session_id: str, *, kind: str = "sample", pricing: Mapping[str, Any] | None = None,
              checkpoint: Mapping[str, Any] | None = None) -> LifecycleRecord:
         if kind not in {"sample", "full"}: raise LifecycleError("kind must be sample or full")
+        if not isinstance(pricing, Mapping):
+            raise LifecycleError("valid pricing receipt required")
+        required = {"pricing_id", "profile_id", "kind", "valid_until", "estimated_cost"}
+        if not required.issubset(pricing) or pricing.get("profile_id") != profile_id or pricing.get("kind") != kind:
+            raise LifecycleError("malformed pricing receipt")
+        try:
+            if float(pricing["valid_until"]) <= self.clock() or float(pricing["estimated_cost"]) < 0:
+                raise LifecycleError("stale or invalid pricing receipt")
+        except (TypeError, ValueError) as exc:
+            raise LifecycleError("malformed pricing receipt") from exc
         with self._lock:
             active = [self._load(p) for p in self._ids() if self._load(p).profile_id == profile_id and self._load(p).state not in _TERMINAL]
             if any(r.session_id == session_id for r in active): raise QuotaExceeded("one active Build/session")
@@ -124,15 +136,19 @@ class HypitLifecycle:
             if rec.state in {"failed", "cancelled"}: rec.state = "planned"; rec.updated_at = self.clock(); self._save(rec)
             self._transition(rec, "running")
             rec.attempt += 1; rec.logs.append(f"attempt {rec.attempt}"); self._save(rec)
-            event = threading.Event(); self._cancel[record_id] = event
+            event = threading.Event(); timeout_event = threading.Event(); self._cancel[record_id] = event
             started = self.clock()
+            def expire() -> None:
+                timeout_event.set(); event.set()
+            timer = threading.Timer(self.timeout_seconds, expire); timer.daemon = True; timer.start()
         try:
             fn = runner or self.runner
             try: result = fn(rec, dict(rec.checkpoint), event)
             except TypeError: result = fn(rec, dict(rec.checkpoint))
             result = dict(result or {})
+            if timeout_event.is_set() or self.clock() - started > self.timeout_seconds:
+                raise LifecycleTimeout("build timeout")
             if event.is_set(): raise LifecycleError("cancelled")
-            if self.clock() - started > self.timeout_seconds: raise LifecycleTimeout("build timeout")
             rec.checkpoint.update(result.get("checkpoint") or {})
             rec.outputs = [str(x) for x in result.get("outputs", rec.outputs)]
             rec.logs.extend(str(x) for x in result.get("logs", []))
@@ -151,6 +167,7 @@ class HypitLifecycle:
             rec.error = str(exc); rec.logs.append(str(exc)); self._save(rec)
             if rec.state not in _TERMINAL: self._transition(rec, "failed")
         finally:
+            timer.cancel()
             self._cancel.pop(record_id, None)
         return self.get(record_id)
 
@@ -167,6 +184,7 @@ class HypitLifecycle:
             return rec
     def retry(self, record_id: str, **kwargs: Any) -> LifecycleRecord:
         rec = self.get(record_id)
+        if rec.state == "succeeded": return rec
         if rec.state not in {"failed", "cancelled"}: raise InvalidTransition("retry requires failed or cancelled")
         return self.run(record_id, **kwargs)
     def status(self, record_id: str) -> dict[str, Any]: return self.get(record_id).as_dict()
