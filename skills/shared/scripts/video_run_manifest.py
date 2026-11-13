@@ -92,6 +92,7 @@ class VideoRunManifest:
     outputs: list[str] = field(default_factory=list)
     reports: list[str] = field(default_factory=list)
     provenance: dict[str, Any] = field(default_factory=dict)
+    provider_policy: dict[str, Any] = field(default_factory=dict)
     schema_version: ClassVar[int] = MANIFEST_VERSION
 
     def __post_init__(self) -> None:
@@ -110,8 +111,9 @@ class VideoRunManifest:
             raise ManifestError("unsupported migration_version")
         if self.state not in STATES:
             raise ManifestError(f"invalid state: {self.state}")
-        if not isinstance(self.checkpoint, dict) or not isinstance(self.provenance, dict):
-            raise ManifestError("checkpoint and provenance must be objects")
+        if (not isinstance(self.checkpoint, dict) or not isinstance(self.provenance, dict)
+                or not isinstance(self.provider_policy, dict)):
+            raise ManifestError("checkpoint, provenance and provider_policy must be objects")
         _path_list(self.outputs, root, "outputs")
         _path_list(self.reports, root, "reports")
         # Native Hypit runtime internals never become generic output/report paths.
@@ -142,7 +144,7 @@ class VideoRunManifest:
         if raw_root != root:
             raise ManifestError("project_root does not match assigned root")
         allowed = {"schema_version", "migration_version", "run_id", "attempt_id", "build_id", "engine",
-                   "profile_id", "session_id", "project_root", "state", "checkpoint", "outputs", "reports", "provenance"}
+                   "profile_id", "session_id", "project_root", "state", "checkpoint", "outputs", "reports", "provenance", "provider_policy"}
         unknown = set(data) - allowed
         if unknown:
             raise ManifestError(f"unknown fields: {', '.join(sorted(unknown))}")
@@ -157,14 +159,16 @@ class VideoRunManifest:
                    project_root=str(root), state=data.get("state", "planned"),
                    migration_version=migration_version,
                    checkpoint=data.get("checkpoint", {}), outputs=data.get("outputs", []),
-                   reports=data.get("reports", []), provenance=data.get("provenance", {}))
+                   reports=data.get("reports", []), provenance=data.get("provenance", {}),
+                   provider_policy=data.get("provider_policy", {}))
 
     def to_dict(self) -> dict[str, Any]:
         return {"schema_version": self.schema_version, "migration_version": self.migration_version,
                 "run_id": self.run_id, "attempt_id": self.attempt_id, "build_id": self.build_id,
                 "engine": self.engine, "profile_id": self.profile_id, "session_id": self.session_id,
                 "project_root": self.project_root, "state": self.state, "checkpoint": self.checkpoint,
-                "outputs": list(self.outputs), "reports": list(self.reports), "provenance": self.provenance}
+                "outputs": list(self.outputs), "reports": list(self.reports), "provenance": self.provenance,
+                "provider_policy": self.provider_policy}
 
     def transition(self, state: str) -> "VideoRunManifest":
         if state not in _TRANSITIONS.get(self.state, set()):
