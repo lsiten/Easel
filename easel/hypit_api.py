@@ -7,8 +7,8 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from .hypit_lifecycle import HypitLifecycle, LifecycleError, LifecycleRecord
 from .hypit_variants import HypitVariantStore, VariantError, VariantNotFoundError
-from .hypit_studio import (allowed_origins, embed_url, frame_ancestors, issue_token, license_available,
-                          policy_for_url, studio_url, validate_token)
+from .hypit_studio import (embed_url, frame_ancestors, issue_token, license_available,
+                          origin_allowed, policy_for_url, studio_url, validate_token)
 
 ROOT = Path(__file__).resolve().parents[1] / "outputs" / "_hypit"
 LIFECYCLE = HypitLifecycle(ROOT / "runs")
@@ -219,8 +219,25 @@ def get_variant(variant_id: str, session_id: str = Query(...), profile_id: str =
 
 def _studio_origin_allowed(request: Request) -> None:
     origin = request.headers.get("origin")
-    if origin and origin not in allowed_origins():
+    if not origin_allowed(origin):
         raise HTTPException(403, "studio origin is not allowlisted")
+
+
+def _studio_authorize(request: Request, req: StudioRequest) -> LifecycleRecord:
+    if not req.run_id:
+        raise HTTPException(403, "studio run required")
+    _studio_origin_allowed(request)
+    try:
+        record = _get(req.run_id, req)
+    except HTTPException:
+        raise
+    if not _studio_ready(record):
+        raise HTTPException(403, "studio run is not ready")
+    if not license_available():
+        raise HTTPException(403, "Hypit Studio license unavailable")
+    if not policy_for_url(studio_url()):
+        raise HTTPException(403, "studio origin is not allowlisted")
+    return record
 
 
 def _studio_scope_record(run_id: str | None, scope: Scope) -> LifecycleRecord | None:
@@ -256,7 +273,6 @@ def _studio_payload(scope: Scope, run_id: str | None, request: Request) -> dict[
         return result
     if not license_available() or not url or not policy_for_url(url):
         return result
-    _studio_origin_allowed(request)
     issued = issue_token(run_id=run_id, profile_id=scope.profile_id, session_id=scope.session_id)
     result.update({
         "available": True,
@@ -282,8 +298,7 @@ def studio_handshake(request: Request, req: StudioRequest):
         raise HTTPException(400, "handshake requires run_id and token")
     if req.engine != "hypit" or req.source != "easel":
         raise HTTPException(403, "studio identity mismatch")
-    _studio_origin_allowed(request)
-    rec = _get(req.run_id, req)
+    rec = _studio_authorize(request, req)
     try:
         claims = validate_token(req.token, run_id=req.run_id, profile_id=req.profile_id, session_id=req.session_id, nonce=req.nonce)
     except ValueError as exc:
@@ -299,8 +314,7 @@ def studio_launch(request: Request, req: StudioRequest):
         raise HTTPException(403, "studio identity mismatch")
     if not req.run_id or not req.token or not req.nonce:
         raise HTTPException(403, "studio token and nonce required")
-    _studio_origin_allowed(request)
-    rec = _get(req.run_id, req)
+    rec = _studio_authorize(request, req)
     try:
         claims = validate_token(req.token, run_id=req.run_id, profile_id=req.profile_id, session_id=req.session_id, nonce=req.nonce)
     except ValueError as exc:

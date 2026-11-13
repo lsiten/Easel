@@ -62,6 +62,10 @@ def studio_origin(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else ""
 
 
+def origin_allowed(origin: str | None) -> bool:
+    return bool(origin) and origin in allowed_origins()
+
+
 def license_available() -> bool:
     value = os.environ.get("EASEL_HYPIT_STUDIO_LICENSE", "enabled").strip().lower()
     return value not in {"0", "false", "no", "disabled", "missing", "unlicensed"}
@@ -118,12 +122,16 @@ def validate_token(token: str, *, run_id: str, profile_id: str, session_id: str,
         claims = json.loads(_unb64(encoded).decode("utf-8"))
     except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError, base64.binascii.Error) as exc:
         raise ValueError("malformed studio token") from exc
+    if not isinstance(claims, dict):
+        raise ValueError("malformed studio claims")
     current = int(time.time() if now is None else now)
     if claims.get("aud") != AUDIENCE or claims.get("engine") != ENGINE or claims.get("source") != SOURCE:
         raise ValueError("studio token identity mismatch")
-    if not isinstance(claims.get("exp"), int) or claims["exp"] <= current:
+    if isinstance(claims.get("iat"), bool) or not isinstance(claims.get("iat"), int):
+        raise ValueError("malformed studio claims")
+    if isinstance(claims.get("exp"), bool) or not isinstance(claims.get("exp"), int) or claims["exp"] <= current:
         raise ValueError("studio token expired")
-    if claims["exp"] - int(claims.get("iat", current)) > MAX_TTL_SECONDS:
+    if claims["exp"] - claims["iat"] > MAX_TTL_SECONDS or claims["exp"] <= claims["iat"]:
         raise ValueError("studio token lifetime exceeds limit")
     if (claims.get("run_id"), claims.get("profile_id"), claims.get("session_id")) != (run_id, profile_id, session_id):
         raise ValueError("studio token scope mismatch")
@@ -161,4 +169,4 @@ def policy_for_url(url: str) -> bool:
     return bool(origin and origin in allowed_origins())
 
 
-__all__ = ["AUDIENCE", "ENGINE", "SOURCE", "MAX_TTL_SECONDS", "allowed_origins", "studio_url", "studio_origin", "license_available", "issue_token", "validate_token", "embed_url", "frame_ancestors", "policy_for_url"]
+__all__ = ["AUDIENCE", "ENGINE", "SOURCE", "MAX_TTL_SECONDS", "allowed_origins", "origin_allowed", "studio_url", "studio_origin", "license_available", "issue_token", "validate_token", "embed_url", "frame_ancestors", "policy_for_url"]

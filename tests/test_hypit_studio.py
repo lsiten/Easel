@@ -31,8 +31,8 @@ def test_wrong_scope_origin_nonce_and_expiry_are_rejected(monkeypatch):
     monkeypatch.setenv("EASEL_HYPIT_STUDIO_SECRET", "test-secret")
     issued = hypit_studio.issue_token(run_id="run-1", profile_id="profile-1", session_id="session-1", now=100)
     for kwargs, message in [
-        ({"run_id": "run-2", "profile_id": "profile-1", "session_id": "session-1"}, "scope"),
-        ({"run_id": "run-1", "profile_id": "profile-1", "session_id": "session-1", "nonce": "wrong"}, "nonce"),
+        ({"run_id": "run-2", "profile_id": "profile-1", "session_id": "session-1", "now": 101}, "scope"),
+        ({"run_id": "run-1", "profile_id": "profile-1", "session_id": "session-1", "nonce": "wrong", "now": 101}, "nonce"),
         ({"run_id": "run-1", "profile_id": "profile-1", "session_id": "session-1", "now": 401}, "expired"),
     ]:
         with pytest.raises(ValueError, match=message):
@@ -45,3 +45,25 @@ def test_embed_url_contains_only_scoped_transport_claims(monkeypatch):
     assert url.startswith("https://studio.example/editor?")
     assert "easel_token=signed" in url and "run_id=run-1" in url
     assert "outputs" not in url and "root" not in url
+
+
+def test_signed_malformed_claims_are_typed_errors(monkeypatch):
+    import base64
+    import hashlib
+    import hmac
+    import json
+    monkeypatch.setenv("EASEL_HYPIT_STUDIO_SECRET", "test-secret")
+    issued = hypit_studio.issue_token(run_id="run-1", profile_id="profile-1", session_id="session-1", now=100)
+    header, _, signature = issued["token"].split(".")
+    encoded = base64.urlsafe_b64encode(json.dumps([]).encode()).rstrip(b"=").decode()
+    signing_input = f"{header}.{encoded}"
+    forged = ".".join((header, encoded, base64.urlsafe_b64encode(hmac.new(b"test-secret", signing_input.encode(), hashlib.sha256).digest()).rstrip(b"=").decode()))
+    with pytest.raises(ValueError, match="malformed studio claims"):
+        hypit_studio.validate_token(forged, run_id="run-1", profile_id="profile-1", session_id="session-1", now=101)
+
+
+def test_origin_policy_requires_exact_present_origin(monkeypatch):
+    monkeypatch.setenv("EASEL_HYPIT_STUDIO_ORIGINS", "https://studio.example")
+    assert not hypit_studio.origin_allowed(None)
+    assert not hypit_studio.origin_allowed("https://evil.example")
+    assert hypit_studio.origin_allowed("https://studio.example")
