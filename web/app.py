@@ -59,6 +59,7 @@ from easel.harnesses import store as harness_store
 from easel.harnesses.base import HarnessError, RunRequest
 from easel.openfilm_references import reference_context
 from easel.openfilm_studio import StudioUrls, live_project_urls
+from easel.hypit_api import router as hypit_router
 from skills.shared.scripts.project_scope import in_persona_scope
 PROFILES_DIR = PROJECT_ROOT / "profiles"
 SKILLS_DIR = PROJECT_ROOT / "skills"
@@ -424,6 +425,7 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Easel", docs_url=None, redoc_url=None, lifespan=_lifespan)
+app.include_router(hypit_router)
 
 def _local_ports(env_port: str) -> set[str]:
     """本机写守卫放行的端口集合：固定的 7860/7870/5173，加上 `--port`/EASEL_PORT

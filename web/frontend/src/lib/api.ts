@@ -400,6 +400,27 @@ export function fetchKbScope(persona?: string): Promise<{ focused: boolean; patt
     : Promise.resolve({ focused: false, patterns: [] });
 }
 
+// ── Hypit replication API (session/profile scoped) ──
+export interface HypitScope { session_id: string; profile_id: string }
+export interface HypitRun { id: string; run_id?: string; profile_id: string; session_id: string; state: string; [key: string]: unknown }
+export interface HypitPricing extends HypitScope { kind: string; units: number; unit_cost: number; estimated_cost: number; pricing_id: string; valid_until: number }
+export interface HypitVariant extends HypitScope { variant_id: string; parent_variant_id?: string | null; approval_state: string; [key: string]: unknown }
+export interface HypitLogs { run_id: string; offset: number; limit: number; logs: string[]; next_offset: number }
+const hypitQuery = (scope: HypitScope) => `session_id=${encodeURIComponent(scope.session_id)}&profile_id=${encodeURIComponent(scope.profile_id)}`;
+export function fetchHypitReadiness(scope: HypitScope, signal?: AbortSignal) { return request<{ ready: boolean; engine: string }>(`/api/hypit/readiness?engine=hypit&${hypitQuery(scope)}`, { signal }); }
+export function fetchHypitPricing(scope: HypitScope, kind = 'sample', units = 1, signal?: AbortSignal) { return request<HypitPricing>(`/api/hypit/pricing?engine=hypit&${hypitQuery(scope)}&kind=${encodeURIComponent(kind)}&units=${units}`, { signal }); }
+export function planHypitRun(scope: HypitScope, body: { kind?: string; pricing?: unknown; checkpoint?: unknown; input_fingerprint?: string } = {}) { return request<HypitRun>('/api/hypit/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...scope, ...body }) }); }
+export function fetchHypitRun(runId: string, scope: HypitScope, signal?: AbortSignal) { return request<HypitRun>(`/api/hypit/runs/${encodeURIComponent(runId)}?${hypitQuery(scope)}`, { signal }); }
+export function fetchHypitLogs(runId: string, scope: HypitScope, offset = 0, limit = 100, signal?: AbortSignal) { return request<HypitLogs>(`/api/hypit/runs/${encodeURIComponent(runId)}/logs?${hypitQuery(scope)}&offset=${offset}&limit=${limit}`, { signal }); }
+export function cancelHypitRun(runId: string, scope: HypitScope) { return request<HypitRun>(`/api/hypit/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...scope, run_id: runId }) }); }
+export function rerunHypitRun(runId: string, scope: HypitScope) { return request<HypitRun>(`/api/hypit/runs/${encodeURIComponent(runId)}/rerun`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...scope, run_id: runId }) }); }
+export function fetchHypitVariants(scope: HypitScope, signal?: AbortSignal) { return request<{ variants: HypitVariant[] }>(`/api/hypit/variants?${hypitQuery(scope)}`, { signal }); }
+export function createHypitVariant(scope: HypitScope, body: Record<string, unknown> = {}) { return request<HypitVariant>('/api/hypit/variants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...scope, ...body }) }); }
+export function fetchHypitReports(runId: string, scope: HypitScope, signal?: AbortSignal) { return request<{ run_id: string; reports: unknown[] }>(`/api/hypit/runs/${encodeURIComponent(runId)}/reports?${hypitQuery(scope)}`, { signal }); }
+export function fetchHypitArtifacts(runId: string, scope: HypitScope, signal?: AbortSignal) { return request<{ run_id: string; artifacts: Array<{ name: string; kind: string }> }>(`/api/hypit/runs/${encodeURIComponent(runId)}/artifacts?${hypitQuery(scope)}`, { signal }); }
+export function fetchHypitStudio(scope: HypitScope, signal?: AbortSignal) { return request<{ available: boolean; studio: string; scoped: boolean }>(`/api/hypit/studio?${hypitQuery(scope)}`, { signal }); }
+export function launchHypitStudio(scope: HypitScope, topic?: string) { return request<{ launched: boolean; scoped: boolean }>('/api/hypit/studio/launch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...scope, topic: topic ?? null, action: 'launch' }) }); }
+
 // ── 素材库（每账号素材源 → 按内容理解整理 → 供视频/文章创作取用）：随画像，仅本画像素材库 ──
 export interface AssetsStatus {
   profile: string; registered: boolean; sources: string[]; registered_all: number;
