@@ -66,3 +66,25 @@ def test_atomic_write_rejects_runtime_paths_and_invalid_transition(tmp_path: Pat
     assert run.transition("running").state == "running"
     with pytest.raises(mod.ManifestError):
         run.transition("succeeded")
+
+
+def test_rejects_session_mismatch_and_schema_mismatch(tmp_path: Path):
+    root = mod.resolve_project_root(tmp_path, "profile-a", "session-a", "run-1")
+    base = mod.VideoRunManifest.create(run_id="run-1", attempt_id="attempt-1", build_id="build-1",
+                                       engine="hypit", profile_id="profile-a", session_id="session-a",
+                                       project_root=root).to_dict()
+    with pytest.raises(mod.ManifestError):
+        mod.VideoRunManifest.from_dict({**base, "session_id": "session-b"}, project_root=root)
+    with pytest.raises(mod.ManifestError):
+        mod.VideoRunManifest.from_dict({**base, "schema_version": 2}, project_root=root)
+    with pytest.raises(mod.ManifestError):
+        mod.VideoRunManifest.from_dict({**base, "schema_version": 1, "migration_version": 2}, project_root=root)
+
+
+def test_rejects_non_string_engine_without_type_error(tmp_path: Path):
+    root = mod.resolve_project_root(tmp_path, "profile-a", "session-a", "run-1")
+    for engine in ([], {}, 1, None):
+        with pytest.raises(mod.ManifestError):
+            mod.VideoRunManifest.create(run_id="run-1", attempt_id="attempt-1", build_id="build-1",
+                                        engine=engine, profile_id="profile-a", session_id="session-a",
+                                        project_root=root)

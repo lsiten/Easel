@@ -62,9 +62,19 @@ def _relative_path(value: Any, root: Path, *, label: str) -> str:
 def _path_list(values: Any, root: Path, label: str) -> list[str]:
     if values is None:
         return []
-    if not isinstance(values, list) or len(values) != len(set(map(str, values))):
+    if not isinstance(values, list):
+        raise ManifestError(f"{label} must be a list")
+    if len(values) != len({item for item in values if isinstance(item, str)}):
         raise ManifestError(f"{label} must contain unique paths")
     return [_relative_path(item, root, label=label) for item in values]
+
+
+def _validate_project_scope(root: Path, profile_id: str, session_id: str) -> None:
+    """Require a project root produced by the profile/session resolver."""
+    expected = ("profiles", profile_id, "sessions", session_id, "video")
+    parts = root.parts
+    if len(parts) < len(expected) + 1 or tuple(parts[-len(expected)-1:-1]) != expected:
+        raise ManifestError("project_root does not match profile/session scope")
 
 
 @dataclass(frozen=True)
@@ -91,10 +101,11 @@ class VideoRunManifest:
         _id(self.build_id, "build_id")
         if len({self.run_id, self.attempt_id, self.build_id}) != 3:
             raise ManifestError("run, attempt and build IDs must be distinct")
-        if self.engine not in SUPPORTED_ENGINES:
-            raise ManifestError(f"unknown engine: {self.engine}")
+        if not isinstance(self.engine, str) or self.engine not in SUPPORTED_ENGINES:
+            raise ManifestError(f"unknown engine: {self.engine!r}")
         _scope(self.profile_id, "profile_id")
         _scope(self.session_id, "session_id")
+        _validate_project_scope(root, self.profile_id, self.session_id)
         if not isinstance(self.migration_version, int) or self.migration_version != MANIFEST_VERSION:
             raise ManifestError("unsupported migration_version")
         if self.state not in STATES:
@@ -124,8 +135,10 @@ class VideoRunManifest:
         missing = required - data.keys()
         if missing:
             raise ManifestError(f"missing fields: {', '.join(sorted(missing))}")
+        if not isinstance(data.get("project_root"), str):
+            raise ManifestError("project_root must be a string")
         root = Path(project_root or data["project_root"]).expanduser().resolve()
-        raw_root = Path(str(data["project_root"])).expanduser().resolve()
+        raw_root = Path(data["project_root"]).expanduser().resolve()
         if raw_root != root:
             raise ManifestError("project_root does not match assigned root")
         allowed = {"schema_version", "migration_version", "run_id", "attempt_id", "build_id", "engine",
@@ -133,10 +146,16 @@ class VideoRunManifest:
         unknown = set(data) - allowed
         if unknown:
             raise ManifestError(f"unknown fields: {', '.join(sorted(unknown))}")
-        return cls(run_id=str(data["run_id"]), attempt_id=str(data["attempt_id"]), build_id=str(data["build_id"]),
+        schema_version = data.get("schema_version", MANIFEST_VERSION)
+        migration_version = data.get("migration_version", schema_version)
+        if (not isinstance(schema_version, int) or schema_version != MANIFEST_VERSION
+                or not isinstance(migration_version, int)
+                or migration_version != schema_version):
+            raise ManifestError("unsupported or mismatched schema/migration version")
+        return cls(run_id=data["run_id"], attempt_id=data["attempt_id"], build_id=data["build_id"],
                    engine=data["engine"], profile_id=data["profile_id"], session_id=data["session_id"],
                    project_root=str(root), state=data.get("state", "planned"),
-                   migration_version=data.get("migration_version", data.get("schema_version", MANIFEST_VERSION)),
+                   migration_version=migration_version,
                    checkpoint=data.get("checkpoint", {}), outputs=data.get("outputs", []),
                    reports=data.get("reports", []), provenance=data.get("provenance", {}))
 
