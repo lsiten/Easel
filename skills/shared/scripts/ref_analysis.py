@@ -228,7 +228,12 @@ def _relative_output_path(path: str | Path, out_dir: Path) -> str | None:
 
 
 def _tokenize_transcript(transcript: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return word anchors, leaving timing unknown when ASR did not provide it."""
+    """Return word anchors, using timing only when ASR supplied word timestamps.
+
+    Segment/SRT cues provide timing for the whole segment.  Their duration cannot
+    be assigned to individual words without fabricating precision, so token timing
+    remains unknown unless a word-level ``words`` array contains valid timestamps.
+    """
     segments = transcript.get("segments") if isinstance(transcript, dict) else None
     if not isinstance(segments, list):
         segments = []
@@ -238,12 +243,11 @@ def _tokenize_transcript(transcript: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(segment, dict):
             continue
         words = word_re.findall(str(segment.get("text") or ""))
-        start = segment.get("start")
-        end = segment.get("end")
-        timed = isinstance(start, (int, float)) and isinstance(end, (int, float)) and end >= start
+        supplied_words = segment.get("words")
+        if not isinstance(supplied_words, list):
+            supplied_words = []
         confidence = segment.get("confidence")
         confidence_known = isinstance(confidence, (int, float)) and 0 <= confidence <= 1
-        span = float(end) - float(start) if timed else 0.0
         for word_index, word in enumerate(words):
             token: dict[str, Any] = {
                 "index": len(tokens), "segment_index": segment_index, "text": word,
@@ -251,10 +255,20 @@ def _tokenize_transcript(transcript: dict[str, Any]) -> list[dict[str, Any]]:
                 "confidence": float(confidence) if confidence_known else None,
                 "confidence_state": "known" if confidence_known else "unknown",
             }
-            if timed:
-                token["start"] = round(float(start) + span * word_index / len(words), 3)
-                token["end"] = round(float(start) + span * (word_index + 1) / len(words), 3)
-                token["timing_state"] = "known"
+            word_info = supplied_words[word_index] if word_index < len(supplied_words) else None
+            if isinstance(word_info, dict):
+                start = word_info.get("start")
+                end = word_info.get("end")
+                timed = (isinstance(start, (int, float)) and
+                          isinstance(end, (int, float)) and end >= start)
+                if timed:
+                    token["start"] = round(float(start), 3)
+                    token["end"] = round(float(end), 3)
+                    token["timing_state"] = "known"
+                word_confidence = word_info.get("confidence")
+                if isinstance(word_confidence, (int, float)) and 0 <= word_confidence <= 1:
+                    token["confidence"] = float(word_confidence)
+                    token["confidence_state"] = "known"
             tokens.append(token)
     return tokens
 
@@ -390,8 +404,11 @@ def cmd_analyze(a) -> int:
 
     brief_path = out_dir / "video_analysis_brief.json"
     tmp_brief = brief_path.with_suffix(".json.tmp")
-    tmp_brief.write_text(json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp_brief.replace(brief_path)
+    try:
+        tmp_brief.write_text(json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_brief.replace(brief_path)
+    finally:
+        tmp_brief.unlink(missing_ok=True)
     elapsed = time.time() - start
     print(f"[ref_analysis] 完成 ({elapsed:.1f}s) → {brief_path}")
     print(f"[ref_analysis] 关键帧目录: {out_dir / 'keyframes'}")
