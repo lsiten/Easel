@@ -111,7 +111,25 @@ class HypitVariantStore:
         path = self._path(variant_id)
         if not path.is_file():
             raise VariantNotFoundError(variant_id)
-        return VariantRecord.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            rec = VariantRecord.from_dict(value)
+            if rec.variant_id != variant_id or rec.approval_state not in {"pending", "approved", "rejected"}:
+                raise VariantError("malformed persisted variant record")
+            for label, raw in (("brief", rec.brief), ("treatment", rec.treatment), ("analysis", rec.analysis), ("timeline", rec.timeline), ("sample_target", rec.sample_target), ("full_target", rec.full_target)):
+                if not isinstance(raw, dict):
+                    raise VariantError(f"malformed persisted {label}")
+            for label in ("source_root", "output_root"):
+                root = _root(getattr(rec, label), label)
+                if root.is_file():
+                    raise BranchOverwriteError(f"{label} is a file")
+            return rec
+        except BranchOverwriteError:
+            raise
+        except VariantError:
+            raise
+        except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            raise VariantError("malformed persisted variant record") from exc
     def list(self, *, profile_id: str | None = None, session_id: str | None = None) -> list[VariantRecord]:
         records = [self.get(p.parent.name) for p in self.root.glob("*/variant.json")]
         return [r for r in records if (profile_id is None or r.profile_id == profile_id) and (session_id is None or r.session_id == session_id)]
@@ -151,6 +169,10 @@ class HypitVariantStore:
         out = _root(output_root or (self.root / "outputs" / variant_id), "output_root")
         if src == out or src in out.parents or out in src.parents:
             raise VariantError("source_root and output_root must be distinct")
+        if src.exists() and src.is_file():
+            raise BranchOverwriteError("source branch is a file")
+        if out.exists() and out.is_file():
+            raise BranchOverwriteError("output branch is a file")
         if out.exists() and any(out.iterdir()):
             raise BranchOverwriteError("output branch already contains artifacts")
         anchors = [_text(v, "selected anchor", max_length=500) for v in (selected_anchors or [])]
@@ -166,13 +188,18 @@ class HypitVariantStore:
         self._save(rec)
         return rec
 
+    @staticmethod
+    def _current_sample_fingerprint(rec: VariantRecord) -> str:
+        payload = {"sample_target": rec.sample_target, "reference_evidence": rec.reference_evidence}
+        return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
     def approve_sample(self, variant_id: str, *, sample_fingerprint: str | None = None,
                        approved_by: str = "user", metadata: Mapping[str, Any] | None = None) -> VariantRecord:
         rec = self.get(variant_id)
-        if rec.approval_state == "approved":
-            return rec
         _id(approved_by, "approved_by")
-        fingerprint = sample_fingerprint or hashlib.sha256(json.dumps(rec.sample_target, sort_keys=True).encode()).hexdigest()
+        fingerprint = self._current_sample_fingerprint(rec)
+        if sample_fingerprint is not None and sample_fingerprint != fingerprint:
+            raise ApprovalRequiredError("sample fingerprint does not match current target")
         rec.sample_fingerprint = _text(fingerprint, "sample_fingerprint", max_length=128)
         rec.approval_state = "approved"
         rec.approval = {"approved_by": approved_by, "sample_fingerprint": rec.sample_fingerprint, "metadata": _json_value(dict(metadata or {}), "approval metadata"), "approved_at": time.time()}
@@ -187,7 +214,10 @@ class HypitVariantStore:
         if target == "full":
             if rec.approval_state != "approved" or not rec.approval:
                 raise ApprovalRequiredError("sample approval is required before full Build")
-            if sample_fingerprint is not None and sample_fingerprint != rec.sample_fingerprint:
+            current = self._current_sample_fingerprint(rec)
+            if rec.sample_fingerprint != current:
+                raise ApprovalRequiredError("stale sample approval")
+            if sample_fingerprint is not None and sample_fingerprint != current:
                 raise ApprovalRequiredError("stale sample approval")
         return rec
 
