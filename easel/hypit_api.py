@@ -44,10 +44,12 @@ class StudioRequest(Scope):
     action: str = "launch"
 
 class AnalysisRequest(Scope):
+    run_id: str | None = None
     analysis: dict[str, Any] | None = None
     data: dict[str, Any] | None = None
 
 class TimelineRequest(Scope):
+    run_id: str | None = None
     timeline: dict[str, Any] | None = None
     data: dict[str, Any] | None = None
 
@@ -98,6 +100,7 @@ def pricing(engine: str = Query(...), session_id: str = Query(..., min_length=1,
     try: value = LIFECYCLE.pricing(profile_id, kind=kind, units=units)
     except LifecycleError as exc: raise HTTPException(400, str(exc)) from exc
     value["session_id"] = session_id
+    value["engine"] = "hypit"
     return _safe(value)
 
 @router.post("/runs")
@@ -105,8 +108,21 @@ def plan_run(req: PlanRequest):
     if not req.pricing:
         raise HTTPException(400, "pricing receipt required")
     pricing_receipt = req.pricing
-    if pricing_receipt.get("engine", "hypit") != "hypit" or pricing_receipt.get("session_id", req.session_id) != req.session_id:
+    if pricing_receipt.get("engine") != "hypit":
+        raise HTTPException(403, "pricing engine mismatch")
+    if pricing_receipt.get("session_id") != req.session_id or pricing_receipt.get("profile_id") != req.profile_id:
         raise HTTPException(403, "pricing scope mismatch")
+    if req.input_fingerprint:
+        for rid in LIFECYCLE._ids():
+            try:
+                existing = LIFECYCLE._load(rid)
+            except Exception:
+                continue
+            if (existing.profile_id, existing.session_id, existing.input_fingerprint) != (req.profile_id, req.session_id, req.input_fingerprint):
+                continue
+            if existing.kind != req.kind or (req.checkpoint is not None and existing.checkpoint != req.checkpoint):
+                raise HTTPException(409, "input fingerprint conflicts with existing run")
+            return _record(existing)
     try: rec = LIFECYCLE.plan(req.profile_id, req.session_id, kind=req.kind, pricing=pricing_receipt, checkpoint=req.checkpoint, input_fingerprint=req.input_fingerprint)
     except LifecycleError as exc: raise HTTPException(400, str(exc)) from exc
     return _record(rec)
@@ -143,6 +159,8 @@ def rerun_run(run_id: str, req: ActionRequest):
 
 @router.post("/runs/{run_id}/analysis")
 def run_analysis(run_id: str, req: AnalysisRequest):
+    if req.run_id and req.run_id != run_id:
+        raise HTTPException(400, "run_id mismatch")
     rec = _get(run_id, req)
     payload = req.analysis if req.analysis is not None else req.data
     if not isinstance(payload, dict) or not payload:
@@ -154,6 +172,8 @@ def run_analysis(run_id: str, req: AnalysisRequest):
 
 @router.post("/runs/{run_id}/timeline")
 def run_timeline(run_id: str, req: TimelineRequest):
+    if req.run_id and req.run_id != run_id:
+        raise HTTPException(400, "run_id mismatch")
     rec = _get(run_id, req)
     payload = req.timeline if req.timeline is not None else req.data
     if not isinstance(payload, dict) or not payload:
