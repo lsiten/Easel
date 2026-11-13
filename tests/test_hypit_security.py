@@ -81,3 +81,33 @@ def test_redirects_are_explicitly_bounded_and_revalidated(monkeypatch):
 def test_redaction_masks_key_value_secret_forms():
     value = redact("client_secret=abc secret=def api_key=ghi Bearer jkl")
     assert "abc" not in value and "def" not in value and "ghi" not in value and "jkl" not in value
+
+
+def test_http_error_redirects_are_inspected_and_followed(monkeypatch):
+    import urllib.error
+    from easel.hypit_security import fetch_reference
+    monkeypatch.setenv("EASEL_VIDEO_REFERENCE_HOSTS", "example.com")
+    resolver = _public_resolver
+    def opener(url, timeout=30):
+        if url.endswith("/start"):
+            raise urllib.error.HTTPError(url, 302, "redirect", {"Location": "https://example.com/final"}, None)
+        class Response:
+            status, headers = 200, {}
+            def __init__(self): self.done = False
+            def read(self, n=-1):
+                if self.done: return b""
+                self.done = True
+                return b"ok"
+            def close(self): pass
+        return Response()
+    assert fetch_reference("https://example.com/start", opener=opener, resolver=resolver) == b"ok"
+
+
+def test_http_error_redirect_to_private_is_blocked(monkeypatch):
+    import urllib.error
+    from easel.hypit_security import fetch_reference
+    monkeypatch.setenv("EASEL_VIDEO_REFERENCE_HOSTS", "example.com,private.example")
+    def opener(url, timeout=30):
+        raise urllib.error.HTTPError(url, 302, "redirect", {"Location": "https://private.example/x"}, None)
+    with pytest.raises(ReferenceURLBlocked):
+        fetch_reference("https://example.com/start", opener=opener, resolver=lambda host, *a, **k: [(None,None,None,None,("127.0.0.1",0))] if host == "private.example" else _public_resolver(host))

@@ -109,9 +109,14 @@ def fetch_reference(url: str, *, opener: Callable[..., Any] | None = None, resol
     else:
         open_fn = opener
     for _ in range(max_redirects + 1):
-        response = open_fn(current, timeout=30)
         try:
-            status = getattr(response, "status", 200)
+            response = open_fn(current, timeout=30)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in {301, 302, 303, 307, 308}:
+                raise
+            response = exc
+        try:
+            status = getattr(response, "status", getattr(response, "code", 200))
             location = response.headers.get("Location") if hasattr(response, "headers") else None
             if status in {301, 302, 303, 307, 308} and location:
                 current = validate_reference_url(urllib.parse.urljoin(current, location), resolver=resolver)
