@@ -407,8 +407,8 @@ export interface HypitPricing extends HypitScope { kind: string; units: number; 
 export interface HypitVariant extends HypitScope { variant_id: string; parent_variant_id?: string | null; approval_state: string; [key: string]: unknown }
 export interface HypitLogs { run_id: string; offset: number; limit: number; logs: string[]; next_offset: number }
 const hypitQuery = (scope: HypitScope) => `session_id=${encodeURIComponent(scope.session_id)}&profile_id=${encodeURIComponent(scope.profile_id)}`;
-export function fetchHypitReadiness(scope: HypitScope, signal?: AbortSignal) { return request<{ ready: boolean; engine: string }>(`/api/hypit/readiness?${hypitQuery(scope)}`, { signal }); }
-export function fetchHypitPricing(scope: HypitScope, kind = 'sample', units = 1, signal?: AbortSignal) { return request<HypitPricing>(`/api/hypit/pricing?${hypitQuery(scope)}&kind=${encodeURIComponent(kind)}&units=${units}`, { signal }); }
+export function fetchHypitReadiness(scope: HypitScope, signal?: AbortSignal) { return request<{ ready: boolean; engine: string }>(`/api/hypit/readiness?engine=hypit&${hypitQuery(scope)}`, { signal }); }
+export function fetchHypitPricing(scope: HypitScope, kind = 'sample', units = 1, signal?: AbortSignal) { return request<HypitPricing>(`/api/hypit/pricing?engine=hypit&${hypitQuery(scope)}&kind=${encodeURIComponent(kind)}&units=${units}`, { signal }); }
 export function planHypitRun(scope: HypitScope, body: { kind?: string; pricing?: unknown; checkpoint?: unknown; input_fingerprint?: string } = {}) { return request<HypitRun>('/api/hypit/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...scope, ...body }) }); }
 export function fetchHypitRun(runId: string, scope: HypitScope, signal?: AbortSignal) { return request<HypitRun>(`/api/hypit/runs/${encodeURIComponent(runId)}?${hypitQuery(scope)}`, { signal }); }
 export function fetchHypitLogs(runId: string, scope: HypitScope, offset = 0, limit = 100, signal?: AbortSignal) { return request<HypitLogs>(`/api/hypit/runs/${encodeURIComponent(runId)}/logs?${hypitQuery(scope)}&offset=${offset}&limit=${limit}`, { signal }); }

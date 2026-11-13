@@ -43,12 +43,26 @@ class StudioRequest(Scope):
     topic: str | None = None
     action: str = "launch"
 
+class AnalysisRequest(Scope):
+    analysis: dict[str, Any] | None = None
+    data: dict[str, Any] | None = None
+
+class TimelineRequest(Scope):
+    timeline: dict[str, Any] | None = None
+    data: dict[str, Any] | None = None
+
 def _scope(rec: LifecycleRecord, scope: Scope) -> None:
     if rec.session_id != scope.session_id or rec.profile_id != scope.profile_id:
         raise HTTPException(403, "session/profile scope mismatch")
 
+_SECRET_TEXT = re.compile(r"(?i)(?:bearer\s+|api[_ -]?key\s*[=:]\s*|token\s*[=:]\s*|password\s*[=:]\s*)[^\s,;]+")
+_PATH_TEXT = re.compile(r"(?:/Users/|/home/|[A-Za-z]:\\|/tmp/)[^\s,;]+")
+
 def _safe(value: Any) -> Any:
-    """Return API-safe data with no runtime paths or credentials."""
+    """Return API-safe data with no runtime paths or credentials, recursively."""
+    if isinstance(value, str):
+        value = _SECRET_TEXT.sub("[REDACTED]", value)
+        return _PATH_TEXT.sub("[PATH_REDACTED]", value)
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
@@ -72,11 +86,15 @@ def _get(run_id: str, scope: Scope) -> LifecycleRecord:
     return rec
 
 @router.get("/readiness")
-def readiness(session_id: str = Query(...), profile_id: str = Query(...)):
-    return {"ready": True, "engine": "hypit", "session_id": session_id, "profile_id": profile_id, "scoped": True}
+def readiness(engine: str = Query(...), session_id: str = Query(..., min_length=1, max_length=256), profile_id: str = Query(..., min_length=1, max_length=120)):
+    if engine != "hypit":
+        raise HTTPException(400, "engine scope mismatch")
+    return {"ready": True, "engine": engine, "session_id": session_id, "profile_id": profile_id, "scoped": True}
 
 @router.get("/pricing")
-def pricing(session_id: str = Query(...), profile_id: str = Query(...), kind: str = "sample", units: int = 1):
+def pricing(engine: str = Query(...), session_id: str = Query(..., min_length=1, max_length=256), profile_id: str = Query(..., min_length=1, max_length=120), kind: str = "sample", units: int = 1):
+    if engine != "hypit":
+        raise HTTPException(400, "engine scope mismatch")
     try: value = LIFECYCLE.pricing(profile_id, kind=kind, units=units)
     except LifecycleError as exc: raise HTTPException(400, str(exc)) from exc
     value["session_id"] = session_id
@@ -84,7 +102,11 @@ def pricing(session_id: str = Query(...), profile_id: str = Query(...), kind: st
 
 @router.post("/runs")
 def plan_run(req: PlanRequest):
-    pricing_receipt = req.pricing or LIFECYCLE.pricing(req.profile_id, kind=req.kind)
+    if not req.pricing:
+        raise HTTPException(400, "pricing receipt required")
+    pricing_receipt = req.pricing
+    if pricing_receipt.get("engine", "hypit") != "hypit" or pricing_receipt.get("session_id", req.session_id) != req.session_id:
+        raise HTTPException(403, "pricing scope mismatch")
     try: rec = LIFECYCLE.plan(req.profile_id, req.session_id, kind=req.kind, pricing=pricing_receipt, checkpoint=req.checkpoint, input_fingerprint=req.input_fingerprint)
     except LifecycleError as exc: raise HTTPException(400, str(exc)) from exc
     return _record(rec)
@@ -101,7 +123,7 @@ def run_status_alias(run_id: str, session_id: str = Query(...), profile_id: str 
 def run_logs(run_id: str, session_id: str = Query(...), profile_id: str = Query(...), offset: int = 0, limit: int = 100):
     rec = _get(run_id, Scope(session_id=session_id, profile_id=profile_id))
     if offset < 0 or limit < 1 or limit > 500: raise HTTPException(400, "invalid pagination")
-    return {"run_id": run_id, "offset": offset, "limit": limit, "logs": rec.logs[offset:offset + limit], "next_offset": min(offset + limit, len(rec.logs))}
+    return {"run_id": run_id, "offset": offset, "limit": limit, "logs": _safe(rec.logs[offset:offset + limit]), "next_offset": min(offset + limit, len(rec.logs))}
 
 @router.post("/runs/{run_id}/cancel")
 def cancel_run(run_id: str, req: ActionRequest):
@@ -120,12 +142,26 @@ def rerun_run(run_id: str, req: ActionRequest):
     return _record(rec)
 
 @router.post("/runs/{run_id}/analysis")
-def run_analysis(run_id: str, req: ActionRequest):
-    return _record(_get(run_id, req))
+def run_analysis(run_id: str, req: AnalysisRequest):
+    rec = _get(run_id, req)
+    payload = req.analysis if req.analysis is not None else req.data
+    if not isinstance(payload, dict) or not payload:
+        raise HTTPException(400, "analysis payload must be non-empty")
+    rec.checkpoint["analysis"] = _safe(payload)
+    rec.updated_at = LIFECYCLE.clock()
+    LIFECYCLE._save(rec)
+    return {"run_id": run_id, "analysis": _safe(rec.checkpoint["analysis"]), "status": _record(rec)}
 
 @router.post("/runs/{run_id}/timeline")
-def run_timeline(run_id: str, req: ActionRequest):
-    return _record(_get(run_id, req))
+def run_timeline(run_id: str, req: TimelineRequest):
+    rec = _get(run_id, req)
+    payload = req.timeline if req.timeline is not None else req.data
+    if not isinstance(payload, dict) or not payload:
+        raise HTTPException(400, "timeline payload must be non-empty")
+    rec.checkpoint["timeline"] = _safe(payload)
+    rec.updated_at = LIFECYCLE.clock()
+    LIFECYCLE._save(rec)
+    return {"run_id": run_id, "timeline": _safe(rec.checkpoint["timeline"]), "status": _record(rec)}
 
 @router.get("/runs/{run_id}/reports")
 def run_reports(run_id: str, session_id: str = Query(...), profile_id: str = Query(...)):
