@@ -1,0 +1,16 @@
+{
+  "source_id": "synthetic-reference",
+  "title": "Synthetic reference reel",
+  "duration_seconds": 8,
+  "width": 1280,
+  "height": 720,
+  "asr": {
+    "language": "en",
+    "segments": [
+      {"start": 0.0, "end": 3.5, "text": "A small synthetic reference."},
+      {"start": 3.5, "end": 8.0, "text": "It is safe to use in deterministic tests."}
+    ]
+  },
+  "rights": "fixture-only",
+  "attribution": "Easel synthetic fixture"
+}

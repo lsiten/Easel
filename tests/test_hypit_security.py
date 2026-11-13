@@ -44,8 +44,11 @@ def test_media_caps_redaction_retention_and_rollback(tmp_path):
     fixture.mkdir()
     item = fixture / "state"
     item.write_text("old")
+    def failing_migration(root):
+        (root / "state").write_text("new")
+        raise RuntimeError("synthetic migration failure")
     with pytest.raises(RuntimeError):
-        migration_with_rollback(fixture, lambda root: (root / "state").write_text("new") or (_ for _ in ()).throw(RuntimeError()))
+        migration_with_rollback(fixture, failing_migration)
     assert item.read_text() == "old"
 
 
