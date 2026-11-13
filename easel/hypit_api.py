@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
-from .hypit_lifecycle import HypitLifecycle, LifecycleError, LifecycleRecord
+from .hypit_lifecycle import HypitLifecycle, LifecycleError, LifecycleRecord, RuntimeNotReady
 from .hypit_variants import HypitVariantStore, VariantError, VariantNotFoundError
 from .video_artifact_boundary import ArtifactBoundaryError, import_artifacts
 from .hypit_studio import (embed_url, frame_ancestors, issue_token, license_available,
@@ -105,7 +105,8 @@ def _get(run_id: str, scope: Scope) -> LifecycleRecord:
 def readiness(engine: str = Query(...), session_id: str = Query(..., min_length=1, max_length=256), profile_id: str = Query(..., min_length=1, max_length=120)):
     if engine != "hypit":
         raise HTTPException(400, "engine scope mismatch")
-    return {"ready": True, "engine": engine, "session_id": session_id, "profile_id": profile_id, "scoped": True}
+    result = LIFECYCLE.readiness(profile_id, session_id)
+    return {**_safe(result), "ready": bool(result.get("ok")), "engine": engine, "session_id": session_id, "profile_id": profile_id, "scoped": True}
 
 @router.get("/pricing")
 def pricing(engine: str = Query(...), session_id: str = Query(..., min_length=1, max_length=256), profile_id: str = Query(..., min_length=1, max_length=120), kind: str = "sample", units: int = 1):
@@ -168,6 +169,7 @@ def rerun_run(run_id: str, req: ActionRequest):
     if req.run_id and req.run_id != run_id: raise HTTPException(400, "run_id mismatch")
     rec = _get(run_id, req)
     try: rec = LIFECYCLE.retry(run_id)
+    except RuntimeNotReady as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc), "details": _safe(exc.details)}) from exc
     except LifecycleError as exc: raise HTTPException(409, str(exc)) from exc
     return _record(rec)
 
@@ -177,6 +179,7 @@ def start_run(run_id: str, req: ActionRequest):
     if req.run_id and req.run_id != run_id: raise HTTPException(400, "run_id mismatch")
     _get(run_id, req)
     try: return _record(LIFECYCLE.run(run_id))
+    except RuntimeNotReady as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc), "details": _safe(exc.details)}) from exc
     except LifecycleError as exc: raise HTTPException(409, str(exc)) from exc
 
 @router.post("/runs/{run_id}/analysis")

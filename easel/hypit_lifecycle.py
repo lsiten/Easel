@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 import hashlib
+import importlib.util
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -36,6 +37,11 @@ class LifecycleTimeout(LifecycleError):
     pass
 class OutputValidationError(LifecycleError):
     pass
+class RuntimeNotReady(LifecycleError):
+    code = "runtime-not-ready"
+    def __init__(self, message: str, details: Mapping[str, Any] | None = None):
+        super().__init__(message)
+        self.details = dict(details or {})
 
 @dataclass
 class LifecycleRecord:
@@ -75,6 +81,7 @@ class HypitLifecycle:
         self.root = Path(root).expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.runner = runner or self._default_runner
+        self._custom_runner = runner is not None
         self.clock = clock
         self.max_active_per_profile = max_active_per_profile
         self.timeout_seconds = min(int(timeout_seconds), 7200)
@@ -223,6 +230,17 @@ class HypitLifecycle:
     def logs(self, record_id: str) -> list[str]: return list(self.get(record_id).logs)
     def inspect(self, record_id: str) -> dict[str, Any]:
         rec = self.get(record_id); return {"state": rec.state, "checkpoint": dict(rec.checkpoint), "outputs": list(rec.outputs), "error": rec.error}
+
+    def readiness(self, profile_id: str = "", session_id: str = "") -> dict[str, Any]:
+        if self._custom_runner:
+            return {"ok": True, "engine": "hypit", "custom_runner": True}
+        adapter = self._adapter_module()
+        config = self._config_for(profile_id or "readiness", session_id or "readiness", "readiness")
+        try:
+            value = adapter.readiness(config)
+        except Exception as exc:
+            return {"ok": False, "engine": "hypit", "error": getattr(exc, "code", "runtime-not-ready"), "message": str(exc)}
+        return value
     def result(self, record_id: str) -> dict[str, Any]:
         rec = self.get(record_id)
         if rec.state != "succeeded": raise LifecycleError(f"result unavailable while {rec.state}")
@@ -250,7 +268,66 @@ class HypitLifecycle:
             if not p.is_absolute(): p = self.root / rec.id / p
             if not p.is_file() or p.stat().st_size <= 0: raise OutputValidationError(f"durable output missing: {output}")
     @staticmethod
-    def _default_runner(rec: LifecycleRecord, checkpoint: Mapping[str, Any], cancel: threading.Event) -> Mapping[str, Any]:
-        return {"checkpoint": {"stage": "complete"}, "outputs": [], "logs": ["build complete"]}
+    def _adapter_module() -> Any:
+        path = Path(__file__).resolve().parents[1] / "skills" / "shared" / "scripts" / "hypit.py"
+        spec = importlib.util.spec_from_file_location("easel._hypit_adapter", path)
+        if not spec or not spec.loader:
+            raise RuntimeNotReady("Hypit adapter is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        import sys
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
 
-__all__ = ["HypitLifecycle", "LifecycleRecord", "LifecycleError", "InvalidTransition", "QuotaExceeded", "LifecycleTimeout", "OutputValidationError"]
+    def _config_for(self, profile_id: str, session_id: str, run_id: str) -> Any:
+        from .video_run_manifest import resolve_project_root
+        adapter = self._adapter_module()
+        workspace = Path(os.environ.get("EASEL_HYPIT_WORKSPACE_ROOT", str(self.root.parents[2]))).expanduser().resolve()
+        project = resolve_project_root(workspace, profile_id, session_id, run_id)
+        asset_root = workspace / "profiles" / profile_id / "assets"
+        output_root = project / "outputs"
+        report_root = project / "reports"
+        executable = os.environ.get("EASEL_HYPIT_EXECUTABLE")
+        return adapter.HypitConfig(project, asset_root, output_root, report_root=report_root,
+                                   executable=Path(executable).expanduser().resolve() if executable else None,
+                                   timeout=self.timeout_seconds)
+
+    def _default_runner(self, rec: LifecycleRecord, checkpoint: Mapping[str, Any], cancel: threading.Event) -> Mapping[str, Any]:
+        adapter = self._adapter_module()
+        config = self._config_for(rec.profile_id, rec.session_id, rec.id)
+        try:
+            ready = adapter.readiness(config)
+        except Exception as exc:
+            raise RuntimeNotReady(str(exc), {"error": getattr(exc, "code", "runtime-not-ready")}) from exc
+        if not ready.get("ok"):
+            raise RuntimeNotReady("Hypit runtime is not ready", ready)
+        if cancel.is_set():
+            raise LifecycleError("cancelled")
+        try:
+            result = adapter.run(config)
+        except Exception as exc:
+            code = getattr(exc, "code", "runtime-error")
+            if code == "timeout":
+                raise LifecycleTimeout(str(exc)) from exc
+            if code in {"missing-executable", "version-mismatch", "invalid-config"}:
+                raise RuntimeNotReady(str(exc), {"error": code}) from exc
+            raise
+        project = config.project
+        manifest = project / "run-manifest.json"
+        files = [p for root in (config.output_root, config.report_root or project / "reports")
+                 if root.exists() for p in root.rglob("*") if p.is_file() and p.stat().st_size > 0]
+        media = [p for p in files if p.suffix.lower() == ".mp4"]
+        reports = [p for p in files if p.suffix.lower() in {".json", ".html", ".pdf", ".md"}]
+        if not media or not reports:
+            raise OutputValidationError("Hypit did not produce durable mp4 and report outputs")
+        if not manifest.exists():
+            manifest.write_text(json.dumps({"engine": "hypit", "run_id": rec.id,
+                "profile_id": rec.profile_id, "session_id": rec.session_id,
+                "outputs": [str(p.relative_to(project)) for p in files]}, sort_keys=True) + "\n", encoding="utf-8")
+        files.append(manifest)
+        artifacts = {str(p): {"sha256": hashlib.sha256(p.read_bytes()).hexdigest(), "size": p.stat().st_size} for p in files}
+        stage = "sample" if rec.kind == "sample" else "full"
+        return {"checkpoint": {"stage": stage, "artifacts": artifacts, "runtime": result.get("runtime_metadata", {})},
+                "outputs": [str(p) for p in files], "logs": ["Hypit runtime completed", f"artifacts: {len(files)}"]}
+
+__all__ = ["HypitLifecycle", "LifecycleRecord", "LifecycleError", "InvalidTransition", "QuotaExceeded", "LifecycleTimeout", "OutputValidationError", "RuntimeNotReady"]

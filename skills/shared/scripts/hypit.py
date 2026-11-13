@@ -255,7 +255,10 @@ def run(config: HypitConfig, args: list[str] | None = None) -> dict[str, Any]:
     executable = resolve_executable(config)
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise HypitMissingExecutableError(f"Hypit executable is not executable: {executable}")
-    command = [str(executable), *(args or []), "--asset-root", str(config.asset_root), "--output-root", str(config.output_root)]
+    command = [str(executable), *(args or []), "--project", str(config.project),
+               "--asset-root", str(config.asset_root), "--output-root", str(config.output_root)]
+    if config.report_root is not None:
+        command.extend(["--report-root", str(config.report_root)])
     try:
         proc = subprocess.run(command, cwd=str(config.project), capture_output=True, text=True, timeout=config.timeout,
                               env={**os.environ, "HYPIT_PROJECT": str(config.project)})
