@@ -3,6 +3,7 @@ import { fetchOutputs, mediaUrl } from '../lib/api';
 import type { OutputNode } from '../lib/api';
 import { useOpenfilmStudio } from '../lib/useOpenfilmStudio';
 import { IconVideo, IconRefresh } from './icons';
+import HypitReplicationWorkspace from './HypitReplicationWorkspace';
 
 interface Props { session?: string; persona: string; onMakeVideo: () => void; }
 
@@ -111,6 +112,8 @@ export default function VideoPage({ session, persona, onMakeVideo }: Props) {
             </div>
           )}
       </div>
+
+      <HypitReplicationWorkspace session={session} persona={persona} />
     </div>
   );
 }
