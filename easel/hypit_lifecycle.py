@@ -114,14 +114,18 @@ class HypitLifecycle:
         if not required.issubset(pricing) or pricing.get("profile_id") != profile_id or pricing.get("kind") != kind:
             raise LifecycleError("malformed pricing receipt")
         try:
+            raw_units = pricing.get("units", 1)
+            if isinstance(raw_units, bool) or not isinstance(raw_units, (int, float)):
+                raise LifecycleError("malformed pricing units")
             pricing_id = str(pricing["pricing_id"])
-            units = float(pricing.get("units", 1))
+            units = float(raw_units)
             unit_cost = float(pricing.get("unit_cost"))
             estimated = float(pricing["estimated_cost"])
             import math
             expected_unit = 1.0 if kind == "sample" else 4.0
-            if not pricing_id or not pricing_id.startswith(f"hypit-{kind}-"):
-                raise LifecycleError("malformed pricing receipt")
+            expected_id = f"hypit-{kind}-{int(expected_unit)}"
+            if pricing_id != expected_id:
+                raise LifecycleError("malformed pricing receipt identity")
             if not (math.isfinite(units) and units > 0 and units.is_integer()):
                 raise LifecycleError("malformed pricing units")
             if not (math.isfinite(unit_cost) and unit_cost > 0 and abs(unit_cost - expected_unit) < 1e-9):

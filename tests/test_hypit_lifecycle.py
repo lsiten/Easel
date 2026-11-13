@@ -83,3 +83,10 @@ def test_pricing_receipt_consistency_rejects_misleading_values(tmp_path):
     for key, value in (("pricing_id", ""), ("units", 99), ("unit_cost", 999), ("estimated_cost", 0)):
         bad = dict(base); bad[key] = value
         with pytest.raises(LifecycleError): service.plan("p", "s", pricing=bad)
+
+def test_pricing_identity_and_units_are_strict(tmp_path):
+    service = HypitLifecycle(tmp_path / "state")
+    base = service.pricing("p")
+    for key, value in (("units", True), ("pricing_id", "hypit-sample-"), ("pricing_id", "hypit-sample-x")):
+        bad = dict(base); bad[key] = value
+        with pytest.raises(LifecycleError): service.plan("p", "s", pricing=bad)
