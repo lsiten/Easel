@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -38,13 +39,31 @@ def _scope(value: Any, label: str) -> str:
 
 def _iso(value: datetime | str) -> str:
     if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ProviderPolicyError("timestamp must include timezone")
         value = value.astimezone(timezone.utc).isoformat()
     if not isinstance(value, str):
         raise ProviderPolicyError("timestamp must be ISO text")
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
         raise ProviderPolicyError("invalid timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ProviderPolicyError("timestamp must include timezone")
+    return value
+
+
+def _redact_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return redact_mapping(value)
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_value(item) for item in value)
+    if isinstance(value, set):
+        return {_redact_value(item) for item in value}
+    if isinstance(value, str) and re.search(r"(?i)^(?:bearer\s+|(?:sk|pk|rk)-[A-Za-z0-9_-]{8,})", value):
+        return "[REDACTED]"
     return value
 
 
@@ -54,10 +73,8 @@ def redact_mapping(values: Mapping[str, Any]) -> dict[str, Any]:
     for key, value in values.items():
         if _SECRET_NAMES.search(str(key)):
             out[str(key)] = "[REDACTED]"
-        elif isinstance(value, Mapping):
-            out[str(key)] = redact_mapping(value)
         else:
-            out[str(key)] = value
+            out[str(key)] = _redact_value(value)
     return out
 
 
@@ -133,7 +150,11 @@ class PricingEstimate:
         _id(self.provider_id, "provider_id")
         _scope(self.profile_id, "profile_id")
         _scope(self.session_id, "session_id")
-        if self.estimated_units < 0 or self.estimated_cost < 0 or not self.currency:
+        if (not isinstance(self.estimated_units, (int, float))
+                or not isinstance(self.estimated_cost, (int, float))
+                or not math.isfinite(self.estimated_units)
+                or not math.isfinite(self.estimated_cost)
+                or self.estimated_units < 0 or self.estimated_cost < 0 or not self.currency):
             raise ProviderPolicyError("pricing values must be non-negative")
         _iso(self.valid_until)
 
@@ -203,7 +224,10 @@ class ProviderPolicy:
     def __post_init__(self) -> None:
         if self.provider.route != "local" and self.credential is None:
             raise ProviderPolicyError("credential reference is required")
-        if self.credential and (self.credential.profile_id != self.provider.profile_id or self.credential.session_id != self.provider.session_id):
+        if self.credential and self.credential.credential_id != self.provider.credential_id:
+            raise ProviderPolicyError("credential does not match provider credential")
+        if self.credential and (self.credential.profile_id != self.provider.profile_id
+                                or self.credential.session_id != self.provider.session_id):
             raise ProviderPolicyError("credential is outside provider profile/session")
         if self.pricing and (self.pricing.provider_id != self.provider.provider_id or self.pricing.profile_id != self.provider.profile_id or self.pricing.session_id != self.provider.session_id):
             raise ProviderPolicyError("pricing is outside provider scope")
@@ -217,19 +241,35 @@ class ProviderPolicy:
     def ready(self) -> bool:
         return self.provider.route == "local" or self.credential is not None
 
-    def assert_build_allowed(self, *, now: datetime | None = None, paid: bool = True) -> None:
+    def assert_build_allowed(self, *, now: datetime | None = None, paid: bool = True,
+                             build_kind: str = "full") -> None:
+        if build_kind not in {"sample", "full"}:
+            raise ProviderPolicyError("invalid build kind")
         if not self.ready:
             raise ProviderPolicyError("provider is not ready")
         if not paid or self.provider.route == "local":
             return
         if self.pricing is None:
             raise ProviderPolicyError("pricing is required before Build")
-        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-        expiry = datetime.fromisoformat(self.pricing.valid_until.replace("Z", "+00:00"))
+        current_value = now or datetime.now(timezone.utc)
+        if current_value.tzinfo is None or current_value.utcoffset() is None:
+            raise ProviderPolicyError("timestamp must include timezone")
+        current = current_value.astimezone(timezone.utc)
+        try:
+            expiry = datetime.fromisoformat(self.pricing.valid_until.replace("Z", "+00:00"))
+        except (TypeError, ValueError) as exc:
+            raise ProviderPolicyError("invalid pricing timestamp") from exc
+        if expiry.tzinfo is None or expiry.utcoffset() is None:
+            raise ProviderPolicyError("pricing timestamp must include timezone")
+        expiry = expiry.astimezone(timezone.utc)
         if expiry <= current:
             raise ProviderPolicyError("pricing estimate is stale")
         if self.approval is None:
             raise ProviderPolicyError("explicit user approval is required before paid Build")
+        if build_kind == "full" and self.approval.scope != "build":
+            raise ProviderPolicyError("approval scope does not cover full Build")
+        if build_kind == "sample" and self.approval.scope not in {"sample", "build"}:
+            raise ProviderPolicyError("approval scope does not cover sample Build")
 
     def to_manifest_dict(self) -> dict[str, Any]:
         return {"provider": self.provider.to_dict(),

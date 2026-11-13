@@ -54,6 +54,9 @@ def test_credential_and_provider_session_isolation():
         ProviderPolicy(_provider("byok", "cred-1"), credential=CredentialRef("cred-1", "profile-b", "session-a", "KEY"))
     with pytest.raises(ProviderPolicyError):
         ProviderRef("provider", "model", "https://example.invalid", "profile-a", "session-a", route="byok")
+    with pytest.raises(ProviderPolicyError, match="credential"):
+        ProviderPolicy(_provider("byok", "provider-credential"),
+                       credential=CredentialRef("different-credential", "profile-a", "session-a", "KEY"))
 
 
 def test_stale_pricing_provenance_and_malformed_metadata():
@@ -83,3 +86,55 @@ def test_manifest_policy_contains_receipts_without_raw_secret():
     assert payload["credential"]["credential_id"] == "cred-1"
     encoded = json.dumps(payload)
     assert "do-not-store" not in encoded and "[REDACTED]" in encoded
+
+
+def test_approval_scope_cannot_escalate_sample_to_full_build():
+    credential = CredentialRef("cred-1", "profile-a", "session-a", "KEY")
+    provider = _provider("byok", "cred-1")
+    pricing = pricing_for(provider, estimated_units=1, unit_cost=1,
+                          valid_until=datetime.now(timezone.utc) + timedelta(minutes=10))
+    sample_approval = ApprovalReceipt("approval", pricing.pricing_id, "profile-a", "session-a",
+                                      datetime.now(timezone.utc).isoformat(), "user", scope="sample")
+    policy = ProviderPolicy(provider, credential, pricing, sample_approval)
+    policy.assert_build_allowed(build_kind="sample")
+    with pytest.raises(ProviderPolicyError, match="scope"):
+        policy.assert_build_allowed(build_kind="full")
+
+
+def test_nested_metadata_redaction_covers_collections_and_secret_values():
+    provider = ProviderRef("provider", "model", "https://example.invalid", "profile-a", "session-a",
+                           route="byok", credential_id="cred",
+                           adapter_metadata={"nested": [{"api_token": "secret"},
+                                                         ("Bearer very-secret", {"safe": "sk-live-12345678"})],
+                                             "set_values": {"sk-live-abcdefgh", "ordinary"}})
+    metadata = provider.to_dict()["adapter_metadata"]
+    assert metadata["nested"][0]["api_token"] == "[REDACTED]"
+    assert metadata["nested"][1][0] == "[REDACTED]"
+    assert metadata["nested"][1][1]["safe"] == "[REDACTED]"
+    assert "[REDACTED]" in metadata["set_values"] and "ordinary" in metadata["set_values"]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_pricing_is_rejected(value):
+    provider = _provider("byok", "cred-1")
+    with pytest.raises(ProviderPolicyError, match="pricing values"):
+        pricing_for(provider, estimated_units=value, unit_cost=1,
+                    valid_until=datetime.now(timezone.utc) + timedelta(minutes=10))
+    with pytest.raises(ProviderPolicyError, match="pricing values"):
+        pricing_for(provider, estimated_units=1, unit_cost=value,
+                    valid_until=datetime.now(timezone.utc) + timedelta(minutes=10))
+
+
+def test_naive_timestamps_are_rejected_deterministically():
+    provider = _provider("byok", "cred-1")
+    with pytest.raises(ProviderPolicyError, match="timezone"):
+        pricing_for(provider, estimated_units=1, unit_cost=1,
+                    valid_until=datetime.now())
+    with pytest.raises(ProviderPolicyError, match="timezone"):
+        ApprovalReceipt("approval", "price", "profile-a", "session-a", datetime.now().isoformat(), "user")
+    pricing = pricing_for(provider, estimated_units=1, unit_cost=1,
+                          valid_until=datetime.now(timezone.utc) + timedelta(minutes=10))
+    approval = ApprovalReceipt("approval", pricing.pricing_id, "profile-a", "session-a",
+                               datetime.now(timezone.utc).isoformat(), "user")
+    with pytest.raises(ProviderPolicyError, match="timezone"):
+        ProviderPolicy(provider, CredentialRef("cred-1", "profile-a", "session-a", "KEY"), pricing, approval).assert_build_allowed(now=datetime.now())
