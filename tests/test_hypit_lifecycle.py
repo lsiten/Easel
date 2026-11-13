@@ -76,3 +76,10 @@ def test_stale_checkpoint_revision_and_fingerprint_rejected(tmp_path):
         service.plan("p", "s", pricing=pricing, checkpoint={"revision": -999, "schema": 1, "stage": "sample", "fingerprint": "bad"})
     with pytest.raises(LifecycleError):
         service.plan("p", "s", pricing=pricing, checkpoint={"revision": 0, "schema": 1, "stage": "unknown", "fingerprint": "badfingerprint"})
+
+def test_pricing_receipt_consistency_rejects_misleading_values(tmp_path):
+    service = HypitLifecycle(tmp_path / "state")
+    base = service.pricing("p")
+    for key, value in (("pricing_id", ""), ("units", 99), ("unit_cost", 999), ("estimated_cost", 0)):
+        bad = dict(base); bad[key] = value
+        with pytest.raises(LifecycleError): service.plan("p", "s", pricing=bad)
