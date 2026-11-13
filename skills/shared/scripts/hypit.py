@@ -166,12 +166,27 @@ def resolve_executable(config: HypitConfig) -> Path:
 
 def _redact(value: Any) -> Any:
     secret = re.compile(r"(?i)(token|secret|password|api[_-]?key|authorization|cookie)")
+    assignment = re.compile(
+        r"(?i)(\b(?:token|secret|password|api[_-]?key|authorization|cookie)\b\s*[:=]\s*)"
+        r"(\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+    )
+
+    def redact_text(text: str) -> str:
+        def replace_assignment(match: re.Match[str]) -> str:
+            raw = match.group(2)
+            if raw[:1] in {"\"", "'"} and raw[-1:] == raw[:1]:
+                return match.group(1) + raw[:1] + "[REDACTED]" + raw[:1]
+            return match.group(1) + "[REDACTED]"
+
+        text = assignment.sub(replace_assignment, text)
+        return re.sub(r"(?i)(bearer\s+)[^\s]+", r"\1[REDACTED]", text)
+
     if isinstance(value, Mapping):
         return {str(k): ("[REDACTED]" if secret.search(str(k)) else _redact(v)) for k, v in value.items()}
     if isinstance(value, list):
         return [_redact(v) for v in value]
     if isinstance(value, str):
-        return re.sub(r"(?i)(bearer\s+)[^\s]+", r"\1[REDACTED]", value)
+        return redact_text(value)
     return value
 
 
@@ -249,7 +264,7 @@ def run(config: HypitConfig, args: list[str] | None = None) -> dict[str, Any]:
     except FileNotFoundError as exc:
         raise HypitMissingExecutableError(str(executable)) from exc
     if proc.returncode != 0:
-        raise HypitProcessError(f"Hypit exited with status {proc.returncode}: {proc.stderr[-500:]}")
+        raise HypitProcessError(f"Hypit exited with status {proc.returncode}: {_redact(proc.stderr[-500:])}")
     return _redact({"engine": "hypit", "version": PINNED_VERSION, "status": "succeeded", "returncode": 0,
                     "stdout": proc.stdout, "output_root": str(config.output_root), "license": LICENSE,
                     "runtime_metadata": {"engine": "hypit", "package": PINNED_PACKAGE, "version": PINNED_VERSION,
