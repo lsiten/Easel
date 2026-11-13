@@ -16,6 +16,8 @@ import {
   rerunHypitRun,
   startHypitRun,
   type HypitPricing,
+  type HypitProviderRoute,
+  type HypitReadiness,
   type HypitRun,
   type HypitScope,
   type HypitVariant,
@@ -33,6 +35,7 @@ type UnknownRecord = Record<string, unknown>;
 const emptyState = <T,>(): LoadState<T> => ({ status: 'idle', data: null, error: '' });
 const asRecord = (value: unknown): UnknownRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as UnknownRecord : {};
 const stringList = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+const finiteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const normalizeVariants = (value: unknown): { variants: HypitVariant[] } => {
   const record = asRecord(value);
   const variants = Array.isArray(record.variants) ? record.variants.map(item => {
@@ -93,6 +96,51 @@ function motionLabel(value: unknown): string {
   return '未知';
 }
 
+function providerRoute(value: HypitReadiness | null | undefined): HypitProviderRoute {
+  const record = asRecord(value);
+  const provider = asRecord(record.provider);
+  const route = typeof record.provider === 'string'
+    ? record.provider
+    : provider.route || record.route || record.provider_route || record.providerRoute || record.provider_kind;
+  const normalized = typeof route === 'string' ? route.toLowerCase().replace(/[_-]/g, '') : '';
+  return normalized === 'byok' || normalized === 'hypihub' ? normalized : 'local';
+}
+
+function normalizePricing(value: HypitPricing | null | undefined): HypitPricing | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = asRecord(value);
+  if (typeof record.pricing_id !== 'string' || !record.pricing_id.trim()) return null;
+  if (!finiteNumber(record.estimated_cost) || record.estimated_cost < 0) return null;
+  if (record.valid_until === undefined) return null;
+  if (typeof record.valid_until === 'number' && (!Number.isFinite(record.valid_until) || record.valid_until <= Date.now() / 1000)) return null;
+  if (typeof record.valid_until === 'string' && (Number.isNaN(Date.parse(record.valid_until)) || Date.parse(record.valid_until) <= Date.now())) return null;
+  if (typeof record.valid_until !== 'number' && typeof record.valid_until !== 'string') return null;
+  return value;
+}
+
+function formatRequirements(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(item => safeText(item, '')).filter(Boolean);
+  const record = asRecord(value);
+  return Object.entries(record).map(([key, item]) => `${key}: ${safeText(typeof item === 'object' ? describe(item) : item)}`);
+}
+
+function readinessMessage(value: HypitReadiness | null | undefined): string {
+  if (!value || value.ready) return '';
+  const record = asRecord(value);
+  const runtime = asRecord(record.runtime);
+  const message = record.message || record.reason || record.detail || runtime.message;
+  const requirements = formatRequirements(record.runtime_requirements || record.requirements || runtime.requirements || runtime.missing);
+  const details = requirements.length ? `运行环境要求：${requirements.join('、')}` : '';
+  return [safeText(message, ''), details].filter(Boolean).join(' ')
+    || '请检查 Hypit 运行时依赖并完成配置后重试。';
+}
+
+function approvalLabel(value: unknown): string {
+  const record = asRecord(value);
+  if (record.approved === true || record.approval_state === 'approved' || record.state === 'approved' || record.status === 'approved') return '已批准';
+  return '需要批准';
+}
+
 function Card({ title, eyebrow, children, className = '' }: { title: string; eyebrow?: string; children: ReactNode; className?: string }) {
   return <section className={`hypit-card ${className}`}>
     <div className="hypit-card-head">
@@ -115,7 +163,7 @@ function DetailList({ value }: { value: unknown }) {
 
 export default function HypitReplicationWorkspace({ session, persona }: Props) {
   const scope = useMemo<HypitScope | null>(() => session && persona ? { session_id: session, profile_id: persona } : null, [session, persona]);
-  const [readiness, setReadiness] = useState<LoadState<{ ready: boolean; engine: string }>>(emptyState());
+  const [readiness, setReadiness] = useState<LoadState<HypitReadiness>>(emptyState());
   const [samplePricing, setSamplePricing] = useState<LoadState<HypitPricing>>(emptyState());
   const [fullPricing, setFullPricing] = useState<LoadState<HypitPricing>>(emptyState());
   const [variants, setVariants] = useState<LoadState<{ variants: HypitVariant[] }>>(emptyState());
@@ -164,8 +212,15 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
 
   const selected = variants.data?.variants.find(item => item.variant_id === selectedVariant) || null;
   const approvalState = safeText(selected?.approval_state, 'pending').toLowerCase();
-  const canBuild = !!scope && readiness.data?.ready === true && (buildKind === 'sample' || approvalState === 'approved');
-  const pricing = buildKind === 'full' ? fullPricing.data : samplePricing.data;
+  const route = providerRoute(readiness.data);
+  const pricing = normalizePricing(buildKind === 'full' ? fullPricing.data : samplePricing.data);
+  const readinessRecord = asRecord(readiness.data);
+  const provider = asRecord(readinessRecord.provider);
+  const providerApproval = asRecord(readinessRecord.approval || asRecord(pricing).approval);
+  const needsPaidApproval = route === 'hypihub';
+  const hasPaidApproval = providerApproval.approved === true || providerApproval.approval_state === 'approved' || providerApproval.state === 'approved' || providerApproval.status === 'approved' || readinessRecord.approval_state === 'approved' || provider.approval_state === 'approved';
+  const pricingReady = pricing !== null;
+  const canBuild = !!scope && readiness.data?.ready === true && pricingReady && (!needsPaidApproval || hasPaidApproval) && (buildKind === 'sample' || approvalState === 'approved');
 
   const refreshRun = useCallback(async (runId: string, currentScope: HypitScope) => {
     const requestGeneration = generation.current;
@@ -194,12 +249,16 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
   }, [run.data?.id, run.data?.run_id, run.data?.state, refreshRun, scope]);
 
   const build = async () => {
-    if (!scope || !pricing || !canBuild) return;
+    if (!scope || !canBuild) return;
     const actionGeneration = generation.current;
     setBusy('build'); setRunError(''); setNotice('');
     try {
       const fingerprint = selected && typeof selected.sample_fingerprint === 'string' ? selected.sample_fingerprint : undefined;
-      const planned = await planHypitRun(scope, { kind: buildKind, pricing, input_fingerprint: fingerprint });
+      const planned = await planHypitRun(scope, {
+        kind: buildKind,
+        pricing,
+        input_fingerprint: fingerprint,
+      });
       if (actionGeneration !== generation.current) return;
       setRun({ status: 'ready', data: planned, error: '' });
       const runId = planned.id || planned.run_id;
@@ -280,6 +339,16 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
     finally { if (actionGeneration === generation.current) setBusy(''); }
   };
 
+  const resourceEstimate = buildKind === 'sample' ? '资源估计 · 1 次样例渲染' : '资源估计 · 4 次完整渲染';
+  const providerCopy = route === 'local'
+    ? '本地构建 · 无平台费用'
+    : route === 'byok'
+      ? '使用自有 API Key，费用由 Provider 收取'
+      : 'HypiHub 托管 Provider';
+  const pricingError = route === 'hypihub' && !pricing
+    ? (buildKind === 'full' ? fullPricing.error : samplePricing.error) || '费用估算格式无效，无法开始 Build。'
+    : '';
+
   if (!scope) return <section className="hypit-workspace hypit-empty-scope" aria-label="Hypit 复制工作台"><IconVideo size={18} /><div><strong>Hypit 复制工作台</strong><p>请选择账号并打开一个会话后开始分析。</p></div></section>;
 
   return <section className="hypit-workspace" aria-label="Hypit 复制工作台">
@@ -292,8 +361,12 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
     <div className="hypit-grid">
       <Card title="准备度与费用" eyebrow="Build gate">
         {readiness.status === 'loading' ? <div className="hypit-loading">正在检查 Hypit…</div> : readiness.status === 'error' ? <InlineError message={readiness.error} onRetry={() => void load()} /> : <div className="hypit-readiness"><span className={`hypit-status-dot ${readiness.data?.ready ? 'ok' : 'off'}`} />{readiness.data?.ready ? 'Hypit 就绪' : 'Hypit 不可用'}<span className="hypit-source-tag">engine: {safeText(readiness.data?.engine, 'hypit')}</span></div>}
-        <div className="hypit-build-toggle" role="group" aria-label="Build 类型"><button className={buildKind === 'sample' ? 'active' : ''} onClick={() => setBuildKind('sample')}>Sample · 1 单位</button><button className={buildKind === 'full' ? 'active' : ''} onClick={() => setBuildKind('full')}>Full · 4 单位</button></div>
-        {pricing ? <div className="hypit-price"><span>预计费用</span><strong>{safeText(pricing.estimated_cost)} units</strong><small>收据 {safeText(pricing.pricing_id)}</small></div> : <div className="hypit-muted">费用收据加载后才能 Build。</div>}
+        {readiness.data && !readiness.data.ready && <div className="hypit-gate hypit-readiness-gate" role="alert">{readinessMessage(readiness.data)}</div>}
+        <div className="hypit-provider-copy">{providerCopy}</div>
+        <div className="hypit-build-toggle" role="group" aria-label="Build 类型"><button className={buildKind === 'sample' ? 'active' : ''} onClick={() => setBuildKind('sample')}>Sample</button><button className={buildKind === 'full' ? 'active' : ''} onClick={() => setBuildKind('full')}>Full</button></div>
+        <div className="hypit-resource-estimate">{resourceEstimate}</div>
+        {route === 'hypihub' && (pricing ? <div className="hypit-price"><span>预计费用</span><strong>{safeText(pricing.estimated_cost)} {safeText(pricing.currency, 'USD')}</strong><small>收据 {safeText(pricing.pricing_id)}</small><small>费用批准：{hasPaidApproval ? '已批准' : approvalLabel(providerApproval)}</small></div> : <div className="hypit-gate" role="alert">{pricingError}</div>)}
+        {route === 'hypihub' && pricing && !hasPaidApproval && <div className="hypit-gate">请先确认 HypiHub 费用后再 Build。</div>}
         {buildKind === 'full' && approvalState !== 'approved' && <div className="hypit-gate">请先批准所选变体的 Sample，Full Build 才可用。</div>}
         {runError && <div className="hypit-error" role="alert">{runError}</div>}
         <button className="btn btn-sm hypit-primary-action" disabled={!canBuild || busy === 'build'} onClick={() => void build()}>{busy === 'build' ? '准备中…' : `开始 ${buildKind === 'sample' ? 'Sample' : 'Full'} Build`}</button>

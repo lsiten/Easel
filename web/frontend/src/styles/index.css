@@ -1077,6 +1077,9 @@ textarea.field { resize: vertical; min-height: 90px; }
 .hypit-inline-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--red); font-size: 12px; }
 .hypit-error { margin-top: 9px; padding: 8px 10px; color: var(--red); background: var(--red-soft); border-radius: 7px; font-size: 12px; overflow-wrap: anywhere; }
 .hypit-readiness { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 650; }
+.hypit-provider-copy { margin-top: 10px; color: var(--text-secondary); font-size: 12px; font-weight: 650; }
+.hypit-resource-estimate { margin-top: 8px; color: var(--text-tertiary); font-size: 11px; }
+.hypit-readiness-gate { margin-top: 9px; }
 .hypit-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-tertiary); }
 .hypit-status-dot.ok { background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
 .hypit-status-dot.off { background: var(--red); }
