@@ -32,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from asset_storage import category_directory, read_index as _read_index, store_entry, _write_json as _write_storage_json
+from video_run_manifest import is_public_artifact
 
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
@@ -108,7 +109,7 @@ def sources(profile: str) -> list[str]:
             continue
         ap = p if Path(p).is_absolute() else str((PROFILES_DIR / p).resolve())
         r = Path(ap)
-        if r.is_dir() and ap not in seen:
+        if r.is_dir() and is_public_artifact(r) and ap not in seen:
             seen.add(ap)
             out.append(ap)
     return out
@@ -129,7 +130,7 @@ def add(profile: str, dirs: list[str]) -> dict:
         if not p:
             continue
         ap = p if Path(p).is_absolute() else str(Path(p).expanduser().resolve())
-        if not Path(ap).is_dir():
+        if not Path(ap).is_dir() or not is_public_artifact(ap):
             invalid.append(ap)
             continue
         if ap in {str(x) for x in existing}:
@@ -201,7 +202,7 @@ def scan(profile: str) -> list[dict]:
     items: list[dict] = []
     for src in sources(profile):
         for p in sorted(Path(src).rglob("*")):
-            if not p.is_file() or p.name.startswith("."):
+            if not p.is_file() or p.name.startswith(".") or not is_public_artifact(p):
                 continue
             if any(part.startswith(".") for part in p.relative_to(Path(src)).parts):
                 continue

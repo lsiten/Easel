@@ -8,6 +8,12 @@ import tempfile
 from pydantic import BaseModel, ConfigDict, StrictStr, ValidationError
 
 
+def video_project_root(root: Path | str, profile_id: str, session_id: str, run_id: str) -> Path:
+    """Resolve an isolated video project directory for one profile/session/run."""
+    from video_run_manifest import resolve_project_root
+    return resolve_project_root(root, profile_id, session_id, run_id)
+
+
 class ProjectOwnership(BaseModel):
     """Parse the owner while preserving the rest of the manifest on update."""
 
