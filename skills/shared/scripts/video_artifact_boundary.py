@@ -42,8 +42,9 @@ class ArtifactRecord:
             raise ArtifactBoundaryError("source_engine must be hypit or openfilm")
         if not _safe_scope(self.target_profile):
             raise ArtifactBoundaryError("invalid target_profile")
-        if not isinstance(self.attribution, str) or not self.attribution.strip():
-            raise ArtifactBoundaryError("attribution is required")
+        if (not isinstance(self.attribution, str) or not self.attribution.strip()
+                or any(ord(c) < 32 for c in self.attribution)):
+            raise ArtifactBoundaryError("attribution is required and must be plain text")
         if not self.derived:
             raise ArtifactBoundaryError("native artifacts cannot be exported as derived artifacts")
 
@@ -159,6 +160,8 @@ def export_artifacts(*, source_root: Path | str, destination_root: Path | str, s
         if not isinstance(record, ArtifactRecord) or record.source_engine != source_engine or record.target_profile != target_profile:
             raise ArtifactBoundaryError("record provenance mismatch")
         rel = _safe_relative(record.path)
+        if record.kind == "manifest" and rel.endswith("film.html"):
+            raise ArtifactBoundaryError("implicit Hypit to film.html conversion is forbidden")
         src = (src_root / rel).resolve()
         if not src.is_file() or not src.is_relative_to(src_root): raise ArtifactBoundaryError("artifact path escapes source root")
         if _checksum(src) != record.checksum: raise ArtifactBoundaryError("artifact checksum mismatch")
