@@ -36,6 +36,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 _URL_RE = re.compile(r"^(https?|ftp)://", re.IGNORECASE)
 _VIDEO_EXT = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".m4v", ".ts", ".wmv"}
@@ -131,6 +132,9 @@ def _extract_keyframes(path: Path, scenes: list[dict], max_frames: int,
                        depth: str, out_dir: Path) -> list[dict]:
     """按场景抽关键帧；deep 时每镜头抽 2 帧，standard/transcript 每镜头 1 帧。"""
     out_dir.mkdir(parents=True, exist_ok=True)
+    # Avoid presenting frames from an older, longer analysis as current evidence.
+    for stale in out_dir.glob("kf_*.jpg"):
+        stale.unlink(missing_ok=True)
     per_scene = 2 if depth == "deep" else 1
     frames: list[dict] = []
     for sc in scenes:
@@ -175,19 +179,151 @@ def _transcribe(path: Path, out_dir: Path, language: str) -> dict:
     if not asr.exists():
         return {}
     srt = out_dir / "transcript.srt"
+    srt.unlink(missing_ok=True)
     ok = _run([sys.executable, str(asr), "transcribe", "-i", str(path),
               "-o", str(srt), "--format", "srt", "--model", "small",
               "--language", language or "auto"], capture_output=True)
     if ok.returncode != 0 or not srt.exists():
         return {}
     text = srt.read_text(encoding="utf-8", errors="ignore")
-    segs = []
-    for line in text.splitlines():
-        line = line.strip()
-        if line and not line.startswith("00:0") and not "-->" in line and not line.isdigit():
-            segs.append(line)
-    return {"transcript": " ".join(segs) if segs else text,
-           "transcript_file": str(srt)}
+    segments = _parse_srt(text)
+    return {"transcript": " ".join(item["text"] for item in segments),
+            "transcript_file": str(srt), "segments": segments,
+            "status": "succeeded" if segments else "partial"}
+
+
+def _parse_srt(text: str) -> list[dict[str, Any]]:
+    """Parse timed SRT cues without trusting cue text as instructions."""
+    result: list[dict[str, Any]] = []
+    blocks = re.split(r"\n\s*\n", text.strip()) if text.strip() else []
+    timestamp = re.compile(
+        r"(?P<start>\d{1,2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*"
+        r"(?P<end>\d{1,2}:\d{2}:\d{2}[,.]\d{3})"
+    )
+
+    def seconds(value: str) -> float:
+        h, m, rest = value.replace(",", ".").split(":")
+        return int(h) * 3600 + int(m) * 60 + float(rest)
+
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        match = next((timestamp.search(line) for line in lines if timestamp.search(line)), None)
+        if not match:
+            continue
+        text_lines = lines[lines.index(next(line for line in lines if timestamp.search(line))) + 1:]
+        cue_text = " ".join(text_lines).strip()
+        if not cue_text:
+            continue
+        result.append({"index": len(result), "start": round(seconds(match.group("start")), 3),
+                       "end": round(seconds(match.group("end")), 3), "text": cue_text,
+                       "confidence": None, "confidence_state": "unknown"})
+    return result
+
+
+def _relative_output_path(path: str | Path, out_dir: Path) -> str | None:
+    try:
+        return Path(path).resolve().relative_to(out_dir.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _tokenize_transcript(transcript: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return word anchors, leaving timing unknown when ASR did not provide it."""
+    segments = transcript.get("segments") if isinstance(transcript, dict) else None
+    if not isinstance(segments, list):
+        segments = []
+    tokens: list[dict[str, Any]] = []
+    word_re = re.compile(r"\S+", re.UNICODE)
+    for segment_index, segment in enumerate(segments):
+        if not isinstance(segment, dict):
+            continue
+        words = word_re.findall(str(segment.get("text") or ""))
+        start = segment.get("start")
+        end = segment.get("end")
+        timed = isinstance(start, (int, float)) and isinstance(end, (int, float)) and end >= start
+        confidence = segment.get("confidence")
+        confidence_known = isinstance(confidence, (int, float)) and 0 <= confidence <= 1
+        span = float(end) - float(start) if timed else 0.0
+        for word_index, word in enumerate(words):
+            token: dict[str, Any] = {
+                "index": len(tokens), "segment_index": segment_index, "text": word,
+                "start": None, "end": None, "timing_state": "unknown",
+                "confidence": float(confidence) if confidence_known else None,
+                "confidence_state": "known" if confidence_known else "unknown",
+            }
+            if timed:
+                token["start"] = round(float(start) + span * word_index / len(words), 3)
+                token["end"] = round(float(start) + span * (word_index + 1) / len(words), 3)
+                token["timing_state"] = "known"
+            tokens.append(token)
+    return tokens
+
+
+def _align_scene_transcript(scene: dict[str, Any], segments: list[dict[str, Any]]) -> dict[str, Any]:
+    matched = []
+    for index, segment in enumerate(segments):
+        start, end = segment.get("start"), segment.get("end")
+        if isinstance(start, (int, float)) and isinstance(end, (int, float)):
+            if float(start) < float(scene["end"]) and float(end) > float(scene["start"]):
+                matched.append(index)
+    return {"segment_indices": matched,
+            "state": "aligned" if matched else ("unknown" if not segments else "none")}
+
+
+def _semanticize(brief: dict[str, Any], out_dir: Path) -> None:
+    """Persist semantic analysis fields while keeping the legacy brief shape."""
+    transcript = brief.get("transcript") if isinstance(brief.get("transcript"), dict) else {}
+    segments = transcript.get("segments") if isinstance(transcript.get("segments"), list) else []
+    tokens = _tokenize_transcript(transcript)
+    brief["whole_piece"] = {
+        "duration": brief.get("metadata", {}).get("duration"),
+        "resolution": {"width": brief.get("metadata", {}).get("width"),
+                        "height": brief.get("metadata", {}).get("height")},
+        "fps": brief.get("metadata", {}).get("fps"),
+        "has_audio": bool(brief.get("has_audio")),
+        "status": "succeeded" if brief.get("metadata") else "partial",
+    }
+    brief["tokens"] = tokens
+    brief["word_timing"] = tokens
+    brief["token_anchors"] = tokens
+    brief["transcript_alignment"] = {
+        "status": "aligned" if segments and tokens else ("partial" if transcript else "unknown"),
+        "segment_count": len(segments), "token_count": len(tokens),
+        "timing_state": "known" if any(item["timing_state"] == "known" for item in tokens) else "unknown",
+    }
+    scenes = brief.get("scenes") if isinstance(brief.get("scenes"), list) else []
+    for index, scene in enumerate(scenes):
+        scene["id"] = str(scene.get("id", index))
+        scene["relationships"] = {
+            "previous_scene_id": str(scenes[index - 1].get("id")) if index else None,
+            "next_scene_id": str(scenes[index + 1].get("id")) if index + 1 < len(scenes) else None,
+        }
+        scene["transcript_alignment"] = _align_scene_transcript(scene, segments)
+        scene["five_aspect"] = {
+            "subject": {"value": None, "state": "unknown"},
+            "subject_motion": {"value": None, "state": "unknown"},
+            "scene": {"value": None, "state": "unknown"},
+            "spatial_framing": {"value": None, "state": "unknown"},
+            "camera": {"value": None, "state": "unknown"},
+        }
+        scene["motion"] = {"type": "unknown", "state": "unknown", "confidence": None}
+        scene["evidence_paths"] = [
+            item["path"] for item in brief.get("keyframes", [])
+            if item.get("scene_id") == index and item.get("path")
+            and _relative_output_path(item["path"], out_dir)
+        ]
+        scene["evidence_paths"] = [_relative_output_path(item, out_dir) or item
+                                    for item in scene["evidence_paths"]]
+    source_path = brief.get("file")
+    evidence = {"brief": "video_analysis_brief.json"}
+    transcript_file = transcript.get("transcript_file")
+    if transcript_file:
+        evidence["transcript"] = _relative_output_path(transcript_file, out_dir) or "transcript.srt"
+    evidence["keyframes"] = "keyframes/"
+    brief["evidence"] = {"paths": evidence, "source": "video_analysis_brief.json",
+                         "source_path_state": "external" if source_path else "unknown"}
+    brief["source_evidence_paths"] = list(evidence.values())
+    brief["analysis_status"] = "succeeded" if scenes else "partial"
 
 
 def cmd_analyze(a) -> int:
@@ -233,9 +369,15 @@ def cmd_analyze(a) -> int:
         print(f"[ref_analysis] 关键帧 {len(brief['keyframes'])} 张 → {kf_dir}")
         brief["transcript"] = _transcribe(src_path, out_dir, a.language)
 
+    if not brief["transcript"]:
+        brief["transcript"] = {"status": "unknown", "reason": "ASR unavailable or failed",
+                                "transcript": "", "segments": []}
+
     # 占位：Agent 读 keyframes 后回填 5-aspect + motion_type
     brief["motion_summary"] = {
-        "motion_type": "UNCLASSIFIED",
+        "motion_type": "unknown",
+        "state": "unknown",
+        "confidence": None,
         "note": "由 Agent 读 keyframes 判定：motion_clip / animated_still / static_image / mixed",
     }
     brief["five_aspect"] = {
@@ -244,9 +386,12 @@ def cmd_analyze(a) -> int:
         "note": "由 Agent 逐镜/逐镜组填写（CMU/Harvard CHAI 5-aspect 结构）",
     }
 
+    _semanticize(brief, out_dir)
+
     brief_path = out_dir / "video_analysis_brief.json"
-    brief_path.write_text(json.dumps(brief, ensure_ascii=False, indent=2),
-                          encoding="utf-8")
+    tmp_brief = brief_path.with_suffix(".json.tmp")
+    tmp_brief.write_text(json.dumps(brief, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_brief.replace(brief_path)
     elapsed = time.time() - start
     print(f"[ref_analysis] 完成 ({elapsed:.1f}s) → {brief_path}")
     print(f"[ref_analysis] 关键帧目录: {out_dir / 'keyframes'}")
