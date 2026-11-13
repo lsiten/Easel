@@ -68,3 +68,11 @@ def test_timeout_sets_terminal_failed_without_false_success(tmp_path):
     done = service.run(rec.id, runner=slow)
     assert done.state == "failed"
     assert "cancel" in (done.error or "") or "timeout" in (done.error or "")
+
+def test_stale_checkpoint_revision_and_fingerprint_rejected(tmp_path):
+    service = HypitLifecycle(tmp_path / "state")
+    pricing = service.pricing("p")
+    with pytest.raises(LifecycleError):
+        service.plan("p", "s", pricing=pricing, checkpoint={"revision": -999, "schema": 1, "stage": "sample", "fingerprint": "bad"})
+    with pytest.raises(LifecycleError):
+        service.plan("p", "s", pricing=pricing, checkpoint={"revision": 0, "schema": 1, "stage": "unknown", "fingerprint": "badfingerprint"})

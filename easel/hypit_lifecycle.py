@@ -10,6 +10,7 @@ import os
 import threading
 import time
 import uuid
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -51,6 +52,7 @@ class LifecycleRecord:
     outputs: list[str] = field(default_factory=list)
     logs: list[str] = field(default_factory=list)
     error: str | None = None
+    input_fingerprint: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {k: getattr(self, k) for k in self.__dataclass_fields__}
@@ -104,7 +106,7 @@ class HypitLifecycle:
                 "valid_until": self.clock() + 600}
 
     def plan(self, profile_id: str, session_id: str, *, kind: str = "sample", pricing: Mapping[str, Any] | None = None,
-             checkpoint: Mapping[str, Any] | None = None) -> LifecycleRecord:
+             checkpoint: Mapping[str, Any] | None = None, input_fingerprint: str | None = None) -> LifecycleRecord:
         if kind not in {"sample", "full"}: raise LifecycleError("kind must be sample or full")
         if not isinstance(pricing, Mapping):
             raise LifecycleError("valid pricing receipt required")
@@ -116,12 +118,17 @@ class HypitLifecycle:
                 raise LifecycleError("stale or invalid pricing receipt")
         except (TypeError, ValueError) as exc:
             raise LifecycleError("malformed pricing receipt") from exc
+        fingerprint = input_fingerprint or hashlib.sha256(f"{profile_id}:{session_id}:{kind}".encode()).hexdigest()
+        if not isinstance(fingerprint, str) or len(fingerprint) < 8:
+            raise LifecycleError("invalid input fingerprint")
+        if checkpoint:
+            self._validate_checkpoint(dict(checkpoint), fingerprint, 0)
         with self._lock:
             active = [self._load(p) for p in self._ids() if self._load(p).profile_id == profile_id and self._load(p).state not in _TERMINAL]
             if any(r.session_id == session_id for r in active): raise QuotaExceeded("one active Build/session")
             if len(active) >= self.max_active_per_profile: raise QuotaExceeded("profile build quota exceeded")
             rid = uuid.uuid4().hex; rec = LifecycleRecord(rid, profile_id, session_id, kind, run_id=uuid.uuid4().hex,
-                checkpoint=dict(checkpoint or {}), logs=["planned"])
+                checkpoint=dict(checkpoint or {}), logs=["planned"], input_fingerprint=fingerprint)
             self._save(rec); return rec
 
     def _ids(self) -> list[str]:
@@ -134,6 +141,7 @@ class HypitLifecycle:
             if rec.state == "succeeded": return rec
             if rec.state not in {"planned", "failed", "cancelled"}: raise InvalidTransition(f"cannot run from {rec.state}")
             if rec.state in {"failed", "cancelled"}: rec.state = "planned"; rec.updated_at = self.clock(); self._save(rec)
+            self._validate_checkpoint(rec.checkpoint, rec.input_fingerprint, 0)
             self._transition(rec, "running")
             rec.attempt += 1; rec.logs.append(f"attempt {rec.attempt}"); self._save(rec)
             event = threading.Event(); timeout_event = threading.Event(); self._cancel[record_id] = event
@@ -149,7 +157,13 @@ class HypitLifecycle:
             if timeout_event.is_set() or self.clock() - started > self.timeout_seconds:
                 raise LifecycleTimeout("build timeout")
             if event.is_set(): raise LifecycleError("cancelled")
-            rec.checkpoint.update(result.get("checkpoint") or {})
+            incoming = dict(result.get("checkpoint") or {})
+            if incoming:
+                incoming.setdefault("revision", int(rec.checkpoint.get("revision", 0)) + 1)
+                incoming.setdefault("schema", 1)
+                incoming.setdefault("fingerprint", rec.input_fingerprint)
+                self._validate_checkpoint(incoming, rec.input_fingerprint, int(rec.checkpoint.get("revision", 0)))
+                rec.checkpoint.update(incoming)
             rec.outputs = [str(x) for x in result.get("outputs", rec.outputs)]
             rec.logs.extend(str(x) for x in result.get("logs", []))
             self._save(rec)
@@ -195,6 +209,21 @@ class HypitLifecycle:
         rec = self.get(record_id)
         if rec.state != "succeeded": raise LifecycleError(f"result unavailable while {rec.state}")
         return {"id": rec.id, "outputs": list(rec.outputs), "checkpoint": dict(rec.checkpoint)}
+    @staticmethod
+    def _validate_checkpoint(checkpoint: Mapping[str, Any], fingerprint: str, minimum_revision: int) -> None:
+        if not isinstance(checkpoint, Mapping): raise LifecycleError("malformed checkpoint")
+        if not checkpoint: return
+        required = {"revision", "schema", "stage", "fingerprint"}
+        if not required.issubset(checkpoint): raise LifecycleError("malformed checkpoint")
+        if checkpoint.get("schema") != 1 or not isinstance(checkpoint.get("revision"), int):
+            raise LifecycleError("malformed checkpoint schema")
+        if checkpoint["revision"] < minimum_revision or checkpoint["revision"] < 0:
+            raise LifecycleError("stale checkpoint revision")
+        if checkpoint.get("fingerprint") != fingerprint:
+            raise LifecycleError("stale checkpoint fingerprint")
+        if checkpoint.get("stage") not in {"planned", "sample", "full", "rendered", "complete", "partial", "retry"}:
+            raise LifecycleError("invalid checkpoint stage")
+
     def _validate_outputs(self, rec: LifecycleRecord) -> None:
         if not rec.outputs:
             raise OutputValidationError("no durable outputs produced")
