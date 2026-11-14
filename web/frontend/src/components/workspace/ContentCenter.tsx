@@ -2,18 +2,16 @@ import type { Page } from '../../lib/navigation';
 import { contentSectionFor } from '../../lib/navigation';
 import OutputsPage from '../OutputsPage';
 import AssetsPage from '../AssetsPage';
-import VideoPage from '../VideoPage';
 import { ChannelContent } from '../channels/ChannelContent';
 import { AiHistory } from '../ai/AiHistory';
 import { IconImage, IconLayers } from '../icons';
 
-export function ContentCenter({ page, persona, session, jumpPath, onJumpHandled, onMakeVideo, onNavigate }: {
+export function ContentCenter({ page, persona, session, jumpPath, onJumpHandled, onNavigate }: {
   readonly page: Page;
   readonly persona: string;
   readonly session?: string;
   readonly jumpPath: string;
   readonly onJumpHandled: () => void;
-  readonly onMakeVideo: () => void;
   readonly onNavigate: (page: Page) => void;
 }) {
   const section = contentSectionFor(page) ?? 'projects';
@@ -35,7 +33,6 @@ export function ContentCenter({ page, persona, session, jumpPath, onJumpHandled,
         </nav>
         <AiHistory persona={persona} assets={page === 'generated-assets'} />
       </div>}
-      {section === 'video' && <VideoPage session={session} persona={persona} onMakeVideo={onMakeVideo} mode="library" />}
     </div>
   </div>;
 }

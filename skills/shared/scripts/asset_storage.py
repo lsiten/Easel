@@ -3,14 +3,17 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from collections.abc import Iterator
-import filecmp
 import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import tempfile
-from typing import TypedDict
+from typing import NotRequired, TypedDict
+
+try:
+    from asset_move import commit_move, recover_moves, rollback_move, begin_move
+except ModuleNotFoundError:
+    from skills.shared.scripts.asset_move import commit_move, recover_moves, rollback_move, begin_move
 
 if os.name == "nt":
     import msvcrt
@@ -25,8 +28,18 @@ class AssetEntry(TypedDict):
     tags: list[str]
     summary: str
     source: str
+    original_source: NotRequired[str]
     mtime: int
     stored_name: str
+    sha256: NotRequired[str]
+    capturedAt: NotRequired[str]
+    location: NotRequired[str]
+    timeSource: NotRequired[str]
+    project: NotRequired[str]
+    role: NotRequired[str]
+    confidence: NotRequired[float]
+    reason: NotRequired[str]
+    manual: NotRequired[bool]
 
 
 class StorageMetadata(TypedDict):
@@ -70,12 +83,33 @@ def read_index(root: Path) -> list[AssetEntry]:
         if not isinstance(item, dict) or not all(isinstance(item.get(key), str)
                                                for key in ("name", "category", "source")):
             continue
-        entries.append({
+        entry: AssetEntry = {
             "name": item["name"], "category": item["category"], "source": item["source"],
             "kind": str(item.get("kind", "other")), "summary": str(item.get("summary", "")),
             "tags": [tag for tag in item.get("tags", []) if isinstance(tag, str)],
             "mtime": item.get("mtime", 0), "stored_name": item.get("stored_name", item["name"]),
-        })
+        }
+        if isinstance(item.get("sha256"), str):
+            entry["sha256"] = item["sha256"]
+        if isinstance(item.get("original_source"), str):
+            entry["original_source"] = item["original_source"]
+        if isinstance(item.get("capturedAt"), str):
+            entry["capturedAt"] = item["capturedAt"]
+        if isinstance(item.get("location"), str):
+            entry["location"] = item["location"]
+        if isinstance(item.get("timeSource"), str):
+            entry["timeSource"] = item["timeSource"]
+        if isinstance(item.get("project"), str):
+            entry["project"] = item["project"]
+        if isinstance(item.get("role"), str):
+            entry["role"] = item["role"]
+        if isinstance(item.get("confidence"), (int, float)):
+            entry["confidence"] = float(item["confidence"])
+        if isinstance(item.get("reason"), str):
+            entry["reason"] = item["reason"]
+        if isinstance(item.get("manual"), bool):
+            entry["manual"] = item["manual"]
+        entries.append(entry)
     return entries
 
 
@@ -98,7 +132,8 @@ def _destination(directory: Path, entry: AssetEntry) -> Path:
     attempt = 0
     while (candidate.name in {"manifest.json", "_index.json", "_meta.json"}
            or candidate.exists() or candidate.is_symlink()):
-        if candidate.is_symlink() and candidate.resolve() == source:
+        if ((candidate.is_file() or candidate.is_symlink())
+                and candidate.resolve() == source.resolve()):
             return candidate
         suffix = f"-{attempt}" if attempt else ""
         candidate = directory / f"{Path(name).stem}-{digest}{suffix}{Path(name).suffix}"
@@ -136,12 +171,21 @@ def store_entry(root: Path, entry: AssetEntry) -> tuple[Path, AssetEntry]:
     if (root / ".storage.lock").is_symlink() or (root / "_index.json").is_symlink():
         raise UnsafeCategory(entry["category"])
     with _storage_lock(root / ".storage.lock"):
+        recover_moves(root)
         previous = read_index(root)
         source = Path(entry["source"]).resolve()
         old = [item for item in previous if Path(item["source"]).resolve() == source]
         retained = [item for item in previous if Path(item["source"]).resolve() != source]
         destination = _destination(directory, entry)
-        stored = {**entry, "stored_name": destination.name}
+        origin = entry.get("original_source")
+        if not origin:
+            origin = old[0].get("original_source", str(source)) if old else str(source)
+        stored = {
+            **entry,
+            "source": os.path.abspath(destination),
+            "original_source": origin,
+            "stored_name": destination.name,
+        }
         updated = [*retained, stored]
         categories = {item["category"] for item in old} | {entry["category"]}
         manifests = {category_directory(root, category) / "manifest.json":
@@ -150,29 +194,21 @@ def store_entry(root: Path, entry: AssetEntry) -> tuple[Path, AssetEntry]:
         if any(path.is_symlink() for path in writes):
             raise UnsafeCategory(entry["category"])
         snapshots = {path: path.read_bytes() if path.exists() else None for path in writes}
-        created = False
         directory.mkdir(parents=True, exist_ok=True)
+        ticket = None
         try:
-            if not destination.is_symlink():
-                try:
-                    destination.symlink_to(source)
-                    created = True
-                except FileExistsError:
-                    raise
-                except (OSError, NotImplementedError):
-                    with source.open("rb") as reader, destination.open("xb") as writer:
-                        created = True
-                        shutil.copyfileobj(reader, writer)
+            ticket = begin_move(root, source, destination)
             for path, items in writes.items():
                 _write_json(path, items)
+            commit_move(ticket)
         except (OSError, ValueError):
+            if ticket is not None:
+                rollback_move(ticket)
             for path, content in snapshots.items():
                 if content is None:
                     path.unlink(missing_ok=True)
                 else:
                     path.write_bytes(content)
-            if created:
-                destination.unlink(missing_ok=True)
             raise
         for item in old:
             old_name = item["stored_name"]
@@ -183,6 +219,6 @@ def store_entry(root: Path, entry: AssetEntry) -> tuple[Path, AssetEntry]:
                 continue
             if old_path.is_symlink() and old_path.resolve() == source:
                 old_path.unlink()
-            elif not old_path.is_symlink() and old_path.is_file() and filecmp.cmp(old_path, source, shallow=False):
+            elif old_path.is_file() and old_path.resolve() == source:
                 old_path.unlink()
         return destination, stored

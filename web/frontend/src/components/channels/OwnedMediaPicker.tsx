@@ -23,7 +23,7 @@ export function OwnedMediaPicker({ persona, value, onChange, disabled = false, k
     return () => controller.abort();
   }, [persona, kind]);
   return <><select className="field" aria-label="选择当前画像媒体文件" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
-    <option value="">选择内容库媒体</option>
+    <option value="">选择素材源媒体</option>
     {value && !files.some((file) => file.path === value) && <option value={value}>{value}</option>}
     {files.map((file) => <option key={file.path} value={file.path}>{file.name} · {file.path}</option>)}
   </select>{error && <p role="alert">{error}</p>}</>;

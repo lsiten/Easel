@@ -4,9 +4,62 @@
 .asset-library-page .gcard:focus-visible { outline: 2px solid var(--accent-start); outline-offset: 3px; }
 .asset-library-page .asset-source button { min-width: 24px; min-height: 24px; }
 .asset-library-page button.crumb { border: 0; background: none; padding: 4px; font: inherit; }
+.reference-sources { margin: 18px 0 4px; }
+.reference-sources-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.reference-sources-head > div { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+.reference-sources-head strong { font-size: 14px; }
+.reference-sources-head span { color: var(--text-tertiary); font-size: 12px; }
+.reference-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.reference-card { padding: 12px 13px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.reference-card-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.reference-card-head svg { flex: none; color: var(--accent-start); }
+.reference-card-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.reference-card-head span { margin-left: auto; flex: none; color: var(--text-tertiary); font-size: 11px; }
+.reference-card p { margin-top: 7px; color: var(--text-secondary); font-size: 11.5px; line-height: 1.55; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   .asset-library-page { padding: 20px 16px; }
   .asset-library-page .gallery-head { flex-direction: column; }
   .asset-library-page .gallery-grid { grid-template-columns: minmax(0, 1fr); }
+  .reference-grid { grid-template-columns: minmax(0, 1fr); }
   .asset-library-page .btn, .asset-library-page button.crumb { min-height: 44px; }
+}
+.asset-entry-editor {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.asset-entry-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.asset-entry-editor-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.asset-entry-editor-head p {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.asset-entry-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.asset-entry-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.asset-entry-editor > label {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }

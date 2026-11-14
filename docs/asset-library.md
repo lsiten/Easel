@@ -33,10 +33,12 @@ Easel 会**按内容理解自动整理**——文本直接读、图片看、视�
   ├── _index.json          # 全量条目索引（检索用）
   └── _meta.json           # 源目录 + 整理时间
   ```
-- **落位方式**：文件以**软链**落位（`_link_into` 先 `symlink_to`，失败回退 `copy2`），
-  避免重复大文件；源目录变动后软链自动跟随。
+- **落位方式**：点击「AI 一键整理」后，文件本体从登记源目录**物理移动**到
+  `profiles/<画像>/assets/<分类>/`；目标目录内是真实文件，不是软链或虚拟分类。
+  跨磁盘移动先写入目标分区临时文件，再原子替换；索引提交失败会移回原位置。
 - **条目元数据**（`manifest.json` / `_index.json` 每项）：
-  `name / kind / category / tags / summary / source / mtime`。
+  `name / kind / category / tags / summary / source / original_source / mtime`。
+  `source` 指向整理后的可用文件，`original_source` 记录原路径以便追溯。
 
 ## 整理（按内容理解）
 
@@ -47,10 +49,9 @@ Easel 会**按内容理解自动整理**——文本直接读、图片看、视�
    然后逐件 `place <画像> --file F --category C --tags ... --summary ...` 归类。
    这是「按理解的内容整理」的完整形态，由 `skill-asset-library` 技能引导。
 2. **基线整理（可独立运行 / 自检）**：无 Agent 计划时，`organize` 用 `scan` 扫源目录，
-   按「类型 + 文件名/内容关键词」做基线归类（见 `_TOPIC_RULES` 主题桶，如 `嘉兴本地 / AI与产品 / 人物` 等），
-   兜底按类型（`图片 / 视频 / 音频 / 文本`）。保证未接 Agent 时也能跑通与自检。
+   只按类型放入 `99-待确认/`，不把文件名关键词猜测标成已完成语义整理。
 
-`organize --dry-run` 只返回整理计划不落位。
+`organize --dry-run` 只返回整理计划，不移动文件。
 
 ## 检索（供创作取用）
 
@@ -89,8 +90,7 @@ python skills/shared/scripts/assets.py check [--json]              # 能力/状�
 | `GET /api/assets/organize/{id}` | 按任务 ID 查看当前画像的进度；其他画像不能读取 |
 
 - **路径约定**：素材库内路径以 `@assets/<分类>/<文件>` 表示；`_assets_resolve` 在**未 resolve** 的
-  路径上做 containment 校验（保留软链，媒体/目录预览经 `FileResponse`/`iterdir` 在系统层自然跟随链接），
-  并显式拒绝含 `..` 或绝对路径段的子路径，杜绝越界。
+  路径上做 containment 校验，并显式拒绝含 `..` 或绝对路径段的子路径，杜绝越界。
 - **内容库集成**：`get_output_tree` 把素材库节点（`assets: True`）并入内容库；Web 前端识别 `assets: True`
   节点，懒加载/媒体走 `/api/assets/*`，只读且隐藏删除，显示「素材库」徽标；内容库工具栏提供「整理素材」。
 
@@ -100,9 +100,11 @@ python skills/shared/scripts/assets.py check [--json]              # 能力/状�
 （文本直读 / 图片视觉 / 视频转写，兜底文件名），`place` 逐件归类或 `organize` 基线整理，
 创作时 `query` 取用相关素材。
 
-Web 登记新目录后会自动启动 AI 整理，「素材库」与「内容库」的整理入口共用后台任务。
+Web 登记新目录只建立待整理范围；用户点击「AI 一键整理」后才执行理解与物理移动。
+「素材库」与「内容库」的整理入口共用后台任务。
 图片实际看图，视频经 `video-reference-analyst` 抽帧理解并结合可用转写，文本读取正文。
-服务端验证 AI 返回的完整方案只包含本批扫描文件，再落盘；原文件保留，同名素材使用独立链接。
+服务端验证 AI 返回的完整方案只包含本批扫描文件，再执行物理移动；同名素材使用独立路径，
+每次移动都有恢复日志，元数据写入失败时文件回到原位置。
 模型或权限失败会显示错误，不会悄悄退回关键词分类并标成成功。此功能需要工具型 Agent，API 仅聊天模式会明确提示切换。
 CLI 的 `assets.py organize` 保留快速基线整理语义；Agent 的 `place` 与 Web AI 方案共享同一素材存储层。
 

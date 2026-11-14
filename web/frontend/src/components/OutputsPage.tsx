@@ -1,11 +1,14 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { fetchOutputs, fetchOutputContent, fetchOutputChildren, fetchKbScope, mediaUrl, assetsMediaUrl, fetchAssetsChildren, deleteOutput, kbQuery, kbSave, kbIngest, kbStatus } from '../lib/api';
-import { AssetOrganizationControl } from './AssetOrganizationControl';
 import type { OutputNode, OutputMeta, KbDoc, KbQueryResult, KbDepositResult } from '../lib/api';
+import { filterProjects, PROJECT_FILTERS, projectNodes } from '../lib/contentOrganization';
+import type { ProjectFilter } from '../lib/contentOrganization';
+import { useProjectOrganization } from '../lib/useProjectOrganization';
 import { useOpenfilmStudio } from '../lib/useOpenfilmStudio';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconOutputs, IconImage, IconVideo, IconMusic, IconFile, IconFolder, IconRefresh, IconChevron, IconTrash, IconSearch, IconBookmark } from './icons';
+import { ProjectOrganizationToolbar } from './ProjectOrganizationToolbar';
 
 const FILTERS: { key: string; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -83,6 +86,10 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
   const [treeError, setTreeError] = useState('');
   const [stack, setStack] = useState<string[]>([]);   // 当前所在的文件夹名称路径
   const [filter, setFilter] = useState('all');
+  const [projectFilter, setProjectFilter] = useState<ProjectFilter>(() => {
+    const value = new URLSearchParams(window.location.hash.split('?')[1] || '').get('type');
+    return PROJECT_FILTERS.some((item) => item.key === value) ? value as ProjectFilter : 'all';
+  });
   const [selected, setSelected] = useState<OutputNode | null>(null);
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
@@ -112,6 +119,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
     refreshStudio();
     fetchOutputs(persona).then(setRoots).catch(() => setTreeError('加载产物列表失败'));
   }, [persona, refreshStudio]);
+  const organization = useProjectOrganization(persona || '', load);
   // 切换画像：回到顶层、清空懒加载缓存、重新拉取聚焦后的内容树。
   useEffect(() => { setStack([]); setLazyMap({}); }, [persona]);
   useEffect(() => { load(); }, [load]);
@@ -125,8 +133,13 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
   }, [persona]);
 
   // 当前层节点：外部内容源（本地知识库）深层无内联子节点，按路径懒加载。
+  const projectRoots = useMemo(() => projectNodes(roots), [roots]);
+  const visibleProjectRoots = useMemo(
+    () => filterProjects(projectRoots, projectFilter),
+    [projectRoots, projectFilter],
+  );
   const { currentNodes, extDirToLoad } = useMemo(() => {
-    let nodes: OutputNode[] = roots;
+    let nodes: OutputNode[] = stack.length === 0 ? visibleProjectRoots : projectRoots;
     let pending: OutputNode | null = null;
     for (const nm of stack) {
       const found = nodes.find((n) => n.type === 'dir' && n.name === nm);
@@ -147,7 +160,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
       }
     }
     return { currentNodes: nodes, extDirToLoad: pending };
-  }, [roots, stack, lazyMap]);
+  }, [projectRoots, visibleProjectRoots, stack, lazyMap]);
   // 外部内容源深层目录：按当前层路径懒加载子节点（知识库可能上万文件，不全量入树）。
   const extDirPath = extDirToLoad?.path;
   useEffect(() => {
@@ -176,8 +189,8 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
   const atProjectRoot = stack.length === 1;
   // 当前项目的展示头（进入项目后才有），用于「成品/素材」分区
   const projectMeta = useMemo(
-    () => (stack.length >= 1 ? roots.find((r) => r.name === stack[0])?.meta : undefined),
-    [roots, stack]);
+    () => (stack.length >= 1 ? projectRoots.find((r) => r.name === stack[0])?.meta : undefined),
+    [projectRoots, stack]);
   const deliverableSet = useMemo(
     () => new Set(atProjectRoot ? (projectMeta?.deliverablePaths || []) : []),
     [projectMeta, atProjectRoot]);
@@ -270,10 +283,10 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
 
   // 等内容树加载后区分文件与目录；文件链接直接打开预览。
   useEffect(() => {
-    if (!jumpPath || roots.length === 0) return;
+    if (!jumpPath || projectRoots.length === 0) return;
     const parts = jumpPath.split('/').filter(Boolean);
     const parent: string[] = [];
-    let nodes = roots;
+    let nodes = projectRoots;
     let node: OutputNode | undefined;
     for (const part of parts) {
       node = nodes.find(candidate => candidate.name === part);
@@ -287,7 +300,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
     if (node?.type === 'file') void open(node);
     else setSelected(null);
     onJumpHandled?.();
-  }, [jumpPath, roots, open, onJumpHandled]);
+  }, [jumpPath, projectRoots, open, onJumpHandled]);
 
   // 素材库节点（@assets/…）：媒体/内容走 /api/assets/*（随画像），其余走通用 /api/media。
   const isAsset = (p?: string) => !!p && p.startsWith('@assets/');
@@ -300,7 +313,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
     if (selected.kind === 'video') {
       // 该视频所属项目是 openfilm 项目（含 film.html）且 Studio 正在运行 → 给「在 Studio 中编辑」入口。
       const seg = selected.path.split('/')[0];
-      const ofProject = roots.find((r) => r.name === seg)?.openfilmProject === true;
+      const ofProject = projectRoots.find((r) => r.name === seg)?.openfilmProject === true;
       const studioUrl = ofStudio?.topic === seg ? ofStudio.studio : '';
       return (
         <>
@@ -337,7 +350,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
     return (
       <div key={d.path} className="card card-hover gcard" onClick={() => enterDir(d.name)}>
         <div className="gcard-thumb">
-          <span className="gcard-kind">{m?.kind ? (KIND_LABEL[m.kind] || m.kind) : '文件夹'}</span>
+          <span className="gcard-kind">{m?.kind ? (KIND_LABEL[m.kind] || m.kind) : (d.catalog?.projectKindLabel || '文件夹')}</span>
           {!d.external && !d.assets && <button className="gcard-del" title="删除" onClick={(e) => remove(d, e)}><IconTrash size={14} /></button>}
           {cover ? <Thumb f={cover} big resolve={resolveMedia} /> : <div className="gcard-ph"><IconFolder size={38} /></div>}
         </div>
@@ -349,7 +362,8 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
             {d.external && <span style={badge}>知识库</span>}
             {d.assets && <span style={badge}>素材库</span>}
             {m?.platform && <span style={badge}>{m.platform}</span>}
-            {m?.status && <span style={statusBadge(m.status)}>{STATUS_LABEL[m.status] || m.status}</span>}
+            {(m?.status || d.catalog?.status) && <span style={statusBadge(m?.status || d.catalog?.status || '')}>{STATUS_LABEL[m?.status || d.catalog?.status || ''] || '草稿'}</span>}
+            {d.catalog && d.catalog.deliverableCount > 0 && <span style={badge}>{d.catalog.deliverableCount} 成品</span>}
             <span>{d.fileCount ?? 0} 个文件</span>
           </div>
         </div>
@@ -380,7 +394,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
         <div>
           <h1 className="page-title">
             <IconOutputs size={21} />
-            <span className="crumb" onClick={() => goTo(0)}>内容库</span>
+            <span className="crumb" onClick={() => goTo(0)}>项目与成品</span>
             {stack.map((name, i) => (
               <span key={i}>
                 <span className="crumb-sep">/</span>
@@ -392,7 +406,7 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
           </h1>
           <p className="page-subtitle">
             {atTop
-              ? `按项目归档，共 ${roots.length} 个项目。点项目进去看成品与素材。`
+              ? `按项目归档，共 ${visibleProjectRoots.length} 个内容项目；视频项目通过上方筛选查看。`
               : `${dirs.length} 个文件夹 · ${files.length} 个文件（可继续点开子文件夹）`}
           </p>
           {kbScope.focused && (
@@ -417,12 +431,22 @@ export default function OutputsPage({ jumpPath, onJumpHandled, session, persona 
             <button className="btn btn-sm" onClick={runKbQuery} disabled={!kbReady || !kbQ.trim() || kbSearching}><IconSearch size={14} /> {kbSearching ? "检索中…" : "检索"}</button>
           </div>
           <button className="btn btn-sm" onClick={() => setDepositOpen(true)} disabled={!kbReady}><IconBookmark size={14} /> 沉淀</button>
-          <AssetOrganizationControl persona={persona || ''} onComplete={load} />
           <button className="btn btn-sm" onClick={load}><IconRefresh size={14} /> 刷新</button>
         </div>
       </div>
 
       {treeError && <div className="notice-error">{treeError}</div>}
+
+      {atTop && <ProjectOrganizationToolbar
+        active={projectFilter}
+        job={organization.job}
+        error={organization.error}
+        busy={organization.busy}
+        canOrganize={Boolean(persona)}
+        onFilter={setProjectFilter}
+        onOrganize={() => void organization.start('')}
+        onRollback={() => void organization.rollback()}
+      />}
 
       {/* 项目主题标签（进入项目根时展示） */}
       {atProjectRoot && projectMeta?.tags && projectMeta.tags.length > 0 && (

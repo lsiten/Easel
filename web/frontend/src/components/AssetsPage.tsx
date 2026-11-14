@@ -2,15 +2,19 @@ import { useState, useEffect, useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import {
   fetchAssetsTree, fetchAssetsChildren, assetsMediaUrl, assetsStatus,
-  fetchAssetsSources, assetsAdd, assetsRemove, fetchDirEntries,
+  fetchAssetsSources, assetsAdd, assetsRemove, fetchDirEntries, fetchOutputs,
 } from '../lib/api';
-import type { OutputNode, AssetsStatus, DirListing } from '../lib/api';
+import type { OutputNode, AssetsStatus } from '../lib/api';
+import { fetchAssetEntry, updateAssetEntry } from '../lib/organizationApi';
+import type { AssetEntry } from '../lib/organizationApi';
+import { referenceNodes } from '../lib/contentOrganization';
 import { renderMarkdown } from '../lib/sanitize';
 import { useAssetOrganization } from '../lib/useAssetOrganization';
+import { DirectoryPickerModal } from './DirectoryPickerModal';
 import '../styles/assets.css';
 import {
   IconLayers, IconFolder, IconImage, IconVideo, IconMusic, IconFile,
-  IconRefresh, IconTrash, IconPlus, IconChevron,
+  IconRefresh, IconTrash, IconPlus,
 } from './icons';
 
 interface Props { persona: string; }
@@ -42,11 +46,14 @@ export default function AssetsPage({ persona }: Props) {
   const [status, setStatus] = useState<AssetsStatus | null>(null);
   const [sources, setSources] = useState<string[]>([]);
   const [tree, setTree] = useState<OutputNode | null>(null);
+  const [references, setReferences] = useState<OutputNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [dir, setDir] = useState<OutputNode | null>(null);   // 当前展开的目录（null=顶层）
   const [children, setChildren] = useState<OutputNode[] | null>(null);
   const [dirLoading, setDirLoading] = useState(false);
   const [selected, setSelected] = useState<OutputNode | null>(null);
+  const [entry, setEntry] = useState<AssetEntry | null>(null);
+  const [saving, setSaving] = useState(false);
   const [content, setContent] = useState('');
   const [newSrc, setNewSrc] = useState('');
   const [notice, setNotice] = useState('');
@@ -55,14 +62,16 @@ export default function AssetsPage({ persona }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, src, t] = await Promise.all([
+      const [s, src, t, outputs] = await Promise.all([
         assetsStatus(persona),
         fetchAssetsSources(persona),
         fetchAssetsTree(persona),
+        fetchOutputs(persona).catch(() => []),
       ]);
       setStatus(s);
       setSources(src.sources);
       setTree(t);
+      setReferences(referenceNodes(outputs));
       setDir(null);
       setChildren(null);
     } catch (e) {
@@ -84,9 +93,8 @@ export default function AssetsPage({ persona }: Props) {
       setNewSrc('');
       const parts = [r.added.length ? `+${r.added.length} 已登记` : '', r.already.length ? `${r.already.length} 重复` : ''];
       if (r.invalid.length) parts.push(`${r.invalid.length} 无效`);
-      setNotice(parts.filter(Boolean).join(' · ') || '已登记');
+      setNotice(`${parts.filter(Boolean).join(' · ') || '已登记'}；点击「AI 一键整理」后会把源文件移动到素材库分类目录`);
       await load();
-      if (r.added.length) await organization.start();
     } catch (e) {
       setNotice((e as Error).message || '登记失败');
     }
@@ -109,12 +117,37 @@ export default function AssetsPage({ persona }: Props) {
   // 预览文件：媒体走 /api/assets/media；文本/HTML 拉取内容渲染。
   const previewFile = async (f: OutputNode) => {
     setSelected(f);
+    setEntry(null);
+    fetchAssetEntry(f.path, persona).then(setEntry).catch(() => setEntry(null));
     if (f.kind === 'text') {
       try { const r = await fetch(assetsMediaUrl(f.path, persona)); setContent(await r.text()); }
       catch { setContent(''); }
     }
   };
   const mediaUrl = (f: OutputNode) => assetsMediaUrl(f.path, persona);
+  const saveEntry = async () => {
+    if (!entry || saving) return;
+    setSaving(true);
+    try {
+      const updated = await updateAssetEntry(persona, {
+        path: entry.path,
+        category: entry.category,
+        tags: entry.tags,
+        summary: entry.summary,
+        capturedAt: entry.capturedAt,
+        location: entry.location,
+        project: entry.project,
+        role: entry.role,
+      });
+      setEntry(updated);
+      setNotice('素材修正已保存；分类变更已同步移动文件，后续 AI 整理不会覆盖');
+      await load();
+    } catch (e) {
+      setNotice((e as Error).message || '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const cats = tree?.children ?? [];
   const dirs = (children ?? []).filter((c) => c.type === 'dir');
@@ -124,19 +157,21 @@ export default function AssetsPage({ persona }: Props) {
     <div className="gallery-page asset-library-page">
       <div className="gallery-head">
         <div>
-          <h1 className="page-title"><IconLayers size={21} /> 素材库</h1>
+          <h1 className="page-title"><IconLayers size={21} /> 素材源</h1>
           <p className="page-subtitle">
-            登记素材源目录（图片 / 视频 / 文本），AI 按内容理解自动整理到分类，供视频、文章创作取用。
+            登记素材源目录（图片 / 视频 / 文本），AI 按内容理解把文件物理移动到分类目录，供视频、文章创作取用。
             {status && <span style={{ marginLeft: 8 }}>
               <span style={badge}>{status.organized} 项已整理</span>
               <span style={badge}>{status.categories} 分类</span>
-              {status.registered ? <span style={badge}>已登记 {status.sources?.length ?? 0} 源</span> : <span style={badge}>未登记</span>}
+              {status.registered ? <span style={badge}>已登记 {status.sources?.length ?? 0} 源</span>
+                : status.organized > 0 ? <span style={badge}>历史索引 · 源未登记</span> : <span style={badge}>未登记</span>}
             </span>}
           </p>
+          <p className="pv-hint">登记不会移动文件；点击「AI 一键整理」后，源文件会移动到本画像素材库。同名文件自动避碰，移动失败会恢复到原位置。</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <button className="btn btn-sm" onClick={organization.start} disabled={organization.busy || !persona || !sources.length}
-            style={{ minWidth: 138 }}><IconRefresh size={14} /> {organization.busy ? '正在理解素材…' : '整理素材'}</button>
+          <button className="btn btn-sm btn-primary" onClick={organization.start} disabled={organization.busy || !persona || !sources.length}
+            style={{ minWidth: 138 }}><IconRefresh size={14} /> {organization.busy ? 'AI 整理中…' : 'AI 一键整理'}</button>
           <button className="btn btn-sm" onClick={load}><IconRefresh size={14} /> 刷新</button>
         </div>
       </div>
@@ -179,6 +214,19 @@ export default function AssetsPage({ persona }: Props) {
         )}
       </div>
 
+      {references.length > 0 && <section className="reference-sources">
+        <div className="reference-sources-head">
+          <div><strong>参考资料源</strong><span>只读知识库，不混入项目与成品</span></div>
+          <span className="badge">{references.length} 个来源</span>
+        </div>
+        <div className="reference-grid">
+          {references.map((source) => <article key={source.path} className="reference-card">
+            <div className="reference-card-head"><IconFolder size={17} /><strong>{source.name}</strong><span>{source.fileCount ?? 0} 个文件</span></div>
+            <p>{(source.children || []).slice(0, 4).map((child) => child.name).join(" · ") || "等待首次索引"}</p>
+          </article>)}
+        </div>
+      </section>}
+
       {/* 浏览 */}
       <div style={{ marginTop: 16 }}>
         <div className="crumb" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
@@ -187,7 +235,7 @@ export default function AssetsPage({ persona }: Props) {
         </div>
 
         {loading ? <div className="dash-empty">加载中…</div>
-          : !tree ? <div className="dash-empty">还没有素材——在上面登记一个素材源目录，再点「整理素材」让 AI 按内容理解归类。</div>
+          : !tree ? <div className="dash-empty">还没有素材——在上面登记一个素材源目录，再点「AI 一键整理」让 AI 理解内容并把文件移动到分类目录。</div>
           : dir ? (
             dirLoading ? <div className="dash-empty">加载中…</div>
               : (dirs.length === 0 && files.length === 0) ? <div className="dash-empty">这个分类是空的</div>
@@ -241,76 +289,51 @@ export default function AssetsPage({ persona }: Props) {
               <button className="btn btn-sm" onClick={() => setSelected(null)}>关闭</button>
             </div>
             <Preview f={selected} url={mediaUrl(selected)} content={content} kind={selected.kind} />
+            {entry && <section className="asset-entry-editor" aria-labelledby="asset-entry-heading">
+              <div className="asset-entry-editor-head">
+                <div><h3 id="asset-entry-heading">AI 整理信息</h3>
+                  <p>{entry.manual ? '已人工确认，后续整理不会覆盖。' : '修改后会锁定为人工确认。'}</p></div>
+                {entry.confidence != null && <span className="badge">置信度 {Math.round(entry.confidence * 100)}%</span>}
+              </div>
+              <div className="asset-entry-fields">
+                <label>分类<input className="field" value={entry.category}
+                  onChange={(event) => setEntry({ ...entry, category: event.target.value })} /></label>
+                <label>时间<input className="field" value={entry.capturedAt || ''}
+                  onChange={(event) => setEntry({ ...entry, capturedAt: event.target.value })} /></label>
+                <label>地点<input className="field" value={entry.location || ''}
+                  placeholder="证据不足时留空"
+                  onChange={(event) => setEntry({ ...entry, location: event.target.value })} /></label>
+                <label>关联项目<input className="field" value={entry.project || ''}
+                  onChange={(event) => setEntry({ ...entry, project: event.target.value })} /></label>
+                <label>用途<input className="field" value={entry.role || ''}
+                  placeholder="封面 / 开场 / 证据…"
+                  onChange={(event) => setEntry({ ...entry, role: event.target.value })} /></label>
+                <label>标签<input className="field" value={entry.tags.join('，')}
+                  onChange={(event) => setEntry({
+                    ...entry,
+                    tags: event.target.value.split(/[，,]/).map((value) => value.trim()).filter(Boolean),
+                  })} /></label>
+              </div>
+              <label>摘要<textarea className="field" value={entry.summary}
+                onChange={(event) => setEntry({ ...entry, summary: event.target.value })} /></label>
+              {entry.reason && <p className="pv-hint">AI 依据：{entry.reason}</p>}
+              <button className="btn btn-primary" type="button" disabled={saving} onClick={() => void saveEntry()}>
+                {saving ? '保存中…' : '保存人工修正'}
+              </button>
+            </section>}
           </div>
         </div>
       )}
 
       {/* 选择素材源目录 */}
       {pickOpen && (
-        <DirPickerModal
+        <DirectoryPickerModal
+          title="选择素材源目录"
+          load={fetchDirEntries}
           onClose={() => setPickOpen(false)}
-          onPick={(d) => { setPickOpen(false); setNewSrc(d); }}
+          onPick={(path) => { setPickOpen(false); setNewSrc(path); }}
         />
       )}
-    </div>
-  );
-}
-
-/** 目录选择器：点击选择本机素材源目录（后端 /api/assets/pick-dir 只读浏览），选中后填回输入框再「登记」。 */
-function DirPickerModal({ onClose, onPick }: { onClose: () => void; onPick: (path: string) => void }) {
-  const [listing, setListing] = useState<DirListing | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState('');
-
-  const load = useCallback((path: string) => {
-    setLoading(true);
-    setErr('');
-    fetchDirEntries(path)
-      .then((d) => setListing(d))
-      .catch((e) => setErr((e as Error).message || '读取失败'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => { load(''); }, [load]);
-
-  const canUp = !!listing && listing.parent !== listing.path;
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal dir-picker" onClick={(e) => e.stopPropagation()}>
-        <div className="dir-picker-head">
-          <strong style={{ fontSize: 15 }}><IconFolder size={16} /> 选择素材源目录</strong>
-          <button className="btn btn-sm" onClick={onClose}>关闭</button>
-        </div>
-        <div className="dir-picker-path" title={listing?.path}>{listing?.path || '…'}</div>
-        <div className="dir-picker-body">
-          {loading ? <div className="dash-empty">加载中…</div>
-            : err ? <div className="notice-error" style={{ background: 'var(--surface-hover)' }}>{err}</div>
-            : (listing && listing.dirs.length === 0) ? <div className="dash-empty">此目录下没有子文件夹——可直接「选择此目录」。</div>
-            : (
-              <div className="dir-picker-grid">
-                {listing?.dirs.map((d) => (
-                  <div key={d.path} className="card card-hover dir-picker-item" onClick={() => load(d.path)}>
-                    <IconFolder size={18} />
-                    <span className="dir-picker-name">{d.name}</span>
-                    <IconChevron size={15} className="dir-picker-chevron" />
-                  </div>
-                ))}
-              </div>
-            )}
-        </div>
-        {listing?.quick.length ? (
-          <div className="dir-picker-quick">
-            <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>常用</span>
-            {listing.quick.map((d) => (
-              <button key={d.path} className="btn btn-sm" onClick={() => load(d.path)}>{d.name}</button>
-            ))}
-          </div>
-        ) : null}
-        <div className="dir-picker-foot">
-          <button className="btn btn-sm" onClick={() => canUp && load(listing!.parent)} disabled={!canUp}>返回上级</button>
-          <button className="btn btn-sm btn-primary" onClick={() => onPick(listing?.path || '')} disabled={!listing}>选择此目录</button>
-        </div>
-      </div>
     </div>
   );
 }

@@ -1,12 +1,13 @@
 """每账号素材库引擎（skills/shared/scripts/assets.py）的行为测试。
 
 覆盖：登记/注销源目录、基线整理（类型+关键词）、逐件 place 归类、
-按主题检索、素材树、能力状态，以及软链落位与非法画像拒绝。
+按主题检索、素材树、能力状态，以及物理移动与非法画像拒绝。
 """
 from pathlib import Path
 
 import json
 import importlib.util
+import shutil
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "shared" / "scripts" / "assets.py"
@@ -61,17 +62,16 @@ def test_organize_baseline_categorizes(assets, tmp_path):
     assets.add("测试画像", [str(src)])
     r = assets.organize("测试画像")
     assert r["placed"] == 4
-    # 主题桶优先：嘉兴本地.md→嘉兴本地，plugin.md→AI与产品；类型兜底：clip.mp4→视频，cover.png→图片
+    # 无 Agent 时只按类型进入待确认，不把关键词猜测冒充语义整理。
     items = assets.list_items("测试画像")
     cats = {x["name"]: x["category"] for x in items}
-    assert cats["嘉兴本地.md"] == "嘉兴本地"
-    assert cats["plugin.md"] == "AI与产品"
-    assert cats["clip.mp4"] == "视频"
-    assert cats["cover.png"] == "图片"
-    # 落位为软链（指向源目录，不复制大文件）
-    dst = tmp_path / "测试画像" / "assets" / "嘉兴本地" / "嘉兴本地.md"
-    assert dst.is_file() and dst.is_symlink()
-    assert dst.resolve() == src / "嘉兴本地.md"
+    assert cats["嘉兴本地.md"] == "99-待确认/文本"
+    assert cats["plugin.md"] == "99-待确认/文本"
+    assert cats["clip.mp4"] == "99-待确认/视频"
+    assert cats["cover.png"] == "99-待确认/图片"
+    dst = tmp_path / "测试画像" / "assets" / "99-待确认" / "文本" / "嘉兴本地.md"
+    assert dst.is_file() and not dst.is_symlink()
+    assert not (src / "嘉兴本地.md").exists()
 
 
 def test_organize_dry_run_does_not_place(assets, tmp_path):
@@ -94,6 +94,48 @@ def test_place_with_tags_and_summary(assets, tmp_path):
     assert item["summary"] == "嘉兴春节活动"
 
 
+def test_manual_asset_correction_survives_later_ai_organization(assets, tmp_path):
+    source = _mk_source(tmp_path) / "cover.png"
+    assets.organize("测试画像", plan=[{
+        "file": str(source), "category": "图片", "tags": ["auto"], "summary": "auto",
+    }])
+    entries = assets.list_items("测试画像")
+    assert len(entries) == 1
+    assert Path(entries[0]["source"]).is_file()
+    assert Path(entries[0]["original_source"]) == source
+
+    stored = entries[0]["source"]
+    assets.update_entry("测试画像", stored, category="品牌与Logo", tags=["确认"],
+                        location="嘉兴", project="禾城AI造物局")
+    assets.organize("测试画像", plan=[{
+        "file": (tmp_path / "测试画像/assets/品牌与Logo/cover.png").as_posix(),
+        "category": "其他", "tags": ["new"], "summary": "new",
+    }])
+
+    item = next(x for x in assets.list_items("测试画像") if x["name"] == "cover.png")
+    assert item["category"] == "品牌与Logo"
+    assert item["tags"] == ["确认"]
+    assert item["location"] == "嘉兴"
+    assert item["project"] == "禾城AI造物局"
+    assert item["manual"] is True
+
+
+def test_changed_only_scan_returns_new_or_modified_sources(assets, tmp_path):
+    source = _mk_source(tmp_path)
+    assets.add("测试画像", [str(source)])
+    first = assets.scan("测试画像", changed_only=True)
+    assets.organize("测试画像", plan=[{
+        "file": item["path"], "category": "图片" if item["kind"] == "image" else "文件",
+        "kind": item["kind"], "tags": [], "summary": item["name"],
+    } for item in first])
+    assert assets.scan("测试画像", changed_only=True) == []
+
+    (source / "new.md").write_text("new", encoding="utf-8")
+    changed = assets.scan("测试画像", changed_only=True)
+
+    assert [item["name"] for item in changed] == ["new.md"]
+
+
 def test_query_matches_topic(assets, tmp_path):
     src = _mk_source(tmp_path)
     assets.add("测试画像", [str(src)])
@@ -113,7 +155,7 @@ def test_check_json(assets, tmp_path):
     j = assets.check_json("测试画像")
     assert j["registered"] is True
     assert j["organized"] == 4
-    assert j["categories"] == 4  # 嘉兴本地/AI与产品/视频/图片
+    assert j["categories"] == 3  # 待确认/文本、视频、图片
 
 
 def test_tree_for_library(assets, tmp_path):
@@ -123,9 +165,24 @@ def test_tree_for_library(assets, tmp_path):
     tree = assets.tree_for_library("测试画像")
     assert tree is not None and tree["assets"] is True and tree["name"] == "素材库"
     names = {c["name"] for c in tree["children"]}
-    assert "嘉兴本地" in names and "AI与产品" in names
+    assert names == {"99-待确认"}
     # 跳过内部元文件（_index.json / _meta.json / manifest.json）
     assert all(not c["name"].startswith("_") for c in tree["children"])
+
+
+def test_indexed_assets_stay_visible_when_their_source_disappears(assets, tmp_path):
+    src = _mk_source(tmp_path)
+    assets.add("测试画像", [str(src)])
+    assets.organize("测试画像")
+    shutil.rmtree(src)
+
+    status = assets.check_json("测试画像")
+    tree = assets.tree_for_library("测试画像")
+
+    assert status["registered"] is False
+    assert status["organized"] == 4
+    assert str(src) in status["missing_sources"]
+    assert tree is not None
 
 
 def test_invalid_persona_rejected(assets, tmp_path):
@@ -148,18 +205,23 @@ def test_same_named_sources_remain_distinct_after_repeated_organize(assets, tmp_
     entries = assets.list_items("测试画像")
     assert len(entries) == 2
     assert {entry["name"] for entry in entries} == {"photo.png"}
-    category = tmp_path / "测试画像/assets/图片"
-    links = [path for path in category.iterdir() if path.is_symlink()]
-    assert {path.resolve() for path in links} == {source / "photo.png" for source in sources}
-    assert {path.read_bytes() for path in links} == {b"image-0", b"image-1"}
+    category = tmp_path / "测试画像/assets/99-待确认/图片"
+    files = [
+        path for path in category.iterdir()
+        if path.is_file() and not path.name.startswith("_") and path.name != "manifest.json"
+    ]
+    assert all(not path.is_symlink() for path in files)
+    assert {path.read_bytes() for path in files} == {b"image-0", b"image-1"}
+    assert all(not (source / "photo.png").exists() for source in sources)
 
 
 def test_reorganize_updates_metadata_and_removes_previous_category_link(assets, tmp_path):
     source = _mk_source(tmp_path) / "cover.png"
     assets.place("测试画像", str(source), "旧分类", tags=["old"], summary="old")
+    stored = assets.list_items("测试画像")[0]["source"]
 
     assets.organize("测试画像", plan=[{
-        "file": str(source), "category": "新分类", "tags": ["new"], "summary": "new summary",
+        "file": stored, "category": "新分类", "tags": ["new"], "summary": "new summary",
     }])
 
     entries = assets.list_items("测试画像")
@@ -168,8 +230,36 @@ def test_reorganize_updates_metadata_and_removes_previous_category_link(assets, 
     assert entries[0]["tags"] == ["new"]
     assert entries[0]["summary"] == "new summary"
     assert not (tmp_path / "测试画像/assets/旧分类/cover.png").exists()
-    assert source.read_bytes() == b"\x89PNG\r\n"
+    assert not source.exists()
+    assert (tmp_path / "测试画像/assets/新分类/cover.png").read_bytes() == b"\x89PNG\r\n"
     assert json.loads((tmp_path / "测试画像/assets/旧分类/manifest.json").read_text()) == []
+
+
+def test_legacy_asset_link_is_replaced_by_the_physical_file(assets, tmp_path):
+    source = _mk_source(tmp_path) / "cover.png"
+    library = tmp_path / "测试画像/assets"
+    category = library / "图片"
+    category.mkdir(parents=True)
+    destination = category / "cover.png"
+    destination.symlink_to(source)
+    entry = {
+        "name": "cover.png", "kind": "image", "category": "图片",
+        "tags": [], "summary": "legacy", "source": str(source),
+        "mtime": int(source.stat().st_mtime), "stored_name": "cover.png",
+    }
+    (category / "manifest.json").write_text(json.dumps([entry]), encoding="utf-8")
+    (library / "_index.json").write_text(json.dumps([entry]), encoding="utf-8")
+
+    assets.organize("测试画像", plan=[{
+        "file": str(source), "category": "图片", "tags": ["physical"], "summary": "moved",
+    }])
+
+    assert not destination.is_symlink()
+    assert destination.read_bytes() == b"\x89PNG\r\n"
+    assert not source.exists()
+    stored = assets.list_items("测试画像")[0]
+    assert stored["source"] == str(destination)
+    assert stored["original_source"] == str(source)
 
 
 @pytest.mark.parametrize("category", ["../outside", "absolute", "nested/../../outside"])
@@ -196,21 +286,21 @@ def test_category_symlink_cannot_escape_library(assets, tmp_path):
     assert assets.list_items("测试画像") == []
 
 
-def test_place_resolves_alias_and_replaces_metadata_in_same_category(assets, tmp_path):
+def test_place_resolves_alias_and_moves_the_real_source_once(assets, tmp_path):
     source = _mk_source(tmp_path) / "cover.png"
     alias = tmp_path / "alias.png"
     alias.symlink_to(source)
-    assets.place("测试画像", str(source), "图片", tags=["old"])
-
     result = assets.place("测试画像", str(alias), "图片", tags=["updated"], summary="updated")
 
     entries = assets.query("测试画像", "updated")
     assert len(assets.list_items("测试画像")) == 1
     assert entries == [result["entry"]]
-    assert entries[0]["source"] == str(source.resolve())
+    assert entries[0]["source"] == str(Path(result["path"]).resolve())
+    assert entries[0]["name"] == "cover.png"
     links = list((tmp_path / "测试画像/assets/图片").glob("*.png"))
     assert links == [Path(result["path"])]
-    assert source.read_bytes() == b"\x89PNG\r\n"
+    assert not source.exists()
+    assert Path(result["path"]).read_bytes() == b"\x89PNG\r\n"
 
 
 def test_metadata_write_failure_restores_previous_library(assets, tmp_path, monkeypatch):
@@ -227,10 +317,10 @@ def test_metadata_write_failure_restores_previous_library(assets, tmp_path, monk
 
     monkeypatch.setattr(asset_storage, "_write_json", fail_index)
     with pytest.raises(OSError, match="simulated disk write failure"):
-        assets.place("测试画像", str(source), "新分类", tags=["new"])
+        assets.place("测试画像", index[0]["source"], "新分类", tags=["new"])
 
     assert assets.list_items("测试画像") == index
-    assert Path(original["path"]).resolve() == source
+    assert Path(original["path"]).is_file()
     manifest = tmp_path / "测试画像/assets/旧分类/manifest.json"
     assert json.loads(manifest.read_text()) == index
     assert not (tmp_path / "测试画像/assets/新分类/cover.png").exists()
@@ -252,7 +342,8 @@ def test_library_tree_counts_real_files_recursively_and_hides_retired_categories
     source = _mk_source(tmp_path)
     assets.add("测试画像", [str(source)])
     assets.place("测试画像", str(source / "cover.png"), "旧分类/子分类")
-    assets.place("测试画像", str(source / "cover.png"), "新分类/子分类")
+    stored = assets.list_items("测试画像")[0]["source"]
+    assets.place("测试画像", stored, "新分类/子分类")
     assets.place("测试画像", str(source / "plugin.md"), "新分类")
     category = tmp_path / "测试画像/assets/新分类"
     (category / "_index.json").write_text("[]")

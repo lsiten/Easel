@@ -22,7 +22,7 @@ class OrganizeResult(TypedDict):
 
 
 class AssetLibrary(Protocol):
-    def scan(self, profile: str) -> list[AssetFile]: ...
+    def scan(self, profile: str, *, changed_only: bool = False) -> list[AssetFile]: ...
     def organize(self, profile: str, *, dry_run: bool, plan: list[dict]) -> OrganizeResult: ...
 
 
@@ -96,7 +96,7 @@ class AssetOrganizer:
             previous = self.current(profile)
             if previous and previous.status == "running":
                 return previous, []
-            files = self.library().scan(profile)
+            files = self.library().scan(profile, changed_only=True)
             job = OrganizationJob(id=uuid.uuid4().hex, profile=profile, total=len(files),
                                   dry_run=dry_run, status="running" if files else "done", updated=time.time(), owner_pid=os.getpid())
             if files:

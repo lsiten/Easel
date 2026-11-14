@@ -55,6 +55,7 @@ def test_ai_decision_changes_real_library_and_survives_refresh(tmp_path, library
     assert (entry['category'], entry['summary'], entry['tags']) == (
         '城市活动', '南湖社区活动，可用于城市视频', ['纪录片', '社区'])
     assert (tmp_path / 'profiles/甲/assets/城市活动/untitled.txt').read_text(encoding='utf-8').startswith('南湖')
+    assert not (source / 'untitled.txt').exists()
     restored = AssetOrganizer(tmp_path / 'jobs', lambda: engine, manager.runner)
     assert restored.current('甲').status == 'done'
     assert client.get(f"/api/assets/organize/{job['id']}?persona=乙").status_code == 404

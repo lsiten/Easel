@@ -11,7 +11,7 @@ layer: produce
 > 整理由 Agent 理解内容驱动；脚本 `skills/shared/scripts/assets.py` 负责登记、落位、索引、检索。
 > 统一入口：`python skills/shared/scripts/assets.py <命令> <画像> ...`
 >
-> Web 登记目录会自动启动当前 Agent 的后台内容理解任务；「整理素材」可重跑，进度按画像保存。
+> Web 登记目录只建立待整理范围；用户点击「AI 一键整理」后才启动后台内容理解任务，「整理素材」可重跑，进度按画像保存。
 > 图片看图、视频抽帧理解并结合可用转写；AI 返回的方案由服务端校验后落位。失败如实显示原因。
 > CLI `organize` 仍表示快速基线分类，不要把它的结果当成已完成视觉/视频理解。
 
@@ -27,7 +27,7 @@ layer: produce
 ## 数据与路径
 
 - 登记清单：`profiles/asset_scopes.json`（{画像: [绝对源目录]}，与 `kb_scopes.json` 同构）。
-- 整理树：`profiles/<画像>/assets/`（分类目录 + 软链落位 + `manifest.json` + `_index.json`）。
+- 整理树：`profiles/<画像>/assets/`（分类目录 + 物理文件 + `manifest.json` + `_index.json`）。
 - 随画像：素材库只属于当前画像；创作取用只读本画像素材库。
 
 ## 执行步骤
@@ -45,7 +45,7 @@ layer: produce
    - 文本：直接读内容，取标题/主题/要点。
    - 图片：用 `ai-image`（视觉理解）或看图判断主题；无视觉能力时按文件名/EXIF 归类并提示用户可补。
    - 视频/音频：用 `asr`/转写取主题；无转写时按文件名归类并提示。
-   - 逐件落位（推荐，最准确）：
+   - 逐件整理（推荐，最准确；会把文件本体移动到素材库）：
      ```bash
      python skills/shared/scripts/assets.py place <画像> --file <素材绝对路径> \
         --category <主题分类> --tags "标签1,标签2" --summary "一句话摘要" --kind image|video|text|audio
@@ -77,7 +77,8 @@ python skills/shared/scripts/assets.py query 水獭比特 AI 编程 --kind video
 
 ## 边界与注意
 
-- 用户只添加**源目录**，不要求移动/复制原文件；整理树用软链（失败回退拷贝），不重复大文件。
+- 登记源目录本身不移动文件；执行 `place` / `organize` 后，文件本体会物理移动到
+  `profiles/<画像>/assets/<分类>/`。移动前先写恢复日志，同名目标自动避碰，索引写入失败会恢复原位置。
 - 无视觉/转写能力时按文件名/类型基线归类并**明确提示**用户可补充理解，不臆造内容。
 - 整理可重复运行（幂等落位）；新增源目录后重跑 `organize`/`place` 增量整理。
 - 素材库随画像：切换画像后素材库随之切换，不跨画像取用。

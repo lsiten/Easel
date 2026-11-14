@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
+# noqa: SIZE_OK — compatibility CLI facade; storage, evidence, and physical moves are split modules.
 """assets.py — 每账号（画像）「素材库」引擎：登记素材源目录 → 按内容理解 AI 整理 → 供视频/文章创作取用。
 
 设计（与 Easel 既有 kb / openfilm 模式一致）：
 - 每个画像可登记若干「素材源目录」（图片 / 视频 / 文本），用户只需添加目录即可。
   登记清单存 profiles/asset_scopes.json（{画像: [绝对源目录]}，与 kb_scopes.json 同构）。
 - 素材库整理树落在 profiles/<画像>/assets/：按内容理解归入分类目录，
-  文件以软链（失败回退拷贝）落位，配 manifest.json（分类/类型/标签/摘要/来源）与 _index.json（全量索引）。
+  文件本体会从登记源目录物理移动落位，配 manifest.json（分类/类型/标签/摘要/来源）与 _index.json（全量索引）。
 - 「按理解的内容整理」由 Agent 驱动：Agent 读文件（文本直读 / 图片看 / 视频转写）理解后
   逐件 `place` 归类；`organize` 无计划时做「类型 + 文件名/内容关键词」基线整理，供可独立运行/自检。
 - 创作取用：视频/文章 skill 调 `query` 按主题/类型检索相关素材（随画像，仅本画像素材库）。
@@ -32,12 +32,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from asset_storage import category_directory, read_index as _read_index, store_entry, _write_json as _write_storage_json
+from asset_evidence import extract_evidence, sha256_file
 from video_run_manifest import is_public_artifact
 
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
 YELLOW = "\033[0;33m"
 NC = "\033[0m"
+
+
+class AssetLibraryError(ValueError):
+    """An asset command input violates the persona or catalog contract."""
 
 
 # ── 路径与画像校验（与 output_paths / persona 一致）──────────────────────────
@@ -49,19 +54,6 @@ _IMG_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif", ".bmp", "
 _VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi", ".flv", ".ts"}
 _TEXT_EXT = {".md", ".txt", ".docx", ".doc", ".pdf", ".csv", ".json", ".yaml", ".yml", ".srt", ".vtt"}
 _AUDIO_EXT = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"}
-
-# 基线分类：文件名/内容关键词 → 主题桶（Agent 可精修覆盖）
-_TOPIC_RULES = [
-    (r"(嘉兴|南湖|禾城|本地|city)", "嘉兴本地"),
-    (r"(ai|gpt|llm|智能|模型|agent|opc)", "AI与产品"),
-    (r"(产品|工具|plugin|app|应用|平台)", "产品与工具"),
-    (r"(人|人物|创始人|团队|staff|team)", "人物"),
-    (r"(品牌|logo|slogan|视觉|brand)", "品牌视觉"),
-    (r"(活动|节日|节庆|campaign|event)", "活动"),
-    (r"(数据|报表|chart|stats|number)", "数据"),
-    (r"(教程|教程|guide|howto|教学)", "教程"),
-]
-
 
 def _valid_persona(name: str) -> bool:
     return (
@@ -81,11 +73,11 @@ def _now_iso() -> str:
 
 
 # ── 登记清单（profiles/asset_scopes.json，与 kb_scopes.json 同构）────────────
-def load_registry() -> dict:
+def load_registry() -> dict:  # noqa: DICT_OK — persisted JSON registry contract.
     try:
         data = json.loads(REGISTRY.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
-    except Exception:  # noqa: BLE001
+    except (OSError, ValueError):
         return {}
 
 
@@ -115,10 +107,10 @@ def sources(profile: str) -> list[str]:
     return out
 
 
-def add(profile: str, dirs: list[str]) -> dict:
+def add(profile: str, dirs: list[str]) -> dict:  # noqa: DICT_OK — CLI/HTTP JSON response.
     """登记素材源目录到 asset_scopes.json（去重、绝对化）。返回 {added, already, invalid}。"""
     if not _valid_persona(profile):
-        raise ValueError(f"非法画像名：{profile!r}")
+        raise AssetLibraryError(f"非法画像名：{profile!r}")
     reg = load_registry()
     cur = reg.get(profile)
     if not isinstance(cur, list):
@@ -144,9 +136,9 @@ def add(profile: str, dirs: list[str]) -> dict:
             "sources": sources(profile)}
 
 
-def remove(profile: str, directory: str) -> dict:
+def remove(profile: str, directory: str) -> dict:  # noqa: DICT_OK — CLI/HTTP JSON response.
     if not _valid_persona(profile):
-        raise ValueError(f"非法画像名：{profile!r}")
+        raise AssetLibraryError(f"非法画像名：{profile!r}")
     reg = load_registry()
     cur = reg.get(profile)
     if not isinstance(cur, list):
@@ -172,72 +164,64 @@ def _kind(path: Path) -> str:
     return "other"
 
 
-def _topic_from(text: str) -> str | None:
-    low = text.lower()
-    for pat, label in _TOPIC_RULES:
-        if re.search(pat, low):
-            return label
-    return None
-
-
-def _text_snippet(path: Path, n: int = 300) -> str:
-    try:
-        if path.suffix.lower() in {".md", ".txt", ".csv", ".json", ".yaml", ".yml"}:
-            return path.read_text(encoding="utf-8", errors="ignore")[:n]
-    except Exception:  # noqa: BLE001
-        pass
-    return ""
-
-
 def _baseline_category(kind: str, path: Path) -> str:
-    """无 Agent 时的基线分类：主题桶优先，否则按类型兜底。"""
-    t = _topic_from(path.stem + " " + _text_snippet(path, 400))
-    if t:
-        return t
-    return {"image": "图片", "video": "视频", "audio": "音频", "text": "文本"}.get(kind, "其他")
+    """无 Agent 时只按类型落入待确认，不冒充已完成语义整理。"""
+    label = {"image": "图片", "video": "视频", "audio": "音频", "text": "文本"}.get(kind, "其他")
+    return f"99-待确认/{label}"
 
 
-def scan(profile: str) -> list[dict]:
+def scan(profile: str, *, changed_only: bool = False) -> list[dict]:
     """扫描已登记源目录内的文件（不改动），返回待整理清单。"""
     items: list[dict] = []
+    indexed = {str(Path(item.get("source", "")).resolve()): item for item in list_items(profile)}
     for src in sources(profile):
         for p in sorted(Path(src).rglob("*")):
             if not p.is_file() or p.name.startswith(".") or not is_public_artifact(p):
                 continue
             if any(part.startswith(".") for part in p.relative_to(Path(src)).parts):
                 continue
+            stat = p.stat()
+            previous = indexed.get(str(p.resolve()))
+            if changed_only and previous and previous.get("mtime") == int(stat.st_mtime):
+                continue
+            evidence = extract_evidence(p)
             items.append({
                 "path": str(p), "name": p.name, "kind": _kind(p),
-                "size": p.stat().st_size if p.exists() else 0,
-                "mtime": int(p.stat().st_mtime) if p.exists() else 0,
+                "size": stat.st_size, "mtime": int(stat.st_mtime),
+                "sha256": evidence["sha256"], "capturedAt": evidence["capturedAt"],
+                "locationHint": evidence["locationHint"], "timeSource": evidence["timeSource"],
             })
     return items
 
 
 # ── 落位 / 整理 / 索引──────────────────────────────────────────────────────
-def place(profile: str, file: str, category: str, *, tags: list[str] | None = None,
-          summary: str = "", kind: str | None = None) -> dict:
+def place(profile: str, file: str, category: str, *, tags: list[str] | None = None,  # noqa: DICT_OK
+          summary: str = "", kind: str | None = None, manual: bool = False
+          ) -> dict:  # noqa: DICT_OK — CLI/Agent JSON response.
     """把单个素材落位到 profiles/<画像>/assets/<category>/（Agent 逐件调用）。"""
     if not _valid_persona(profile):
-        raise ValueError(f"非法画像名：{profile!r}")
+        raise AssetLibraryError(f"非法画像名：{profile!r}")
     fp = Path(file).expanduser()
     if not fp.is_file():
         return {"ok": False, "error": f"素材文件不存在：{file}"}
     category = (category or "其他").strip() or "其他"
     kind = kind or _kind(fp)
     asset_dir = _asset_dir(profile)
+    source = fp.resolve()
     entry = {
-        "name": fp.name, "kind": kind, "category": category,
+        "name": source.name, "kind": kind, "category": category,
         "tags": [t.strip() for t in (tags or []) if t.strip()],
-        "summary": summary.strip()[:500], "source": str(fp.resolve()),
-        "mtime": int(fp.stat().st_mtime), "stored_name": fp.name,
+        "summary": summary.strip()[:500], "source": str(source),
+        "mtime": int(source.stat().st_mtime), "stored_name": source.name,
+        "sha256": extract_evidence(source)["sha256"], "manual": manual,
     }
     dst, entry = store_entry(asset_dir, entry)
     _write_meta(asset_dir, sources(profile))
     return {"ok": True, "profile": profile, "category": category, "path": str(dst), "entry": entry}
 
 
-def organize(profile: str, *, dry_run: bool = False, plan: list[dict] | None = None) -> dict:
+def organize(profile: str, *, dry_run: bool = False,  # noqa: DICT_OK
+             plan: list[dict] | None = None) -> dict:  # CLI/HTTP JSON response.
     """整理素材库：plan（Agent 给定的逐件 {file,category,tags,summary,kind}）优先；
     否则用 scan 做「类型 + 文件名/内容关键词」基线整理。dry_run 只返回计划不落位。"""
     if not _valid_persona(profile):
@@ -256,14 +240,32 @@ def organize(profile: str, *, dry_run: bool = False, plan: list[dict] | None = N
         if not fp.is_file():
             skipped.append(str(fp))
             continue
+        previous = next((entry for entry in _read_index(asset_dir)
+                         if Path(str(entry.get("source", ""))).resolve() == fp.resolve()), None)
         category = (item.get("category") or "其他").strip() or "其他"
+        if previous and previous.get("manual"):
+            category = str(previous.get("category") or category)
         kind = item.get("kind") or _kind(fp)
         entry = {
             "name": fp.name, "kind": kind, "category": category,
             "tags": [t.strip() for t in (item.get("tags") or []) if t.strip()],
             "summary": (item.get("summary") or "").strip()[:500], "source": str(fp.resolve()),
             "mtime": int(fp.stat().st_mtime), "stored_name": fp.name,
+            "sha256": str((item.get("sha256") or sha256_file(fp))),
+            "capturedAt": str(item.get("capturedAt") or ""),
+            "location": str(item.get("location") or item.get("locationHint") or ""),
+            "timeSource": str(item.get("timeSource") or ""),
+            "project": str(item.get("project") or ""),
+            "role": str(item.get("role") or ""),
+            "confidence": float(item.get("confidence") or 0.0),
+            "reason": str(item.get("reason") or ""),
+            "manual": bool(previous and previous.get("manual")),
         }
+        if previous and previous.get("manual"):
+            for key in ("tags", "summary", "capturedAt", "location", "timeSource",
+                        "project", "role", "confidence", "reason"):
+                if key in previous:
+                    entry[key] = previous[key]
         if dry_run:
             placed.append(entry)
             continue
@@ -282,6 +284,22 @@ def organize(profile: str, *, dry_run: bool = False, plan: list[dict] | None = N
 def _write_meta(asset_dir: Path, srcs: list[str]) -> None:
     meta = {"sources": srcs, "organized_at": _now_iso(), "index": str(asset_dir / "_index.json")}
     _write_storage_json(asset_dir / "_meta.json", meta)
+
+
+def update_entry(profile: str, source: str,  # noqa: DICT_OK
+                 **changes: str | list[str]) -> dict:  # noqa: DICT_OK — HTTP JSON response.
+    """Apply a user-confirmed override and lock it against later AI runs."""
+    asset_dir = _asset_dir(profile)
+    entries = _read_index(asset_dir)
+    resolved = str(Path(source).resolve())
+    current = next((entry for entry in entries if str(Path(entry["source"]).resolve()) == resolved), None)
+    if current is None:
+        raise AssetLibraryError("素材不存在")
+    allowed = {"category", "tags", "summary", "capturedAt", "location", "project", "role"}
+    updates = {key: value for key, value in changes.items() if key in allowed}
+    updated = {**current, **updates, "manual": True}
+    store_entry(asset_dir, updated)
+    return updated
 
 
 def list_items(profile: str, category: str | None = None) -> list[dict]:
@@ -306,6 +324,10 @@ def query(profile: str, what: str, *, kind: str | None = None, limit: int = 10) 
             str(x.get("summary", "")),
             str(x.get("name", "")),
             str(x.get("kind", "")),
+            str(x.get("capturedAt", "")),
+            str(x.get("location", "")),
+            str(x.get("project", "")),
+            str(x.get("role", "")),
         ]).lower()
         score = sum(hay.count(t) for t in terms)
         if score > 0 or not terms:
@@ -318,13 +340,18 @@ def tree_for_library(profile: str) -> dict | None:
     """供内容库展示的素材库树（仅分类子目录 + 文件计数），与外部内容源渲染同构。
     只列分类目录，跳过 _index.json / _meta.json 等元文件（以 _ 开头）。"""
     asset_dir = _asset_dir(profile)
-    if not asset_dir.is_dir() or not sources(profile):
+    if not asset_dir.is_dir():
         return None
+    indexed_counts: dict[str, int] = {}
+    for item in _read_index(asset_dir):
+        category = str(item.get("category", "")).replace("\\", "/").strip("/")
+        if category:
+            indexed_counts[category.split("/", 1)[0]] = indexed_counts.get(category.split("/", 1)[0], 0) + 1
     children: list[dict] = []
     for c in sorted(asset_dir.iterdir()):
         if c.name.startswith(".") or c.name.startswith("_") or not c.is_dir():
             continue
-        count = _count_files(c)
+        count = max(_count_files(c), indexed_counts.get(c.name, 0))
         if count == 0:
             continue
         fm = {"name": c.name, "type": "dir", "external": False,
@@ -357,11 +384,11 @@ def _count_files(d: Path, cap: int = 100000) -> int:
             if n >= cap:
                 break
     except OSError:
-        pass
+        return n
     return n
 
 
-def check_json(profile: str | None = None) -> dict:
+def check_json(profile: str | None = None) -> dict:  # noqa: DICT_OK — CLI/HTTP JSON status.
     """能力/状态：该画像是否已登记素材源、已整理多少素材。"""
     profile = profile or ""
     reg = load_registry()
@@ -369,8 +396,14 @@ def check_json(profile: str | None = None) -> dict:
     srcs = sources(profile) if profile else []
     n = len(list_items(profile)) if profile else 0
     cats = {x.get("category") for x in list_items(profile) if x.get("category")} if profile else set()
+    missing_sources = [
+        str(raw)
+        for raw in entry
+        if isinstance(raw, str) and raw.strip() and not Path(raw).is_dir()
+    ] if profile else []
     return {
         "profile": profile, "registered": bool(srcs), "sources": srcs,
+        "registered_paths": len(entry), "missing_sources": missing_sources,
         "registered_all": sum(1 for v in reg.values() if isinstance(v, list) and v),
         "organized": n, "categories": len(cats),
         "asset_dir": str(_asset_dir(profile)) if profile else "",
@@ -491,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
                 state = f"{GREEN}OK{NC}" if r["registered"] else f"{YELLOW}未登记{NC}"
                 print(f"素材库（{a.profile}）{state}：源目录 {len(r['sources'])}，已整理 {r['organized']} 项，分类 {r['categories']} 类")
             return 0
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BROAD_EXCEPT_OK — CLI boundary.
         print(f"{RED}✗{NC} {exc}", file=sys.stderr)
         return 1
     return 0

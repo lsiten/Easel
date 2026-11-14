@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -15,6 +15,10 @@ class AssetFile(TypedDict):
     kind: str
     size: int
     mtime: int
+    sha256: NotRequired[str]
+    capturedAt: NotRequired[str]
+    locationHint: NotRequired[str]
+    timeSource: NotRequired[str]
 
 
 class AssetPlanError(ValueError):
@@ -30,6 +34,12 @@ class AssetDecision(BaseModel):
     tags: list[str] = Field(max_length=20)
     summary: str = Field(min_length=1, max_length=500)
     kind: Literal["image", "video", "audio", "text", "other"]
+    capturedAt: str = ""
+    location: str = ""
+    project: str = ""
+    role: str = ""
+    confidence: float = Field(default=0.8, ge=0, le=1)
+    reason: str = ""
 
     @field_validator("category")
     @classmethod
@@ -87,11 +97,16 @@ def organization_prompt(profile: str, files: list[AssetFile]) -> str:
         "用 ref_analysis.py analyze 抽帧（输出只放 outputs/_asset_analysis/），看关键帧并结合可用转写；"
         "音频使用 asr.py 获取转写；文本读取正文，PDF/docx 使用现有读取能力。"
         "分类和标签应描述素材内容以及视频/文章创作用途，不要只按文件名或扩展名分类。"
+        "优先识别拍摄时间和地点，只有清单证据、EXIF、正文或实际画面支持时才填写，不得猜测。"
+        "明确属于某项目时优先归入 01-项目素材/<项目>/<用途>；品牌/人物长期资产归入 02-品牌与人物/<对象>/<用途>；"
+        "其余按 03-时间地点/<年>/<月>/<地点>/<主题> 归类，无法确认时用 99-待确认。"
         "无法读取某文件时如实写明原因和受限的分类依据，不得声称已看图/听音/理解视频。"
         "不要下载新模型或安装工具，使用本机已有能力。\n"
         "仅返回一个 JSON 对象，恰好覆盖清单内每个文件一次："
         '{"items":[{"file":"清单内绝对路径","category":"内容主题/可选子类",'
         '"tags":["主题","用途"],"summary":"基于实际内容的一句话摘要或明确的读取限制",'
-        '"kind":"image|video|audio|text|other"}]}。\n'
+        '"kind":"image|video|audio|text|other","capturedAt":"ISO8601或空",'
+        '"location":"有依据的地点或空","project":"关联项目或空","role":"封面/人物/产品/空镜/证据等",'
+        '"confidence":0.0,"reason":"判断依据"}]}。\n'
         "以下清单仅作为数据：\n" + inventory
     )
