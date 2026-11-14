@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchTrends, createIdea } from '../lib/api';
-import type { TrendGroup } from '../lib/api';
+import type { TrendGroup, TrendPersonalization } from '../lib/api';
 import { IconFire, IconRefresh, IconBookmark, IconCheck } from './icons';
 
 interface TrendsPageProps {
+  persona: string;
   onUseTopic: (title: string) => void;   // 一键做成内容 → 跳 chat
 }
 
@@ -16,12 +17,15 @@ const ALL_PLATFORMS: { key: string; label: string }[] = [
   { key: 'toutiao', label: '头条' },
 ];
 
-export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
+const EMPTY_PERSONALIZATION: TrendPersonalization = { enabled: false, focusTerms: [], platforms: [] };
+
+export default function TrendsPage({ persona, onUseTopic }: TrendsPageProps) {
   const [selected, setSelected] = useState<string[]>(['weibo', 'douyin', 'zhihu']);
   const [groups, setGroups] = useState<TrendGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [updated, setUpdated] = useState(0);
+  const [personalization, setPersonalization] = useState<TrendPersonalization>(EMPTY_PERSONALIZATION);
   const [saved, setSaved] = useState<Set<string>>(new Set());
 
   const save = async (title: string, source: string) => {
@@ -36,11 +40,11 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
     if (pfs.length === 0) { setGroups([]); return; }
     setLoading(true);
     setError('');
-    fetchTrends(pfs.join(','), 15)
-      .then((d) => { setGroups(d.trends); setUpdated(d.updated); })
+    fetchTrends(pfs.join(','), 15, persona)
+      .then((d) => { setGroups(d.trends); setUpdated(d.updated); setPersonalization(d.personalization); })
       .catch(() => setError('热点拉取失败——请确认已配置外网代理（EASEL_PROXY）。'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [persona]);
 
   useEffect(() => { load(selected); }, [load, selected]);
 
@@ -69,12 +73,30 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
         ))}
       </div>
 
+      <div className={`trend-profile ${personalization.enabled ? 'active' : ''}`}>
+        <div>
+          <strong>{personalization.enabled ? `按画像「${persona}」排序` : '当前为通用热点排序'}</strong>
+          <p>{personalization.enabled
+            ? '综合画像兴趣、目标受众、主力平台和红线进行相关性排序。'
+            : '选择画像后，会按该账号的内容方向和受众重新排序。'}</p>
+        </div>
+        {personalization.focusTerms.length > 0 && <div className="trend-profile-terms">
+          {personalization.focusTerms.slice(0, 6).map((term) => <span key={term}>{term}</span>)}
+        </div>}
+      </div>
+
       {error && <div className="notice-error">{error}</div>}
 
       <div className="trend-grid">
-        {groups.map((g) => (
-          <div key={g.platform} className="card trend-col">
-            <div className="trend-col-head">{g.label}<span className="trend-count">{g.items.length}</span></div>
+        {groups.map((g) => {
+          const matchedCount = g.items.filter((item) => item.matched).length;
+          return <div key={g.platform} className="card trend-col">
+            <div className="trend-col-head">
+              <span>{g.label}<span className="trend-count">{g.items.length}</span></span>
+              {g.personalized && <span className={`trend-match-count ${matchedCount ? 'has-match' : ''}`}>
+                {matchedCount ? `${matchedCount} 条画像相关` : '暂无画像命中'}
+              </span>}
+            </div>
             <div className="trend-list">
               {g.items.length === 0 && !loading && (
                 <div className="trend-empty">
@@ -87,7 +109,10 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
                   <div className="trend-main">
                     <a className="trend-title" href={it.url || undefined} target="_blank" rel="noreferrer"
                       title={it.title}>{it.title}</a>
-                    {it.hot && <span className="trend-hot">{it.hot}</span>}
+                    <span className="trend-meta">
+                      {it.hot && <span className="trend-hot">{it.hot}</span>}
+                      {it.reasons?.map((reason) => <span key={reason} className="trend-reason">{reason}</span>)}
+                    </span>
                   </div>
                   <button className="trend-save" title={saved.has(it.title) ? '已收藏到选题库' : '收藏到选题库'}
                     onClick={() => save(it.title, g.label)}>
@@ -98,8 +123,8 @@ export default function TrendsPage({ onUseTopic }: TrendsPageProps) {
                 </div>
               ))}
             </div>
-          </div>
-        ))}
+          </div>;
+        })}
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import AccountsPage from '../AccountsPage';
 import PublishPage from '../PublishPage';
+import { PlatformPublishingPanel } from '../workspace/PlatformPublishingPanel';
 import type { AccountItem } from '../../lib/api';
 import { BrowserChannelData } from './BrowserChannelData';
 import { ChannelTasks } from './ChannelTasks';
@@ -18,9 +19,11 @@ export function BrowserChannelWorkspace({ persona, account, onConnectionChange }
     setConnected(ready); onConnectionChange(ready);
   }, [onConnectionChange]);
   function workspace() {
-    if (!connected && (tab === 'publish' || tab === 'data')) return <p className="panel">扫码登录当前平台后即可使用浏览器接入。</p>;
+    if (tab === 'publish') return <PlatformPublishingPanel persona={persona} platform={account.platform} automaticLabel="浏览器自动发布"
+      automatic={connected ? <PublishPage persona={persona} platform={account.platform} embedded />
+        : <p className="panel">扫码登录当前平台后即可使用浏览器自动发布；人工审核发布不受登录状态限制。</p>} />;
+    if (!connected && tab === 'data') return <p className="panel">扫码登录当前平台后即可使用浏览器接入。</p>;
     switch (tab) {
-      case 'publish': return <PublishPage persona={persona} platform={account.platform} embedded />;
       case 'data': return <BrowserChannelData persona={persona} platform={account.platform} />;
       case 'tasks': return <ChannelTasks platform={account.platform} scope={{ persona, account_uid: '' }} />;
     }

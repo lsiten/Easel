@@ -27,11 +27,14 @@ function today() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export default function ManualPublishPage({ persona }: { persona: string }) {
-  const initial = useRef(loadPublishDraft()).current;
+export default function ManualPublishPage({ persona, platform }: { readonly persona: string; readonly platform?: string }) {
+  const draftScope = platform ? JSON.stringify([persona, platform]) : undefined;
+  const initial = useRef(loadPublishDraft(draftScope)).current;
   const [title, setTitle] = useState(initial.title);
   const [body, setBody] = useState(initial.body);
-  const [platforms, setPlatforms] = useState<string[]>(initial.platforms);
+  const [platforms, setPlatforms] = useState<string[]>(
+    platform && PLATFORMS.some((item) => item.key === platform) ? [platform] : initial.platforms,
+  );
   const [overrides, setOverrides] = useState<Record<string, string>>(initial.overrides);
   const [tags, setTags] = useState(initial.tags || '');
   const [mediaFiles, setMediaFiles] = useState<OutputFile[]>([]);
@@ -50,7 +53,9 @@ export default function ManualPublishPage({ persona }: { persona: string }) {
   const [saving, setSaving] = useState(false);
   const ctl = useRef<AbortController | null>(null);
 
-  useEffect(() => { savePublishDraft({ title, body, platforms, overrides, tags }); }, [title, body, platforms, overrides, tags]);
+  useEffect(() => {
+    savePublishDraft({ title, body, platforms, overrides, tags }, draftScope);
+  }, [title, body, platforms, overrides, tags, draftScope]);
   useEffect(() => () => ctl.current?.abort(), []);
   useEffect(() => {
     let current = true;
@@ -66,7 +71,7 @@ export default function ManualPublishPage({ persona }: { persona: string }) {
       };
       roots.forEach(walk);
       setMediaFiles(files.sort((a, b) => (b.mtime || 0) - (a.mtime || 0)));
-    }).catch(() => setToast('内容库暂时无法读取，仍可编辑和复制文案'));
+    }).catch(() => setToast('素材源暂时无法读取，仍可编辑和复制文案'));
     return () => { current = false; };
   }, [persona]);
 
@@ -180,7 +185,7 @@ export default function ManualPublishPage({ persona }: { persona: string }) {
 
   return <div className="publish-page">
     <div className="publish-editor">
-      <h1 className="page-title"><IconPublish size={21} /> 发布中心 · 人工发布</h1>
+      <h1 className="page-title"><IconPublish size={21} /> 人工审核发布</h1>
       <p className="page-subtitle">AI 排版 → 人工审核 → 复制 / 导出 → 在官方发布页亲自提交。</p>
       <div className="panel" style={{ marginBottom: 16, fontSize: 13 }}>
         <strong>最终提交由你完成。</strong> 本页不自动登录、上传或点击发布。官方页面的登录与 Easel 账号页相互独立。
@@ -194,11 +199,11 @@ export default function ManualPublishPage({ persona }: { persona: string }) {
       <label className="field-label">目标平台</label>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{PLATFORMS.map((p) => <button key={p.key} className={`chip ${platforms.includes(p.key) ? 'active' : ''}`} onClick={() => toggle(p.key)}>{p.label}</button>)}</div>
       <label className="field-label" style={{ marginTop: 16 }}>媒体素材 · 已选 {selectedMedia.length} 个</label>
-      <p className="pv-hint">从内容库选择图片 / 视频打包导出，也可稍后在官方页面手动选择电脑上的文件。</p>
+      <p className="pv-hint">从素材源选择图片 / 视频打包导出，也可稍后在官方页面手动选择电脑上的文件。</p>
       <button className="btn btn-sm" onClick={() => setShowPicker((v) => !v)}>{showPicker ? '收起素材' : '选择媒体'}</button>
       {selectedMedia.length > 0 && <ul style={{ fontSize: 12 }}>{selectedMedia.map((path) => <li key={path}><button className="pv-copy" onClick={() => toggleMedia(path)} title="移除素材">×</button> {path.split('/').pop()}</li>)}</ul>}
       {showPicker && <div className="media-grid">
-        {!mediaFiles.length && <p className="dash-empty">内容库暂无图片或视频，可先导出文案。</p>}
+        {!mediaFiles.length && <p className="dash-empty">素材源暂无图片或视频，可先导出文案。</p>}
         {mediaFiles.slice(0, 80).map((f) => <button type="button" key={f.path} className={`media-cell ${selectedMedia.includes(f.path) ? 'sel' : ''}`} onClick={() => toggleMedia(f.path)} title={f.path}>
           {f.kind === 'image' ? <img src={mediaUrl(f.path)} alt={f.name} loading="lazy" /> : <span className="media-vid">视频 · {f.name}</span>}
           {selectedMedia.includes(f.path) && <span className="media-check">✓</span>}

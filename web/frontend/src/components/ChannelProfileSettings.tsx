@@ -3,6 +3,7 @@ import { AI_KINDS, AI_LABELS, SettingsInputError, loadLocalProfile, parsePrefere
   saveAiPreference, saveAiPreferences, saveLocalProfile } from '../lib/channelSettingsApi';
 import type { AiKind, AiPreference, LocalProfile } from '../lib/channelSettingsApi';
 import type { ChannelDocument } from '../lib/channelsApi';
+import { aiPath, aiRequest, rows, text } from '../lib/aiWorkspaceApi';
 import { useChannelJob } from './channels/useChannelJob';
 
 const LOCATION_FIELDS = [
@@ -17,6 +18,12 @@ type ProfileDraft = {
 type AiDraft = { readonly model: string; readonly options: string };
 type AiDrafts = Readonly<Record<AiKind, AiDraft>>;
 const GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(16rem, 100%), 1fr))', gap: 'var(--space-3, 12px)' } as const;
+const MODEL_PATHS: Readonly<Record<AiKind, string>> = {
+  image: '/api/ai/models/image/generation',
+  edit: '/api/ai/models/image/edit',
+  video: '/api/ai/models/video/generation',
+  agent: '/api/ai/models/chat',
+};
 
 function profileDraft(profile: LocalProfile): ProfileDraft {
   const place = profile.location;
@@ -44,6 +51,9 @@ function profilePayload(draft: ProfileDraft): ChannelDocument {
 export function ChannelProfileSettings({ persona }: { readonly persona: string }) {
   const [draft, setDraft] = useState<ProfileDraft | null>(null);
   const [models, setModels] = useState<AiDrafts | null>(null);
+  const [catalogs, setCatalogs] = useState<Readonly<Record<AiKind, readonly ChannelDocument[]>>>({
+    image: [], edit: [], video: [], agent: [],
+  });
   const [message, setMessage] = useState('');
   const [section, setSection] = useState<'profile' | 'ai'>('profile');
   const { busy, error, perform } = useChannelJob();
@@ -53,6 +63,22 @@ export function ChannelProfileSettings({ persona }: { readonly persona: string }
     });
   }, [persona, perform]);
   useEffect(load, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all(AI_KINDS.map(async (kind) => {
+      const result = await aiRequest(aiPath(MODEL_PATHS[kind], persona), controller.signal);
+      return [kind, rows(result).filter((model) => model.configured !== false)] as const;
+    })).then((entries) => {
+      if (!controller.signal.aborted) {
+        const next: Record<AiKind, readonly ChannelDocument[]> = { image: [], edit: [], video: [], agent: [] };
+        for (const [kind, models] of entries) next[kind] = models;
+        setCatalogs(next);
+      }
+    }).catch(() => {
+      if (!controller.signal.aborted) setCatalogs({ image: [], edit: [], video: [], agent: [] });
+    });
+    return () => controller.abort();
+  }, [persona]);
   if (!draft || !models) return <section className="panel" aria-label="画像设置">
     <h2 className="panel-title">画像设置</h2>
     {error ? <p role="alert">{error}</p> : <p role="status">正在加载画像设置…</p>}
@@ -66,14 +92,26 @@ export function ChannelProfileSettings({ persona }: { readonly persona: string }
       setMessage(`${AI_LABELS[kind]}模型已保存`);
     });
   }
+  function chooseModel(kind: AiKind, model: string) {
+    if (!models) return;
+    setModels({
+      ...models,
+      [kind]: {
+        model,
+        options: '{}',
+      },
+    });
+    setMessage('');
+  }
   const feedback = <>{error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     {busy && <p className="pv-hint" role="status">正在保存设置…</p>}</>;
   return <>
-    <section className="panel" aria-label="画像资料">
-      <h2 className="panel-title">画像资料</h2>
+    <section className="panel" aria-label="本机账号资料">
+      <h2 className="panel-title">本机账号资料</h2>
+      <p className="pv-hint">用于平台授权、发布和 API 调用的本机资料，不修改创作画像 Markdown。</p>
       <form onSubmit={(event) => { event.preventDefault(); setMessage(''); setSection('profile');
         void perform((signal) => saveLocalProfile(persona, profilePayload(draft), signal), (value) => {
-          setDraft(profileDraft(value)); setMessage('画像资料已保存');
+          setDraft(profileDraft(value)); setMessage('本机账号资料已保存');
         }); }}>
         <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
           <div style={GRID}>
@@ -106,12 +144,15 @@ export function ChannelProfileSettings({ persona }: { readonly persona: string }
       {AI_KINDS.map((kind) => <form key={kind} onSubmit={(event) => { event.preventDefault(); setMessage(''); saveModel(kind); }}
         style={{ marginBottom: 'var(--space-5, 20px)' }}>
         <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-          <label className="field-label">{AI_LABELS[kind]}默认模型<input className="field" maxLength={200} value={models[kind].model}
-            onChange={(event) => setModels({ ...models, [kind]: { ...models[kind], model: event.target.value } })} /></label>
-          <details><summary>{AI_LABELS[kind]}高级参数 JSON</summary>
-            <textarea className="field" rows={4} spellCheck={false} aria-label={`${AI_LABELS[kind]}高级参数 JSON`} value={models[kind].options}
-              onChange={(event) => setModels({ ...models, [kind]: { ...models[kind], options: event.target.value } })} />
-          </details>
+          <label className="field-label">{AI_LABELS[kind]}默认模型
+            <select className="field" value={models[kind].model} onChange={(event) => chooseModel(kind, event.target.value)}>
+              <option value="">{catalogs[kind].length ? '选择已配置模型' : '当前没有可用模型'}</option>
+              {models[kind].model && !catalogs[kind].some((item) => text(item.name) === models[kind].model)
+                ? <option value={models[kind].model}>{models[kind].model}（当前）</option> : null}
+              {catalogs[kind].map((item) => <option key={text(item.name)} value={text(item.name)}>{text(item.name)}</option>)}
+            </select>
+          </label>
+          <p className="pv-hint">模型连接、能力和可用性在「设置 · 模型配置」中维护；画像只保存默认选择。</p>
           <button className="btn" type="submit" disabled={!models[kind].model.trim()} style={{ marginTop: 'var(--space-2, 8px)' }}>保存{AI_LABELS[kind]}模型</button>
         </fieldset>
       </form>)}

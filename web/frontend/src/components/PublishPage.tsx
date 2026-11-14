@@ -223,7 +223,7 @@ export default function PublishPage({ persona, platform, embedded = false }: Pub
     setPublishing(true);
     for (const t of targets) {
       if (!loginOf(t.key)) {
-        setPub((r) => ({ ...r, [t.key]: { status: 'fail', msg: '未登录 · 去账号页登录' } }));
+        setPub((r) => ({ ...r, [t.key]: { status: 'fail', msg: '未登录 · 去平台页登录' } }));
         continue;
       }
       if (MEDIA_REQUIRED.has(t.key) && selectedMedia.length === 0) {
@@ -231,7 +231,7 @@ export default function PublishPage({ persona, platform, embedded = false }: Pub
         continue;
       }
       if (VIDEO_ONLY.has(t.key) && !selectedMedia.some((p) => VIDEO_RE.test(p))) {
-        setPub((r) => ({ ...r, [t.key]: { status: 'fail', msg: `${t.label}只能发视频，请从内容库选一个视频` } }));
+        setPub((r) => ({ ...r, [t.key]: { status: 'fail', msg: `${t.label}只能发视频，请从素材源选一个视频` } }));
         continue;
       }
       setPub((r) => ({ ...r, [t.key]: { status: 'publishing', msg: '发布中…可能需 1-2 分钟' } }));
@@ -326,7 +326,7 @@ export default function PublishPage({ persona, platform, embedded = false }: Pub
   return (
     <div className={embedded ? 'publish-page browser-publish' : 'publish-page'}>
       <div className="publish-editor">
-        {embedded ? <h2 className="panel-title">浏览器发布</h2> : <h1 className="page-title"><IconPublish size={21} /> 发布中心</h1>}
+        {embedded ? <h2 className="panel-title">浏览器发布</h2> : <h1 className="page-title"><IconPublish size={21} /> 自动发布</h1>}
         {!embedded && <p className="page-subtitle">一次编辑 → AI 一键改写成各平台版本 → 预检 → 附媒体 → 一键真发布。</p>}
 
         <label className="field-label">标题</label>
@@ -351,7 +351,7 @@ export default function PublishPage({ persona, platform, embedded = false }: Pub
 
         <label className="field-label" style={{ marginTop: 14 }}>
           媒体附件 {selectedMedia.length > 0 && <span className="pv-badge">{selectedMedia.length} 个</span>}
-          <span style={{ color: 'var(--text-secondary)', fontWeight: 400, fontSize: 12 }}>（小红书/抖音/快手/微信视频号/B站必需，从内容库选；抖音、视频号、B站须为视频）</span>
+          <span style={{ color: 'var(--text-secondary)', fontWeight: 400, fontSize: 12 }}>（小红书/抖音/快手/微信视频号/B站必需，从素材源选；抖音、视频号、B站须为视频）</span>
         </label>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn btn-sm" onClick={() => setShowPicker((v) => !v)}>
@@ -367,7 +367,7 @@ export default function PublishPage({ persona, platform, embedded = false }: Pub
         </div>
         {showPicker && (
           <div className="media-grid">
-            {mediaFiles.length === 0 && <div className="dash-empty">内容库暂无图片/视频</div>}
+            {mediaFiles.length === 0 && <div className="dash-empty">素材源暂无图片/视频</div>}
             {mediaFiles.slice(0, 40).map((f) => (
               <div key={f.path}
                 className={`media-cell ${selectedMedia.includes(f.path) ? 'sel' : ''}`}

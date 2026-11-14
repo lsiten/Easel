@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { createCallerKey, createShortLink, deleteShortLink, loadCallerKeys, loadShortLinks,
   revokeCallerKey, SettingsInputError, shortLinkUrl } from '../lib/channelSettingsApi';
 import type { CallerKey, ShortLink } from '../lib/channelSettingsApi';
-import { ChannelProfileSettings } from './ChannelProfileSettings';
 import { ChannelAccountGroups } from './ChannelAccountGroups';
 import { useChannelJob } from './channels/useChannelJob';
 
@@ -40,7 +39,6 @@ function PersonaSettings({ persona }: { readonly persona: string }) {
   const feedback = <>{error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     {busy && ready && <p className="pv-hint" role="status">正在处理访问设置…</p>}</>;
   return <>
-    <ChannelProfileSettings persona={persona} />
     <ChannelAccountGroups persona={persona} />
     <section className="panel" aria-label="调用密钥">
       <div className="account-card-head"><h2 className="panel-title">调用密钥</h2>

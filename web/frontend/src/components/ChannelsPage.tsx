@@ -29,7 +29,8 @@ export default function ChannelsPage({ persona, onConfigureApplication }: { read
   const choices = platformConnections(browserAccounts, platforms);
   const selected = choices.find((item) => item.id === platform);
   return <div className="accounts-page platform-workbench">
-    <h1 className="page-title">平台工作台</h1>
+    <h1 className="page-title">平台</h1>
+    <p className="page-subtitle">连接账号、选择发布方式，并统一查看作品数据与任务。</p>
     {!persona ? <div className="panel">请先在侧栏选择画像，再连接平台账号。</div> : <>
       <label className="field-label" htmlFor="channel-platform">平台</label>
       <select id="channel-platform" className="field" value={platform} onChange={(event) => setPlatform(event.target.value)}>

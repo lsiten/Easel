@@ -7,7 +7,8 @@ import type {
   TrendGroup, ScheduleItem, OutputNode, AccountItem, Idea,
   AnalyticsPlatform, AccountAnalytics, AccountWhoami,
 } from '../lib/api';
-import type { Page } from './Sidebar';
+import type { Page } from '../lib/navigation';
+import { projectNodes, recommendedTrends } from '../lib/contentOrganization';
 import { getWhoamiCache, verifyStale } from '../lib/whoami';
 import {
   IconFire, IconCalendar, IconOutputs, IconChat, IconSkills, IconAccounts,
@@ -42,6 +43,7 @@ const STATUS_LABEL: Record<string, string> = { idea: '选题', draft: '草稿', 
 
 export default function DashboardPage({ persona, gatewayStatus, apiDirect, agentRuntime, onNavigate, onUseTopic }: DashboardProps) {
   const [trends, setTrends] = useState<TrendGroup[]>([]);
+  const [trendPersonalized, setTrendPersonalized] = useState(false);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [outputs, setOutputs] = useState<OutputNode[]>([]);
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
@@ -71,7 +73,10 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
   }, []);
 
   useEffect(() => {
-    fetchTrends('weibo,douyin', 6).then((d) => setTrends(d.trends)).catch(() => {});
+    fetchTrends('weibo,douyin,zhihu', 8, persona).then((d) => {
+      setTrends(d.trends);
+      setTrendPersonalized(d.personalization.enabled);
+    }).catch(() => {});
     fetchSchedule(persona).then(setSchedule).catch(() => {});
     fetchOutputs(persona).then(setOutputs).catch(() => {});
     fetchAccounts(persona).then(setAccounts).catch(() => {});
@@ -126,7 +131,9 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
   const upcoming = [...schedule]
     .filter((s) => s.date >= todayStr && s.status !== 'published')
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)).slice(0, 5);
-  const recent = outputs.slice(0, 5);
+  const projects = projectNodes(outputs);
+  const recent = projects.slice(0, 5);
+  const trendRecommendations = recommendedTrends(trends, 6, trendPersonalized);
   const pendingIdeas = ideas.filter((i) => i.status === 'pending');
   const loggedIn = accounts.filter((a) => a.loggedIn).length;
 
@@ -142,14 +149,14 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
   const stats: { label: string; value: string; page: Page; Icon: typeof IconChat }[] = [
     { label: '待做选题', value: String(pendingIdeas.length), page: 'ideas', Icon: IconIdea },
     { label: '待发排期', value: String(upcoming.length), page: 'calendar', Icon: IconCalendar },
-    { label: '内容项目', value: String(outputs.length), page: 'outputs', Icon: IconOutputs },
+    { label: '内容项目', value: String(projects.length), page: 'outputs', Icon: IconOutputs },
     { label: '已登录账号', value: `${loggedIn}/${accounts.length}`, page: 'platform', Icon: IconAccounts },
   ];
 
   return (
     <div className="page-scroll dash-page">
       <div className="dash-hero">
-        <h1 className="page-title" style={{ fontSize: 26 }}>{greet} 👋</h1>
+        <h1 className="page-title" style={{ fontSize: 26 }}>{greet}</h1>
         <p className="page-subtitle">
           {apiDirect ? (gatewayStatus === 'connected' ? '仅聊天模式已配置，可开始对话。' : '请先配置仅聊天模式的模型 API。')
             : (gatewayStatus === 'connected'
@@ -185,15 +192,14 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
             <span><IconFire size={16} /> 今日热点</span>
             <button className="dash-more" onClick={() => onNavigate('trends')}>热点雷达 →</button>
           </div>
-          {trends.length === 0 && <div className="dash-empty">热点加载中 / 需配置代理</div>}
-          {trends.map((g) => (
-            <div key={g.platform} className="dash-trend-group">
-              <div className="dash-trend-plat">{g.label}</div>
-              {g.items.slice(0, 3).map((it, i) => (
-                <div key={i} className="dash-trend-item" title={`${it.title}（点击做成内容）`}>
-                  <span className="dash-trend-title" onClick={() => onUseTopic(it.title)}>{it.title}</span>
-                </div>
-              ))}
+          {trendRecommendations.length === 0 && <div className="dash-empty">
+            {trendPersonalized ? '当前热榜暂无与画像高相关的主题，可到热点雷达查看完整榜单' : '热点加载中 / 需配置代理'}
+          </div>}
+          {trendRecommendations.map((item) => (
+            <div key={`${item.platform}:${item.title}`} className="dash-trend-item" title={`${item.title}（点击做成内容）`}>
+              <span className="dash-trend-plat">{item.platformLabel}</span>
+              <span className="dash-trend-title" onClick={() => onUseTopic(item.title)}>{item.title}</span>
+              {item.reasons?.[0] && <span className="dash-trend-reason">{item.reasons[0]}</span>}
             </div>
           ))}
         </div>
@@ -233,7 +239,7 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
         <div className="card dash-card dash-card-top">
           <div className="dash-card-head">
             <span><IconOutputs size={16} /> 最近产物</span>
-            <button className="dash-more" onClick={() => onNavigate('outputs')}>内容库 →</button>
+            <button className="dash-more" onClick={() => onNavigate('outputs')}>项目与成品 →</button>
           </div>
           {recent.length === 0 && <div className="dash-empty">还没有产物，去对话生成第一条吧</div>}
           {recent.map((g) => (
@@ -258,7 +264,7 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
             if (logged.length === 0) {
               return (
                 <div className="dash-empty" onClick={() => onNavigate('platform')} style={{ cursor: 'pointer' }}>
-                  去账号页登录后，这里看各平台粉丝 / 获赞 / 关注、增长趋势与最新笔记 →
+                  去平台页登录后，这里看各平台粉丝 / 获赞 / 关注、增长趋势与最新笔记 →
                 </div>
               );
             }
@@ -283,7 +289,7 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
                 )}
                 {d && d !== 'loading' && d !== 'error' && (!d.loggedIn ? (
                   <div className="dash-empty" onClick={() => onNavigate('platform')} style={{ cursor: 'pointer' }}>
-                    该平台登录态已失效，去账号页重登 →
+                    该平台登录态已失效，去平台页重登 →
                   </div>
                 ) : (
                   <div className="ana-body">

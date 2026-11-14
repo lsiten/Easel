@@ -84,7 +84,7 @@ export function ChannelPublish({ scope, spec }: { readonly scope: ChannelScope; 
     <textarea id="channel-body" className="field" rows={7} value={body} disabled={!!busy}
       onChange={(event) => { setBody(event.target.value); invalidate(); }} />
     <fieldset style={{ border: 0, padding: 0, margin: 0 }}><legend className="field-label">当前画像的媒体</legend>
-      {!files.length && <p className="pv-hint">内容库中暂无图片或视频，可在内容标签上传或导入。</p>}
+      {!files.length && <p className="pv-hint">素材源中暂无图片或视频，可在内容模块上传或导入。</p>}
       <div style={{ maxHeight: '14rem', overflow: 'auto' }}>{files.map((file) => <label key={file.path} className="field-label" style={{ overflowWrap: 'anywhere' }}>
         <input type="checkbox" checked={selected.includes(file.path)} disabled={!!busy} onChange={(event) => {
           setSelected((old) => event.target.checked ? [...old, file.path] : old.filter((path) => path !== file.path)); invalidate();

@@ -430,7 +430,7 @@ export default function AccountsPage({ persona, platform: onlyPlatform, embedded
     <div className={embedded ? 'browser-connection' : 'accounts-page'}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <div>
-          {embedded ? <h2 className="panel-title">浏览器账号</h2> : <h1 className="page-title">账号登录 Accounts</h1>}
+          {embedded ? <h2 className="panel-title">浏览器账号</h2> : <h1 className="page-title">平台账号</h1>}
           {!embedded && <p className="page-subtitle">
             用手机 App 扫码登录，登录态本地持久化，之后发布免登。<br />
             ⚠️ 平台可能对机房/代理 IP 判风险导致二维码弹不出，需干净/家宽 IP，或在正常网络登录后拷贝登录态目录。

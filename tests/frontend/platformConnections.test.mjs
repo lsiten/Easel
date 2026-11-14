@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, afterEach } from 'node:test';
-import { platformConnections, preferredConnection } from '../../web/frontend/src/lib/platformConnections.ts';
+import { browserPlatformFor, platformConnections, preferredConnection } from '../../web/frontend/src/lib/platformConnections.ts';
 import { loadPublishDraft, savePublishDraft } from '../../web/frontend/src/lib/store.ts';
 
 const browser = { platform: 'xiaohongshu', name: '小红书', backend: 'xhs', supported: true, loggedIn: true, note: '' };
@@ -16,6 +16,8 @@ test('an existing browser login is usable when the application has no configurat
 });
 
 test('API-only and browser-only platforms retain their usable connection choice', () => {
+  assert.equal(browserPlatformFor('rednote-link'), 'xiaohongshu');
+  assert.equal(browserPlatformFor('zhihu'), 'zhihu');
   const rows = platformConnections([{ ...browser, platform: 'zhihu', name: '知乎' }], [{ ...application, platform: 'youtube', configured: true }]);
   assert.equal(preferredConnection(rows.find(row => row.id === 'zhihu')), 'browser');
   assert.equal(preferredConnection(rows.find(row => row.id === 'youtube')), 'application');
