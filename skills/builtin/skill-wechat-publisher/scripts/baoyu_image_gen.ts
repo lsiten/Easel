@@ -33,8 +33,8 @@ Options:
   -h, --help                     Show help
 
 Environment:
-  OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_IMAGE_MODEL
-  GEMINI_PROXY_API_KEY / GEMINI_PROXY_BASE_URL / GEMINI_PROXY_IMAGE_MODEL`);
+  IMG_API_KEY / IMG_BASE_URL / IMG_MODEL / IMG_PROVIDER
+  （由 Easel「设置 → 模型配置 → 生图」统一提供）`);
 }
 
 function parseArgs(argv: string[]): CliArgs {

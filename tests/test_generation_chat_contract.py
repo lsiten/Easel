@@ -38,6 +38,10 @@ def surface(tmp_path, request):
             self.end_headers()
             if text == 'reject':
                 self.wfile.write(b'{"error":"SECRET-token"}')
+            elif self.path.endswith('/messages') and not body['stream']:
+                result = {'content': [{'type': 'text', 'text': 'claude-answer'}],
+                          'usage': {'input_tokens': 8, 'output_tokens': 3}}
+                self.wfile.write(json.dumps(result).encode())
             elif not body['stream']:
                 result = {'choices': [{'message': {'content': inline if text == 'image' else 'answer'}}],
                           'usage': {'prompt_tokens': 8, 'completion_tokens': 3, 'total_tokens': 11}}
@@ -57,7 +61,8 @@ def surface(tmp_path, request):
     thread.start()
     settings = {'EASEL_DIRECT_API_BASE_URL': f'http://127.0.0.1:{server.server_port}/v1',
                 'EASEL_DIRECT_API_MODEL': 'test-model', 'EASEL_DIRECT_API_KEY': getattr(request, 'param', 'SECRET-token'),
-                'ANTHROPIC_BASE_URL': f'http://127.0.0.1:{server.server_port}/v1', 'ANTHROPIC_MODEL': 'claude-test'}
+                'ANTHROPIC_BASE_URL': f'http://127.0.0.1:{server.server_port}/v1', 'ANTHROPIC_MODEL': 'claude-test',
+                'ANTHROPIC_API_KEY': 'anthropic-test-key'}
     store = GenerationStore(tmp_path)
     app = FastAPI()
 
@@ -92,6 +97,21 @@ def test_local_provider_without_key_uses_valid_http_headers(surface):
     response = client.post('/api/ai/chat', json=payload())
     assert response.status_code == 200 and response.json()['content'] == 'answer'
     assert len(calls) == 1
+
+
+def test_anthropic_completion_reuses_chat_channel_for_structured_tasks(surface):
+    client, _, calls, _ = surface
+    request = payload(model='claude-test', key='claude-completion')
+    request['messages'] = [
+        {'role': 'system', 'content': 'Return JSON.'},
+        {'role': 'user', 'content': 'Draft this.'},
+    ]
+    response = client.post('/api/ai/chat', json=request)
+    assert response.status_code == 200
+    assert response.json()['content'] == 'claude-answer'
+    assert calls[-1]['system'] == 'Return JSON.'
+    assert calls[-1]['messages'] == [{'role': 'user', 'content': 'Draft this.'}]
+    assert calls[-1]['stream'] is False
 
 
 def test_completion_options_usage_and_idempotent_history(surface):

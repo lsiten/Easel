@@ -20,7 +20,7 @@ layer: publish
 | 公众号发草稿（`publish.py --official-api` → 官方 HTTP API，回退） | ✅ 可跑 | `wechat-publisher.yaml` 的 `app_id`/`app_secret` + 出口 IP 加进公众号 IP 白名单 |
 | 反 AI 检测（`ai_score.py`） | ✅ 可跑 | 纯本地，无外部依赖 |
 | MD→公众号排版（`html_converter.py`） | ✅ 可跑 | 纯本地 |
-| 生成配图 | 按实际能力选择 | 系统生图 API 优先；未配置时按 `ai-image-gen` 使用底座可用的生图工具 |
+| 生成配图 | 按实际能力选择 | 统一读取 Easel「设置 → 模型配置 → 生图」的 `IMG_*` 通道；未配置时按 `ai-image-gen` 使用底座可用的生图工具 |
 | 多平台同步（`multi_publish.py`，阶段七） | ❌ 当前不可用 | 需浏览器 + Wechatsync Chrome 扩展 |
 
 核心链路（写作→排版→反 AI 检测→发草稿）的 Markdown / HTML 入口默认复用已扫码的公众号后台会话，不要求 `wechat-publisher.yaml` 或 `app_id`/`app_secret`；仅显式选择 `--official-api` 时需要官方 API 凭证。配图统一先按 [ai-image-gen](../ai-image-gen/SKILL.md) 检查系统配置，未配置且底座有生图工具时直接使用；两者均不可用时再说明限制并选择替代素材，多平台同步默认不启用。
@@ -76,7 +76,7 @@ python3 skills/builtin/skill-wechat-publisher/scripts/wechat_api.py list-account
 独立 pass，不与阶段三混。对骨架稿逐段过 **9 条强制清单**（Burstiness / 句式多样性 / AI 高频词黑名单 / 开头破冰 / 人称立场 / 事实密度 / 标点多样性 / 结构不完美 / 按账号 voice 过滤）。每条阈值、完整禁用词表、改写示例**必须逐条对照** [references/anti-ai-checklist.md](references/anti-ai-checklist.md)。
 
 ### 阶段四：生成配图（系统 API 或底座工具）
-默认风格 `hand-drawn-blue`；有具体数字/对比→用 `infographic-*`，金句大字→用 `marker-*`；图内需一字不差的文字→改走**排版卡 typeset-card**（HTML/CSS → 无头 Chrome 2× 截图）。风格选择、共享视觉原则见 [references/image-styles-guide.md](references/image-styles-guide.md)；排版卡设计系统见 [references/typeset-card.md](references/typeset-card.md)。一篇 6-10 张，统一一种风格。系统生图配置及底座回退按 `ai-image-gen` 执行；显式使用本技能脚本 `scripts/generate_image.py` 时需其图像 API 配置。底座生成的图片落盘后同样用 `scripts/image_handler.py upload` 上传。
+默认风格 `hand-drawn-blue`；有具体数字/对比→用 `infographic-*`，金句大字→用 `marker-*`；图内需一字不差的文字→改走**排版卡 typeset-card**（HTML/CSS → 无头 Chrome 2× 截图）。风格选择、共享视觉原则见 [references/image-styles-guide.md](references/image-styles-guide.md)；排版卡设计系统见 [references/typeset-card.md](references/typeset-card.md)。一篇 6-10 张，统一一种风格。模型、地址和密钥只从 Easel 的 image 通道读取；`wechat-publisher.yaml` 不再保存模型凭据。底座生成的图片落盘后同样用 `scripts/image_handler.py upload` 上传。
 
 ### 阶段五：格式转换与排版
 ```bash
@@ -117,7 +117,7 @@ python3 skills/builtin/skill-wechat-publisher/scripts/publish.py --account main 
 | 脚本 | 用途 |
 |---|---|
 | `publish.py` | 完整发布（一键，含 AI 味 gate），支持 `--type news\|newspic` |
-| `generate_image.py` | 统一生图入口（需图像 API key） |
+| `generate_image.py` | 统一生图入口（复用 Easel image 通道） |
 | `newspic_build.py` | 贴图拆卡器（brief.md → card_plan.json） |
 | `wechat_api.py` | facade —— 重导出下述模块 + CLI |
 | `config.py` | （内部）yaml + 配图风格加载 / `set_account` / `get_config` |

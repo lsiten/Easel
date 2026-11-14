@@ -7,7 +7,7 @@ from easel.generation_agent_models import AgentEvent, AgentRun, AgentSnapshot, C
 from easel.generation_models import GenerationError
 from easel.publish_recovery import worker_owner
 from web.generation_agent_bridge import INTERNAL_AGENT_CHAT, service
-from web import app as server
+from web.server_binding import server
 
 
 def observe_chat(req: server.ChatRequest, runtime: str) -> AgentRun | None:

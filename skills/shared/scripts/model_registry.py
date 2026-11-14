@@ -24,26 +24,41 @@ def _key(env: str, label: str, *, required: bool = True, secret: bool = True,
 MODEL_GROUPS: dict[str, dict[str, Any]] = {
     "image": {
         "label": "AI 生图",
-        "settings": [],
-        "providers": [{
-            "id": "openai",
-            "name": "OpenAI 兼容 / apimart / 小红书 MaaS",
-            "keys": [
-                _key("IMG_API_KEY", "API Key", aliases=("OPENAI_API_KEY", "API_KEY")),
-                _key("IMG_BASE_URL", "API 根地址", secret=False,
-                     aliases=("OPENAI_BASE_URL", "OPENAI_API_BASE", "BASE_URL")),
-                _key("IMG_MODEL", "模型", required=False, secret=False),
-                _key("IMG_API_KEY_HEADER", "鉴权头名", required=False, secret=False),
-                _key("IMG_API_VERSION", "api-version", required=False, secret=False),
-                _key("IMG_NO_PROXY", "内网直连（填 1）", required=False, secret=False),
-            ],
-        }],
+        "settings": [
+            _key("IMG_PROVIDER", "默认生图 provider", required=False, secret=False,
+                 choices=("openai", "agnes", "gemini")),
+        ],
+        "providers": [
+            {
+                "id": "openai",
+                "name": "OpenAI 兼容 / apimart / 小红书 MaaS",
+                "keys": [
+                    _key("IMG_API_KEY", "API Key", aliases=("OPENAI_API_KEY", "API_KEY")),
+                    _key("IMG_BASE_URL", "API 根地址", secret=False,
+                         aliases=("OPENAI_BASE_URL", "OPENAI_API_BASE", "BASE_URL")),
+                    _key("IMG_MODEL", "模型", required=False, secret=False),
+                    _key("IMG_API_KEY_HEADER", "鉴权头名", required=False, secret=False),
+                    _key("IMG_API_VERSION", "api-version", required=False, secret=False),
+                    _key("IMG_NO_PROXY", "内网直连（填 1）", required=False, secret=False),
+                ],
+            },
+            {
+                "id": "gemini",
+                "name": "Google Gemini 原生生图",
+                "keys": [
+                    _key("GEMINI_API_KEY", "Gemini API Key",
+                         aliases=("GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY")),
+                    _key("GEMINI_BASE_URL", "根地址", required=False, secret=False),
+                    _key("GEMINI_IMAGE_MODEL", "生图模型", required=False, secret=False),
+                ],
+            },
+        ],
     },
     "video": {
         "label": "AI 视频生成",
         "settings": [
             _key("VIDEO_PROVIDER", "默认视频 provider", required=False, secret=False,
-                 choices=("dashscope", "ark", "kling", "openai-compatible", "xhs-maas", "agnes")),
+                 choices=("dashscope", "ark", "kling", "openai-compatible", "xhs-maas", "agnes", "grok", "relay")),
             _key("VIDEO_CAPABILITIES_JSON", "模型能力覆盖 JSON", required=False, secret=False),
         ],
         "providers": [
@@ -96,6 +111,20 @@ MODEL_GROUPS: dict[str, dict[str, Any]] = {
                     _key("AGNES_POLL_BASE", "轮询端点", required=False, secret=False),
                     _key("AGNES_MODEL", "视频模型", required=False, secret=False),
                     _key("AGNES_SIZE", "分辨率", required=False, secret=False),
+                ],
+            },
+            {
+                "id": "grok", "name": "Grok Video", "keys": [
+                    _key("GROK_API_KEY", "API Key"),
+                    _key("GROK_BASE_URL", "根地址", required=False, secret=False),
+                    _key("GROK_VIDEO_MODEL", "视频模型", required=False, secret=False),
+                ],
+            },
+            {
+                "id": "relay", "name": "中继 / Relay Video", "keys": [
+                    _key("RELAY_API_KEY", "API Key"),
+                    _key("RELAY_BASE_URL", "根地址", required=False, secret=False),
+                    _key("RELAY_VIDEO_MODEL", "视频模型", required=False, secret=False),
                 ],
             },
         ],
@@ -181,6 +210,31 @@ MODEL_GROUPS: dict[str, dict[str, Any]] = {
     },
 }
 
+# Web 生成器使用能力名称，环境注册表使用服务适配器名称。这里只做一层稳定映射，
+# 不复制 provider 配置；模型、密钥和地址仍全部来自 MODEL_GROUPS 的同一条记录。
+MODEL_PROVIDER_ALIASES: dict[str, dict[str, str]] = {
+    "image": {
+        "openai": "openai",
+        "new-api": "openai",
+        "agnes": "openai",
+        "gemini": "gemini",
+    },
+    "video": {
+        "openai": "openai-compatible",
+        "volcengine": "ark",
+        "grok": "grok",
+        "dashscope": "dashscope",
+        "relay": "relay",
+    },
+}
+
+DEFAULT_PROVIDER_ENV = {
+    "image": "IMG_PROVIDER",
+    "video": "VIDEO_PROVIDER",
+    "music": "MUSIC_PROVIDER",
+    "voice": "VOICE_PROVIDER",
+}
+
 
 def model_group(name: str) -> dict[str, Any]:
     return MODEL_GROUPS[name]
@@ -241,12 +295,59 @@ def _configured_value(key: dict[str, Any], env: dict[str, str]) -> str:
     return ""
 
 
+def provider_configured(provider: dict[str, Any], env: dict[str, str]) -> bool:
+    """Whether a provider's required credentials are present and usable."""
+    return all(_configured_value(key, env) for key in provider["keys"] if key["required"])
+
+
+def provider_catalog(group: str, env: dict[str, str], preferred: str = "") -> list[dict[str, Any]]:
+    """Return provider availability in execution order.
+
+    Configured providers come first. A configured explicit default is first,
+    then the remaining providers keep their registry order. Unconfigured rows
+    follow so the settings UI can still explain what is missing without ever
+    routing work to them.
+    """
+    preferred = preferred or env.get(DEFAULT_PROVIDER_ENV.get(group, ""), "").strip()
+    providers = MODEL_GROUPS[group]["providers"]
+    rows = [
+        {
+            "id": provider["id"],
+            "name": provider["name"],
+            "configured": provider_configured(provider, env),
+            "declaredOrder": index + 1,
+        }
+        for index, provider in enumerate(providers)
+    ]
+    configured = [row for row in rows if row["configured"]]
+    if preferred:
+        configured.sort(key=lambda row: (row["id"] != preferred, row["declaredOrder"]))
+    configured.extend(row for row in rows if not row["configured"])
+    return [
+        {**row, "order": index + 1}
+        for index, row in enumerate(configured)
+    ]
+
+
+def routed_provider_ids(group: str, env: dict[str, str], preferred: str = "") -> tuple[str, ...]:
+    return tuple(row["id"] for row in provider_catalog(group, env, preferred))
+
+
+def resolve_provider(group: str, env: dict[str, str], preferred: str = "") -> str:
+    """Choose the first usable provider, preserving the configured order."""
+    return next((row["id"] for row in provider_catalog(group, env, preferred) if row["configured"]), "")
+
+
+def provider_for_model_channel(group: str, channel: str) -> str:
+    """Map a generation channel to its owning provider row."""
+    return MODEL_PROVIDER_ALIASES.get(group, {}).get(channel, channel)
+
+
 def configured_providers(group: str, env: dict[str, str]) -> list[dict[str, Any]]:
     """Return usable providers and non-secret model names without exposing credentials."""
     configured = []
     for provider in MODEL_GROUPS[group]["providers"]:
-        required = [key for key in provider["keys"] if key["required"]]
-        if not all(_configured_value(key, env) for key in required):
+        if not provider_configured(provider, env):
             continue
         models = {
             key["env"]: _configured_value(key, env)

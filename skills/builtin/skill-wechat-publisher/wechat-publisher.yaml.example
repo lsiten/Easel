@@ -32,18 +32,8 @@ accounts:
 image_generation:
   # 默认 baoyu-image-gen; 如需使用 Web 登录版 Gemini,改为 baoyu-danger-gemini-web
   generator: "baoyu-image-gen"
-
-  # baoyu-image-gen / provider=openai
-  openai:
-    api_key: "sk-..."
-    base_url: "https://api.openai.com/v1"
-    image_model: "gpt-image-1"
-
-  # baoyu-image-gen / provider=gemini-proxy
-  gemini_proxy:
-    base_url: "https://generativelanguage.googleapis.com"
-    api_key: "AIza..."
-    image_model: "gemini-2.5-flash"
+  # 模型、Base URL 和 API Key 不在此处配置；统一使用 Easel
+  # 「设置 → 模型配置 → 生图」中的 IMG_* 通道配置。
 
   # baoyu-danger-gemini-web
   gemini_web:

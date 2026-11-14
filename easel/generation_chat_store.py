@@ -27,7 +27,7 @@ class ChatStore:
 
             install_metrics(db, CHAT_QUEUE)
 
-    def replay(self, request: ChatRequest, operation: Literal['completion', 'stream', 'claude']) -> ChatRecord | None:
+    def replay(self, request: ChatRequest, operation: Literal['completion', 'stream', 'claude', 'claude_completion']) -> ChatRecord | None:
         """Check the original intent before consulting mutable config or source files."""
         digest = hashlib.sha256((operation + request.model_dump_json()).encode()).hexdigest()
         with self.base.connect() as db:
@@ -39,7 +39,7 @@ class ChatStore:
             raise GenerationError('chat_request_conflict', 409)
         return ChatRecord.model_validate_json(row['body'])
 
-    def claim(self, request: ChatRequest, channel: str, operation: Literal['completion', 'stream', 'claude']) -> tuple[ChatRecord, bool]:
+    def claim(self, request: ChatRequest, channel: str, operation: Literal['completion', 'stream', 'claude', 'claude_completion']) -> tuple[ChatRecord, bool]:
         digest = hashlib.sha256((operation + request.model_dump_json()).encode()).hexdigest()
         with self.base.connect() as db:
             db.execute('BEGIN IMMEDIATE')

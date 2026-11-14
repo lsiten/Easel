@@ -6,10 +6,8 @@
   让「无视觉执行者」升级为「能自检的执行者」。
 
 配置（进程环境变量优先；否则在当前目录向上逐层找 .env）：
-  VISION_BASE_URL ← OPENAI_BASE_URL / OPENAI_API_BASE / BASE_URL
-  VISION_API_KEY  ← OPENAI_API_KEY / API_KEY
-  VISION_MODEL    ← OPENAI_VISION_MODEL / OPENAI_MODEL / 默认 deepseek-chat
-  VISION_TIMEOUT  ← 默认 60（秒）
+  优先复用「对话与脚本」通道：EASEL_DIRECT_API_BASE_URL / API_KEY / MODEL。
+  兼容旧配置 VISION_BASE_URL / VISION_API_KEY / VISION_MODEL 及 OPENAI_* 别名。
 
 子命令：
   describe --image PATH [--image PATH ...] [--question "..."] [--max-tokens N] [--json]
@@ -64,9 +62,11 @@ def cfg() -> dict:
         return default
 
     return {
-        "base": (get("VISION_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE", "BASE_URL") or "").rstrip("/"),
-        "key": get("VISION_API_KEY", "OPENAI_API_KEY", "API_KEY") or "",
-        "model": get("VISION_MODEL", "OPENAI_VISION_MODEL", "OPENAI_MODEL", default=DEFAULT_MODEL),
+        "base": (get("EASEL_DIRECT_API_BASE_URL", "VISION_BASE_URL", "OPENAI_BASE_URL",
+                     "OPENAI_API_BASE", "BASE_URL") or "").rstrip("/"),
+        "key": get("EASEL_DIRECT_API_KEY", "VISION_API_KEY", "OPENAI_API_KEY", "API_KEY") or "",
+        "model": get("EASEL_DIRECT_API_MODEL", "VISION_MODEL", "OPENAI_VISION_MODEL",
+                     "OPENAI_MODEL", default=DEFAULT_MODEL),
         "timeout": int(get("VISION_TIMEOUT", default="60")),
     }
 
@@ -81,7 +81,7 @@ def cmd_check() -> int:
     print(f"端点   : {c['base'] or '(缺)'}")
     print(f"Key    : {mask(c['key']) if c['key'] else '(缺)'}")
     if not c["base"] or not c["key"]:
-        print("结果   : 配置缺失（需要 VISION_BASE_URL 与 VISION_API_KEY，或其别名 OPENAI_*）")
+        print("结果   : 配置缺失（请先在同一对话通道配置支持图片输入的模型）")
         return 2
     print("结果   : 就绪（check 不联网；可用 describe 实测）")
     return 0
@@ -102,7 +102,7 @@ def encode_image(path: Path) -> tuple[str, str]:
 def cmd_describe(a) -> int:
     c = cfg()
     if not c["base"] or not c["key"]:
-        print("配置缺失：需要 VISION_BASE_URL 与 VISION_API_KEY（或其别名 OPENAI_*）", file=sys.stderr)
+        print("配置缺失：请先在同一对话通道配置支持图片输入的模型", file=sys.stderr)
         return 2
     content = [{"type": "text", "text": a.question}]
     for p in a.image:

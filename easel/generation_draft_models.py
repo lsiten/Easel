@@ -180,6 +180,7 @@ class DraftModelPrice(GenerationModel):
 
 class DraftPricing(GenerationModel):
     imageModels: tuple[DraftModelPrice, ...]
+    imageEditModels: tuple[DraftModelPrice, ...] = ()
     videoModels: tuple[DraftModelPrice, ...]
 
 

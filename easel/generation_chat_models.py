@@ -39,7 +39,7 @@ class ChatRecord(BaseModel):
     state: Literal['running', 'succeeded', 'failed', 'unknown'] = 'running'
     channel: str
     request_model: str
-    operation: Literal['completion', 'stream', 'claude']
+    operation: Literal['completion', 'stream', 'claude', 'claude_completion']
     created_at: float
     updated_at: float
     request: dict[str, JsonValue] = Field(default_factory=dict)
@@ -60,3 +60,4 @@ class ChatModel(BaseModel):
     inputModalities: tuple[str, ...] = ()
     outputModalities: tuple[str, ...] = ()
     runtime_model: str = Field(default='', exclude=True)
+    configured: bool = True

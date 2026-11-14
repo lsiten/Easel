@@ -35,6 +35,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from model_registry import resolve_provider as resolve_configured_provider
+
 # ── 常用中文音色（名称 → 简介）───────────────────────────────────────
 # edge-tts --list-voices 里 zh- 开头的一批，挑最常用、素质好的列出。
 COMMON_ZH_VOICES: list[tuple[str, str]] = [
@@ -196,16 +198,17 @@ def _transcode(src: Path, dst: Path, fmt: str) -> None:
 
 
 # ── 闭源口播（好嗓子，优先）────────────────────────────────────────
-# tts-voiceover 及所有用它的视频 SKILL(auto-short-video/paper-explainer…)的旁白，配了 VOICE_PROVIDER
-# 就默认走闭源云 TTS(voice_clone.py，有情感、像真人)，edge 仅无 key 时兜底——避免"AI 味/生硬"。
+# tts-voiceover 及所有用它的视频 SKILL(auto-short-video/paper-explainer…)的旁白，
+# 只要 voice 通道有可用 provider 就默认走闭源云 TTS，edge 仅无可用配置时兜底。
 
 class ClosedTTSError(Exception):
     """闭源 TTS 合成失败（用于 auto 模式回退 edge）。"""
 
 
 def _closed_provider() -> str | None:
-    p = (os.environ.get("VOICE_PROVIDER") or "").strip()
-    return p or None
+    provider = resolve_configured_provider("voice", dict(os.environ),
+                                           (os.environ.get("VOICE_PROVIDER") or "").strip())
+    return provider or None
 
 
 def _closed_voice_id(voice: str | None) -> str | None:
@@ -264,7 +267,7 @@ def _run_closed(text: str, out: Path, fmt: str, subtitle: Path | None, voice: st
     """闭源云 TTS 口播：按句 voice_clone 合成 → 拼接 → 按各句真实时长写分句 SRT。失败抛 ClosedTTSError。"""
     provider = _closed_provider()
     if not provider:
-        raise ClosedTTSError("未配置 VOICE_PROVIDER")
+        raise ClosedTTSError("没有可用的语音 provider；请先补全配音通道配置")
     vc = Path(__file__).resolve().parent / "voice_clone.py"
     vid = _closed_voice_id(voice)
     sents = _split_sentences(text) or [text.strip()]
@@ -311,7 +314,7 @@ def cmd_speak(args) -> int:
     if subtitle:
         subtitle.parent.mkdir(parents=True, exist_ok=True)
 
-    # 闭源优先：配了 VOICE_PROVIDER(或 --engine closed) → 走闭源云 TTS(好嗓子)，edge 仅兜底。
+    # 闭源优先：voice 通道有可用 provider（或 --engine closed）→ 走闭源云 TTS，edge 仅兜底。
     engine = getattr(args, "engine", "auto")
     use_closed = engine == "closed" or (engine == "auto" and _closed_provider())
     if use_closed:
@@ -325,7 +328,7 @@ def cmd_speak(args) -> int:
             return 0
         except ClosedTTSError as e:
             if engine == "closed":
-                _die(f"闭源配音失败：{e}\n（确认 VOICE_PROVIDER/VOICE_API_KEY/voice-id；或用 --engine edge）", code=4)
+                _die(f"闭源配音失败：{e}\n（检查配音通道的 provider/API Key/voice-id；或用 --engine edge）", code=4)
             print(f"⚠️ 闭源配音失败（{e}）→ 回退 edge-tts（AI 味，仅兜底）。", file=sys.stderr)
 
     # edge-tts 原生出 mp3；非 mp3 时先合成临时 mp3 再转码。
@@ -435,7 +438,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-v", "--voice", default=DEFAULT_VOICE,
                    help=f"音色（edge 传音色名；闭源传 voice-id 如 FunAudioLLM/CosyVoice2-0.5B:alex）")
     p.add_argument("--engine", choices=["auto", "closed", "edge"], default="auto",
-                   help="配音引擎：auto=配了 VOICE_PROVIDER 走闭源(好嗓子)否则 edge；closed=强制闭源；edge=强制 edge(AI 味)")
+                   help="配音引擎：auto=有可用配音 provider 走闭源，否则 edge；closed=强制闭源；edge=强制 edge(AI 味)")
     p.add_argument("--rate", help="语速，如 +10%% / -20%%")
     p.add_argument("--volume", help="音量，如 +20%% / -10%%")
     p.add_argument("--pitch", help="音调，如 +2Hz / -5Hz")

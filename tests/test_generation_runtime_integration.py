@@ -156,18 +156,35 @@ def test_generation_admin_settings_save_mask_secrets_and_guard_access(runtime, m
     for name in ('GROK_API_KEY', 'GROK_BASE_URL', 'EASEL_DRAFT_MODEL_RATES'):
         monkeypatch.delenv(name, raising=False)
     secret = 'config-test-private-value'
-    result = client.post('/api/generation-settings', json={'values': {'GROK_API_KEY': secret,
-        'GROK_BASE_URL': 'https://provider.example/v1',
-        'EASEL_DRAFT_MODEL_RATES': '{"video":[{"amount":0.02,"currency":"USD","unit":"second"}]}'}})
+    result = client.post('/api/settings/models/save', json={'channel': 'video', 'rows': [{
+        'slot': 'grok', 'model': 'grok-video', 'baseUrl': 'https://provider.example/v1',
+        'key': secret, 'primary': True}]})
     assert result.status_code == 200, result.text
-    field = next(item for item in result.json()['fields'] if item['name'] == 'GROK_API_KEY')
-    assert field['configured'] is True and field['value'] == '' and secret not in result.text
+    assert secret not in result.text
     assert web.read_settings(web.ENV_FILE)['GROK_API_KEY'] == secret
+    rates = client.post('/api/generation-settings', json={'values': {
+        'EASEL_DRAFT_MODEL_RATES': '{"video":[{"amount":0.02,"currency":"USD","unit":"second"}]}'}})
+    assert rates.status_code == 200
+    fields = {field['name']: field for field in rates.json()['fields']}
+    assert fields['VOLCENGINE_ACCESS_KEY_ID']['required'] is True
+    assert fields['VOLCENGINE_ACCESS_KEY_ID']['section'] == '智能视频 / VOD'
+    assert 'Seedance' in fields['VOLCENGINE_ACCESS_KEY_ID']['description']
+    assert fields['VOLCENGINE_REGION']['configured'] is True
+    assert fields['VOLCENGINE_REGION']['value'] == 'cn-north-1'
+    assert '公网 HTTPS' in fields['EASEL_CHANNEL_MEDIA_BASE_URL']['description']
+    transcript = client.post('/api/settings/models/save', json={'channel': 'transcribe', 'rows': [{
+        'slot': 'siliconflow', 'model': 'XingChenAGI/XingChenGSR-V2',
+        'baseUrl': 'https://api.siliconflow.cn/v1', 'key': ''}]})
+    assert transcript.status_code == 200, transcript.text
+    assert web.read_settings(web.ENV_FILE)['SILICONFLOW_ASR_MODEL'] == 'XingChenAGI/XingChenGSR-V2'
     invalid = client.post('/api/generation-settings', json={'values': {'GROK_API_KEY': {'private': secret}}})
     assert invalid.status_code == 422 and secret not in invalid.text
+    assert client.post('/api/generation-settings', json={'values': {'GROK_API_KEY': secret}}).status_code == 400
     assert client.post('/api/generation-settings', json={'values': {'EASEL_DRAFT_MODEL_RATES': '{"video":[] invalid}'}}).status_code == 400
-    assert client.post('/api/generation-settings', json={'values': {'GROK_BASE_URL': 'https://user:secret@example.com/'}}).status_code == 400
     monkeypatch.setenv('GROK_API_KEY', 'process-owned-test-value')
-    assert client.post('/api/generation-settings', json={'values': {'GROK_API_KEY': 'replacement'}}).status_code == 409
+    locked = client.post('/api/settings/models/save', json={'channel': 'video', 'rows': [{
+        'slot': 'grok', 'model': 'grok-video', 'baseUrl': 'https://provider.example/v1',
+        'key': 'replacement', 'primary': True}]})
+    assert locked.status_code == 409
     key = AccessStore(outputs / '_access').create_key('alice', 'writer', 'write')['key']
     assert client.get('/api/generation-settings', headers={'x-easel-api-key': key}).status_code == 403

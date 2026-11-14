@@ -690,13 +690,13 @@ def main() -> int:
     if a.cmd == "cast":
         cf = _cast_file(a.root, a.series)
         if a.castcmd == "init":
-            r = mv.cast_init(cf, a.series, narrator_provider=os.environ.get("VOICE_PROVIDER"))
+            r = mv.cast_init(cf, a.series, narrator_provider=mv.configured_voice_provider())
             print(f"✅ {r['path']}" + ("（新建）" if r["created"] else "（已存在，未覆盖）"))
         elif a.castcmd == "add":
             # 闭源优先：engine=clone 但没写 provider 时，取环境变量 VOICE_PROVIDER（.env 里配的闭源默认）
             provider = a.provider
             if a.engine == "clone" and not provider:
-                provider = os.environ.get("VOICE_PROVIDER", "").strip() or None
+                provider = mv.configured_voice_provider()
             e = mv.cast_add(cf, {"name": a.name, "role": a.role, "engine": a.engine,
                                  "voice": a.voice or None, "rate": a.rate, "pitch": a.pitch,
                                  "volume": a.volume, "provider": provider,

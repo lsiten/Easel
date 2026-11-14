@@ -64,14 +64,15 @@ def test_unified_config_reads_wechat_publisher_yaml(tmp_path, monkeypatch):
     assert cfg["image_generator"] == "baoyu-danger-gemini-web"
 
 
-def test_load_env_reads_unified_image_and_integration_config(tmp_path, monkeypatch):
-    """load_env() should export unified YAML settings as process env fallbacks."""
+def test_load_env_keeps_image_provider_config_out_of_yaml(tmp_path, monkeypatch):
+    """YAML may keep legacy fields, but model credentials come only from the image channel."""
     import config
 
     # load_env writes directly, including keys absent before this test.
     monkeypatch.setattr(config.os, "environ", dict(config.os.environ))
     for key in (
         "WECHATSYNC_MCP_TOKEN",
+        "IMG_API_KEY",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
         "OPENAI_IMAGE_MODEL",
@@ -81,6 +82,7 @@ def test_load_env_reads_unified_image_and_integration_config(tmp_path, monkeypat
         "WECHAT_PUBLISHER_IMAGE_GENERATOR",
     ):
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("IMG_API_KEY", "easel-image-channel-key")
 
     yaml_path = tmp_path / "wechat-publisher.yaml"
     yaml_path.write_text(textwrap.dedent("""\
@@ -108,8 +110,9 @@ def test_load_env_reads_unified_image_and_integration_config(tmp_path, monkeypat
     monkeypatch.setattr(config, "_config_path", lambda: yaml_path)
     config.load_env()
     assert config.os.environ["WECHAT_PUBLISHER_IMAGE_GENERATOR"] == "baoyu-image-gen"
-    assert config.os.environ["OPENAI_API_KEY"] == "sk_openai"
-    assert config.os.environ["GEMINI_PROXY_BASE_URL"] == "https://proxy.example"
+    assert config.os.environ["IMG_API_KEY"] == "easel-image-channel-key"
+    assert "OPENAI_API_KEY" not in config.os.environ
+    assert "GEMINI_PROXY_BASE_URL" not in config.os.environ
     assert config.os.environ["WECHATSYNC_MCP_TOKEN"] == "sync_token"
 
 

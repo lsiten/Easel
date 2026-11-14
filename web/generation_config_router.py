@@ -3,8 +3,8 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from easel.generation_models import GenerationError
 from easel.channel_application_router import SecretSafeRoute
 from easel.generation_config_models import ConfigUpdate
-from easel.generation_app_config import public_config, save_config
-from web import app as server
+from easel.generation_app_config import migrate_provider_config, public_config, save_config
+from web.server_binding import server
 
 
 def require_config_admin(request: Request) -> None:
@@ -20,18 +20,24 @@ def create_router() -> APIRouter:
     @router.get('/api/config')
     @router.get('/api/ai/config')
     def read(request: Request):
+        migrate_provider_config(server.OUTPUTS_DIR, server.ENV_FILE)
         return public_config(server.OUTPUTS_DIR, server.read_settings(server.ENV_FILE))
 
     @router.post('/api/config/validate')
     @router.post('/api/ai/config/validate')
     def validate(payload: ConfigUpdate, request: Request):
+        if payload.config.providers:
+            raise HTTPException(409, 'provider_config_managed_by_channels')
         return {'valid': True}
 
     @router.put('/api/config')
     @router.put('/api/ai/config')
     def save(payload: ConfigUpdate, request: Request):
+        if payload.config.providers:
+            raise HTTPException(409, 'provider_config_managed_by_channels')
         try:
             save_config(server.OUTPUTS_DIR, payload, server.read_settings(server.ENV_FILE))
+            migrate_provider_config(server.OUTPUTS_DIR, server.ENV_FILE)
         except GenerationError as error:
             raise HTTPException(error.status, error.code) from error
         return public_config(server.OUTPUTS_DIR, server.read_settings(server.ENV_FILE))

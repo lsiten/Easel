@@ -18,7 +18,7 @@ from easel.generation_inputs import local_image_request
 from easel.generation_models import GenerationError, ImageRequest
 from easel.ownership import owned_media_path
 from easel.remote_media import RemoteMediaError, download_to_file
-from web import app as server
+from web.server_binding import server
 
 
 def session_id(run: AgentRun) -> str:

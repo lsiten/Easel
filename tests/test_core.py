@@ -25,9 +25,11 @@ import app as web  # noqa: E402
 import paper_ingest  # noqa: E402
 import render_slides  # noqa: E402
 from model_registry import (configured_providers, env_aliases, provider_ids,
-                            provider_required_env)  # noqa: E402
+                            provider_catalog, provider_required_env, resolve_provider)  # noqa: E402
 from persona_gate import classify as classify_persona_score  # noqa: E402
 import gemini_maas_adapter as gemini_adapter  # noqa: E402
+import multivoice  # noqa: E402
+import tts  # noqa: E402
 
 
 # ---- 媒体模型注册表：脚本与 Web 共用同一真相源 ----
@@ -62,6 +64,40 @@ def test_configured_media_providers_lists_choices_without_keys():
     serialized = json.dumps(providers)
     assert "secret-agnes" not in serialized and "secret-openai" not in serialized
     assert "agnes-video-2.5-flash" in serialized and "video-model-b" in serialized
+
+
+def test_provider_routing_prefers_available_rows_before_declared_order():
+    rows = provider_catalog("video", {
+        "RELAY_API_KEY": "relay-key",
+        "RELAY_VIDEO_MODEL": "relay-model",
+        "VIDEO_PROVIDER": "dashscope",
+    })
+    assert rows[0]["id"] == "relay"
+    assert rows[0]["configured"] is True
+    assert rows[0]["order"] == 1
+    assert all(not row["configured"] for row in rows[1:])
+    assert resolve_provider("video", {"RELAY_API_KEY": "relay-key"}) == "relay"
+
+
+def test_provider_routing_keeps_a_configured_primary_first():
+    env = {
+        "VIDEO_PROVIDER": "relay",
+        "VIDEO_API_KEY": "openai-key",
+        "VIDEO_BASE_URL": "https://video.example/v1",
+        "RELAY_API_KEY": "relay-key",
+    }
+    assert [row["id"] for row in provider_catalog("video", env)[:2]] == [
+        "relay", "openai-compatible",
+    ]
+
+
+def test_voice_consumers_route_to_the_first_configured_provider(monkeypatch):
+    monkeypatch.setenv("VOICE_PROVIDER", "gemini")
+    monkeypatch.setenv("VOICE_API_KEY", "voice-channel-key")
+    monkeypatch.setenv("VOICE_BASE_URL", "https://voice.example/v1")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert tts._closed_provider() == "openai-compatible"
+    assert multivoice._closed_source_configured() is True
 
 
 # ---- CLI: _resolve_input ----

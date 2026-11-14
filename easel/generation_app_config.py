@@ -1,4 +1,10 @@
-"""Private atomic structured configuration with compare-and-swap revisions."""
+"""Private atomic structured configuration with compare-and-swap revisions.
+
+Provider credentials have one editable home: the six model channels in ``.env``.
+Older releases also wrote provider credentials to ``app-config.json``. Those
+records are imported once and removed so a stale copy cannot shadow the channel
+configuration shared by the Web app, API workers, and Agent subprocesses.
+"""
 from collections.abc import Mapping
 from skills.shared.scripts.asset_storage import _storage_lock
 import hashlib
@@ -6,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from easel.env_store import update_environment
 from easel.generation_config_models import AppConfig, ConfigUpdate
 from easel.generation_models import GenerationError
 
@@ -38,19 +45,71 @@ def revision(outputs: Path) -> str:
 
 
 def effective_settings(outputs: Path, settings: Mapping[str, str]) -> dict[str, str]:
+    """Return the runtime environment, with channel `.env` values authoritative.
+
+    Legacy app-config providers only fill keys that are absent from `.env`.
+    Process environment variables remain the final deployment override.
+    """
     result = dict(settings)
     config = effective_config(outputs)
     for name, provider in config.providers.items():
         base, key = PROVIDER_ENV[name]
-        if provider.baseUrl:
+        if provider.baseUrl and not result.get(base):
             result[base] = provider.baseUrl
-        result[key] = provider.apiKey.get_secret_value()
-        if not result[key]:
+        legacy_key = provider.apiKey.get_secret_value()
+        if legacy_key and not result.get(key) and not any(
+                result.get(alias) for alias in SECRET_ALIASES.get(name, ())):
+            result[key] = legacy_key
+        elif not legacy_key and not result.get(key):
             for alias in SECRET_ALIASES.get(name, ()):
-                result[alias] = ''
-    if config.application.plannerModel:
-        result['EASEL_DRAFT_PLANNER_MODEL'] = config.application.plannerModel
+                if not result.get(alias):
+                    result[alias] = ''
     return {**result, **os.environ}
+
+
+def migrate_provider_config(outputs: Path, env_file: Path) -> bool:
+    """Move legacy structured providers into `.env` and clear the duplicate.
+
+    The old runtime let app-config override `.env`; migration preserves that
+    effective value once. Process environment variables still take precedence
+    when the application resolves settings.
+    """
+    config = effective_config(outputs)
+    if not config.providers:
+        return False
+    updates: dict[str, str] = {}
+    for name, provider in config.providers.items():
+        base, key = PROVIDER_ENV[name]
+        if provider.baseUrl:
+            updates[base] = provider.baseUrl
+        legacy_key = provider.apiKey.get_secret_value()
+        if legacy_key:
+            updates[key] = legacy_key
+            for alias in SECRET_ALIASES.get(name, ()):
+                updates[alias] = ''
+    if updates:
+        update_environment(env_file, updates)
+    cleared = config.model_copy(update={'providers': {}})
+    path = config_path(outputs)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    backup = path.with_name('app-config.pre-channel-migration.json')
+    if not backup.exists():
+        backup.write_bytes(path.read_bytes() if path.exists() else b'{}')
+        backup.chmod(0o600)
+    lock = path.with_suffix('.lock')
+    encoded = json.dumps(cleared.model_dump(mode='json', by_alias=True), ensure_ascii=False).encode()
+    with _storage_lock(lock):
+        lock.chmod(0o600)
+        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix='.config-')
+        try:
+            with os.fdopen(descriptor, 'wb') as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+    return True
 
 
 def public_config(outputs: Path, settings: Mapping[str, str] = {}):
@@ -58,15 +117,10 @@ def public_config(outputs: Path, settings: Mapping[str, str] = {}):
     snapshot = path.read_bytes() if path.exists() else b''
     config = AppConfig.model_validate_json(snapshot) if snapshot else AppConfig()
     data = config.model_dump(mode='json', by_alias=True)
-    configured = []
-    effective = effective_settings(outputs, settings)
-    for name, (base, key) in PROVIDER_ENV.items():
-        if name not in data['providers'] and not (effective.get(base) or effective.get(key) or any(effective.get(alias) for alias in SECRET_ALIASES.get(name, ()))):
-            continue
-        data['providers'][name] = {'baseUrl': effective.get(base, ''), 'apiKey': ''}
-        if effective.get(key) or any(effective.get(alias) for alias in SECRET_ALIASES.get(name, ())):
-            configured.append('providers.' + name + '.apiKey')
-    return {'revision': hashlib.sha256(snapshot).hexdigest(), 'config': data, 'configuredSecrets': configured,
+    # Planning defaults belong to the chat channel and are resolved per task;
+    # do not expose the retired global planner field as editable configuration.
+    data.get('application', {}).pop('plannerModel', None)
+    return {'revision': hashlib.sha256(snapshot).hexdigest(), 'config': data, 'configuredSecrets': [],
             'locked': sorted({key for pair in (*PROVIDER_ENV.values(), *SECRET_ALIASES.values()) for key in pair if key in os.environ}),
             'applyMode': 'per-request'}
 

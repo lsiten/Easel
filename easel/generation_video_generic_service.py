@@ -26,12 +26,19 @@ def submit_generic(service: 'VideoGeneration', payload: VideoGenerationRequest, 
         return existing
     outputs = service.store.generation.outputs
     validate_video_group(outputs, request)
-    candidates = [item for item in video_models(outputs, request.persona, service.settings) if item.name == request.model]
-    if len(candidates) != 1:
+    matching = [item for item in video_models(outputs, request.persona, service.settings)
+                if item.name == request.model]
+    if not matching:
         raise GenerationError('video_model_invalid')
+    candidates = [item for item in matching if item.configured]
+    if not candidates:
+        raise GenerationError('video_provider_configuration_required', 409)
     channel = candidates[0].channel
     selected = LocalUsers(outputs).read(request.persona).ai.video
-    options = VideoCapabilities.model_validate(selected.options) if selected is not None and selected.default_model == request.model else VideoCapabilities.model_validate(candidates[0].model_dump())
+    options = (VideoCapabilities.model_validate(selected.options)
+               if selected is not None and selected.default_model == request.model
+               and VideoCapabilities.model_validate(selected.options).channel == channel
+               else VideoCapabilities.model_validate(candidates[0].model_dump()))
     model, effective = options.resolve(request)
     validate_channel_fields(effective, channel)
     match channel:

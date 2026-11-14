@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pydantic import JsonValue, TypeAdapter, ValidationError
 from typing_extensions import assert_never
-from easel.generation_chat_config import chat_models
+from easel.generation_chat_config import chat_models, default_chat_model
 from easel.generation_chat_models import ChatMessage, CompletionRequest
 from easel.generation_chat_service import ChatGeneration
 from easel.generation_store import GenerationStore
@@ -21,16 +21,25 @@ from easel.ownership import owned_media_path
 
 
 class NativeDraftRuntime(NativeDraftMedia):
-    def planner_model(self, persona: str, requested: str) -> str:
-        model = requested or self.settings.get('EASEL_DRAFT_PLANNER_MODEL', '') or self.settings.get('EASEL_DIRECT_API_MODEL', '')
+    def planner_choice(self, persona: str, requested: str):
         available = chat_models(self.outputs, persona, self.settings)
-        if not any(item.name == model and item.channel != 'anthropic' for item in available):
+        model = next((item for item in available if requested and item.name == requested), None)
+        if requested and model is None:
+            raise GenerationError('draft_planner_model_invalid', 409)
+        model = model or default_chat_model(self.outputs, persona, self.settings)
+        if model is None:
             raise GenerationError('draft_planner_model_invalid', 409)
         return model
 
+    def planner_model(self, persona: str, requested: str) -> str:
+        return self.planner_choice(persona, requested).name
+
     def validate(self, persona: str, payload: DraftRequest) -> None:
         if payload.draftType == 'draft':
-            self.planner_model(persona, payload.plannerModel)
+            planner = self.planner_choice(persona, payload.plannerModel)
+            needs_vision = payload.kind == 'video-url' or bool(payload.imageUrls)
+            if needs_vision and planner.inputModalities and 'image' not in planner.inputModalities:
+                raise GenerationError('draft_planner_model_requires_vision', 409)
         elif not payload.prompt.strip():
             raise GenerationError('draft_prompt_required')
         if payload.kind in ('image-text', 'video'):
@@ -116,9 +125,20 @@ class NativeDraftRuntime(NativeDraftMedia):
         except (ValidationError, ValueError) as error:
             raise GenerationError('draft_model_rates_invalid', 409) from error
         images = image_models(self.outputs, persona, self.settings, 'generate')
+        edits = image_models(self.outputs, persona, self.settings, 'edit')
         videos = video_models(self.outputs, persona, self.settings)
-        return DraftPricing(imageModels=tuple(DraftModelPrice(model=item.name, displayName=item.name, description=item.description,
-            maxInputImages=item.max_input_images, supportedAspectRatios=item.supportedAspectRatios, resolutions=item.resolutions, pricing=rates.get(item.name, (ModelRate(unit='image'),))) for item in images),
+        def price(item):
+            return DraftModelPrice(
+                model=item.name,
+                displayName=item.name,
+                description=item.description,
+                maxInputImages=item.max_input_images,
+                supportedAspectRatios=item.supportedAspectRatios,
+                resolutions=item.resolutions,
+                pricing=rates.get(item.name, (ModelRate(unit='image'),)),
+            )
+        return DraftPricing(imageModels=tuple(price(item) for item in images),
+            imageEditModels=tuple(price(item) for item in edits),
             videoModels=tuple(DraftModelPrice(model=item.name, name=item.name, description=item.description, channel=item.channel,
                 maxInputImages=item.max_input_images, resolutions=item.resolutions, durations=item.durations,
                 aspectRatios=item.ratios, modes=item.modes, pricing=rates.get(item.name, (ModelRate(unit='video'),))) for item in videos))

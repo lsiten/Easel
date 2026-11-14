@@ -14,6 +14,7 @@ from easel.generation_config_models import AppConfig, ConfigUpdate
 from easel.generation_images import ImageGeneration
 from easel.generation_models import ImageRequest, GenerationError
 from easel.generation_catalog import image_models
+from easel.generation_catalog import image_channel
 from easel.generation_draft_runtime import NativeDraftRuntime
 from web import app as web
 from tests.generation_support import generation as generation
@@ -28,29 +29,39 @@ def configuration():
             'edit': [{'name': 'native-one', 'channel': 'gemini', 'supportedAspectRatios': ['9:16']}]}}})
 
 
-def test_structured_config_mask_cas_secret_preserve_clear_and_environment(generation, monkeypatch):
+def test_structured_config_migrates_provider_secret_into_channel_env(generation, monkeypatch):
     outputs, _, _ = generation
     with TestClient(web.app, base_url='http://localhost:7860', client=('127.0.0.1', 4000)) as client:
         before = client.get('/api/config').json()
         config = configuration().model_dump(mode='json')
         config['providers']['gemini']['apiKey'] = 'native-private'
-        assert client.post('/api/ai/config/validate', json={'config': config}).status_code == 200
+        assert client.post('/api/ai/config/validate', json={'config': config}).status_code == 409
         response = client.put('/api/ai/config', json={'config': config, 'revision': before['revision']})
-        assert response.status_code == 200, response.text
-        saved = response.json()
-        assert 'native-private' not in response.text and saved['config']['providers']['gemini']['apiKey'] == ''
-        assert client.put('/api/config', json={'config': config, 'revision': before['revision']}).status_code == 409
+        assert response.status_code == 409
+        assert response.json()['detail'] == 'provider_config_managed_by_channels'
+        legacy = AppConfig.model_validate({
+            **configuration().model_dump(mode='json'),
+            'providers': {'gemini': {'apiKey': 'native-private'}},
+        })
+        save_config(outputs, ConfigUpdate(config=legacy, revision=before['revision']))
+        saved = client.get('/api/config').json()
+        assert 'native-private' not in json.dumps(saved)
+        assert saved['config']['providers'] == {}
+        assert 'GEMINI_API_KEY=native-private' in web.ENV_FILE.read_text()
+        backup = outputs / '_generation/app-config.pre-channel-migration.json'
+        assert backup.is_file() and stat.S_IMODE(backup.stat().st_mode) == 0o600
+        assert client.put('/api/config', json={'config': saved['config'], 'revision': before['revision']}).status_code == 409
         assert stat.S_IMODE((outputs / '_generation/app-config.json').stat().st_mode) == 0o600
         assert client.put('/api/config', json={'config': saved['config'], 'revision': saved['revision']}).status_code == 200
-        assert effective_settings(outputs, {})['GEMINI_API_KEY'] == 'native-private'
+        assert effective_settings(outputs, web.read_settings(web.ENV_FILE))['GEMINI_API_KEY'] == 'native-private'
         assert client.post('/api/config/restart').json()['mode'] == 'per-request'
         refreshed = client.get('/api/config').json()
-        assert client.put('/api/config', json={'config': refreshed['config'], 'revision': refreshed['revision'],
-            'clearSecrets': ['providers.gemini.apiKey']}).status_code == 200
-        assert effective_config(outputs).providers['gemini'].apiKey.get_secret_value() == ''
+        assert refreshed['config']['providers'] == {}
+        assert refreshed['configuredSecrets'] == []
         monkeypatch.setenv('GEMINI_API_KEY', 'environment-private')
-        refreshed = client.get('/api/config').json()
-        assert client.put('/api/config', json={'config': config, 'revision': refreshed['revision']}).status_code == 409
+        assert web._generation_settings()['GEMINI_API_KEY'] == 'environment-private'
+        locked = client.get('/api/config').json()
+        assert 'GEMINI_API_KEY' in locked['locked']
         config['providers']['gemini']['baseUrl'] = 'file:///etc/passwd'
         assert client.post('/api/config/validate', json={'config': config}).status_code == 422
 
@@ -152,25 +163,22 @@ def test_native_gemini_images_data_references_receipts_and_replay(generation):
         thread.join()
 
 
-def test_legacy_secret_status_blank_preservation_and_clear(generation, monkeypatch):
+def test_provider_status_is_read_only_and_environment_locked(generation, monkeypatch):
     outputs, _, _ = generation
     web.ENV_FILE.write_text('GEMINI_API_KEY=legacy-private\nGEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta\n')
     with TestClient(web.app, base_url='http://localhost:7860', client=('127.0.0.1', 4000)) as client:
         initial = client.get('/api/config').json()
-        assert 'providers.gemini.apiKey' in initial['configuredSecrets']
+        assert initial['config']['providers'] == {}
+        assert initial['configuredSecrets'] == []
         assert 'legacy-private' not in json.dumps(initial)
         saved = client.put('/api/config', json={'revision': initial['revision'], 'config': initial['config']})
         assert saved.status_code == 200
         assert web._generation_settings()['GEMINI_API_KEY'] == 'legacy-private'
-        status = saved.json()
-        cleared = client.put('/api/config', json={'revision': status['revision'], 'config': status['config'],
-            'clearSecrets': ['providers.gemini.apiKey']})
-        assert cleared.status_code == 200
-        assert 'providers.gemini.apiKey' not in cleared.json()['configuredSecrets']
-        assert web._generation_settings()['GEMINI_API_KEY'] == ''
+        assert effective_config(outputs).providers == {}
         monkeypatch.setenv('GEMINI_API_KEY', 'locked-private')
         status = client.get('/api/config').json()
-        assert 'providers.gemini.apiKey' in status['configuredSecrets'] and 'GEMINI_API_KEY' in status['locked']
+        assert status['configuredSecrets'] == [] and 'GEMINI_API_KEY' in status['locked']
+        assert web._generation_settings()['GEMINI_API_KEY'] == 'locked-private'
 
 
 def test_catalog_configuration_rejects_invalid_shape_and_preserves_multiple_models(generation):
@@ -205,3 +213,65 @@ def test_gemini_named_openai_relay_model_keeps_openai_protocol(generation):
     assert completed.state == 'succeeded' and completed.channel == 'openai'
     assert calls[0][0] == '/v1/images/generations'
     assert json.loads(calls[0][2])['model'] == 'gemini-relay-name'
+
+
+def test_image_catalog_and_route_choose_available_provider_first(generation):
+    outputs, _, _ = generation
+    save_config(outputs, ConfigUpdate(config=AppConfig.model_validate({
+        'models': {'image': {
+            'generation': [
+                {'name': 'shared-image', 'channel': 'openai'},
+                {'name': 'shared-image', 'channel': 'gemini', 'runtimeModel': 'gemini-image-runtime'},
+            ],
+            'edit': [],
+        }},
+    }), revision=revision(outputs)))
+    settings = {'GEMINI_API_KEY': 'gemini-key'}
+    models = image_models(outputs, 'alice', settings, 'generate')
+    assert [(item.name, item.channel, item.configured) for item in models] == [
+        ('shared-image', 'gemini', True),
+        ('shared-image', 'openai', False),
+    ]
+    request = ImageRequest(persona='alice', request_key='provider-order', prompt='cup',
+                           model='shared-image')
+    assert image_channel(outputs, request, settings) == 'gemini'
+
+
+def test_video_catalog_puts_available_provider_first(generation):
+    from easel.generation_video_catalog import video_models
+    outputs, _, _ = generation
+    save_config(outputs, ConfigUpdate(config=AppConfig.model_validate({
+        'models': {'video': {'generation': [
+            {'name': 'shared-video', 'channel': 'dashscope'},
+            {'name': 'shared-video', 'channel': 'relay'},
+        ]}},
+    }), revision=revision(outputs)))
+    models = video_models(outputs, 'alice', {'RELAY_API_KEY': 'relay-key'})
+    assert [(item.name, item.channel, item.configured) for item in models] == [
+        ('shared-video', 'relay', True),
+        ('shared-video', 'dashscope', False),
+    ]
+
+
+def test_chat_catalog_routes_same_model_to_first_configured_provider(generation):
+    from easel.generation_chat_config import chat_models, default_chat_model, endpoint
+    outputs, _, _ = generation
+    save_config(outputs, ConfigUpdate(config=AppConfig.model_validate({
+        'models': {'chat': [
+            {'name': 'shared-chat', 'channel': 'anthropic'},
+            {'name': 'shared-chat', 'channel': 'openai', 'runtime_model': 'openai-runtime'},
+        ]},
+    }), revision=revision(outputs)))
+    settings = {
+        'OPENAI_API_KEY': 'openai-key',
+        'OPENAI_BASE_URL': 'https://openai.example/v1',
+        'ANTHROPIC_API_KEY': 'anthropic-key',
+        'ANTHROPIC_BASE_URL': 'https://anthropic.example/v1',
+    }
+    models = chat_models(outputs, 'alice', settings)
+    assert [(item.name, item.channel, item.configured) for item in models] == [
+        ('shared-chat', 'openai', True),
+        ('shared-chat', 'anthropic', True),
+    ]
+    assert default_chat_model(outputs, 'alice', settings) == models[0]
+    assert endpoint(settings, models[0], False).url == 'https://openai.example/v1/chat/completions'

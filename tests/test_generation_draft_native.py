@@ -14,7 +14,9 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from easel.generation_draft import DraftGeneration
-from easel.generation_draft_models import ImageDraftInput
+from easel.generation_draft_models import ImageDraftInput, URLDraftInput
+from easel.generation_app_config import revision, save_config
+from easel.generation_config_models import AppConfig, ConfigUpdate
 from easel.generation_draft_router import create_draft_router
 from easel.generation_draft_runtime import NativeDraftRuntime
 from easel.generation_models import GenerationError
@@ -102,6 +104,7 @@ def test_native_planner_memory_and_configured_pricing(tmp_path: Path) -> None:
                 assert memory.json()['items'][0]['text'] == 'Use concise workshop captions.'
                 prices = (await client.get('/api/ai/draft-generation/pricing')).json()
                 assert prices['imageModels'][0]['pricing'][0]['amount'] == 0.03
+                assert prices['imageEditModels'][0]['model'] == 'local-image'
                 assert prices['videoModels'][0]['pricing'][0]['amount'] is None
                 with service.store.base.connect() as db:
                     rows = db.execute('SELECT state,body FROM chat_jobs').fetchall()
@@ -110,6 +113,25 @@ def test_native_planner_memory_and_configured_pricing(tmp_path: Path) -> None:
                 with pytest.raises(GenerationError):
                     service.submit('alice', ImageDraftInput(prompt='cup', imageModel='unknown'), 'bad')
         anyio.run(scenario)
+
+
+def test_video_url_planner_rejects_text_only_model_before_import(tmp_path: Path) -> None:
+    outputs = tmp_path / 'outputs'
+    config = AppConfig.model_validate({
+        'models': {'chat': [{'name': 'text-only', 'channel': 'openai', 'inputModalities': ['text']}]},
+    })
+    save_config(outputs, ConfigUpdate(config=config, revision=revision(outputs)))
+    settings = {
+        'EASEL_DIRECT_API_BASE_URL': 'http://127.0.0.1:9/v1',
+        'EASEL_DIRECT_API_KEY': 'fixture-key',
+        'EASEL_DIRECT_API_MODEL': 'planner',
+    }
+    service = DraftGeneration(outputs, NativeDraftRuntime(outputs, Path.cwd(), settings))
+    with pytest.raises(GenerationError, match='draft_planner_model_requires_vision'):
+        service.submit('alice', URLDraftInput(
+            videoUrl='https://93.184.216.34/video.mp4',
+            plannerModel='text-only',
+        ), 'vision-required')
 
 
 def test_native_video_url_import_analyzes_real_frames(tmp_path: Path, monkeypatch) -> None:

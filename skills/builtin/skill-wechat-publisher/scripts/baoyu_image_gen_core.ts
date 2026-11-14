@@ -48,12 +48,6 @@ const SKILL_ROOT = path.resolve(SCRIPT_DIR, "..");
 const CONFIG_PATH = path.join(SKILL_ROOT, "wechat-publisher.yaml");
 const CONFIG_EXPORT_KEYS = [
   "WECHAT_PUBLISHER_IMAGE_GENERATOR",
-  "OPENAI_API_KEY",
-  "OPENAI_BASE_URL",
-  "OPENAI_IMAGE_MODEL",
-  "GEMINI_PROXY_API_KEY",
-  "GEMINI_PROXY_BASE_URL",
-  "GEMINI_PROXY_IMAGE_MODEL",
   "GEMINI_WEB_DATA_DIR",
   "GEMINI_WEB_COOKIE_PATH",
   "GEMINI_WEB_CHROME_PROFILE_DIR",
@@ -62,17 +56,11 @@ const CONFIG_EXPORT_KEYS = [
 ] as const;
 
 function hasConfiguredProviderEnv(): boolean {
-  return Boolean(process.env.GEMINI_PROXY_API_KEY || process.env.OPENAI_API_KEY);
+  return Boolean(process.env.IMG_API_KEY || process.env.GEMINI_PROXY_API_KEY || process.env.OPENAI_API_KEY);
 }
 
 function hasCanonicalConfigFile(): boolean {
   return existsSync(CONFIG_PATH);
-}
-
-function hasLoadedProviderEnv(
-  loaded: Partial<Record<(typeof CONFIG_EXPORT_KEYS)[number], string | null>>
-): boolean {
-  return Boolean(loaded.OPENAI_API_KEY || loaded.GEMINI_PROXY_API_KEY);
 }
 
 export async function loadEnv(): Promise<void> {
@@ -123,20 +111,8 @@ print(json.dumps({key: os.environ.get(key) for key in keys}))
 
   try {
     const loaded = JSON.parse(output) as Partial<Record<(typeof CONFIG_EXPORT_KEYS)[number], string | null>>;
-    const hasCanonicalConfig = hasCanonicalConfigFile();
-    if (hasCanonicalConfig && !hasLoadedProviderEnv(loaded)) {
-      throw new Error(
-        "wechat-publisher.yaml does not configure OPENAI_API_KEY or GEMINI_PROXY_API_KEY"
-      );
-    }
-
     for (const key of CONFIG_EXPORT_KEYS) {
       const value = loaded[key];
-      if (hasCanonicalConfig) {
-        if (value) process.env[key] = value;
-        else delete process.env[key];
-        continue;
-      }
       if (value && !process.env[key]) {
         process.env[key] = value;
       }
@@ -155,14 +131,20 @@ print(json.dumps({key: os.environ.get(key) for key in keys}))
 
 export function detectProvider(args: CliArgs): Provider {
   if (args.provider) return args.provider;
+  if (process.env.IMG_API_KEY) {
+    return process.env.IMG_PROVIDER === "gemini" || process.env.IMG_BASE_URL?.includes("generativelanguage")
+      ? "gemini-proxy"
+      : "openai";
+  }
   if (process.env.GEMINI_PROXY_API_KEY) return "gemini-proxy";
   if (process.env.OPENAI_API_KEY) return "openai";
   throw new Error(
-    "No image provider configured. Set GEMINI_PROXY_API_KEY or OPENAI_API_KEY."
+    "No image channel configured. Set IMG_API_KEY or use a legacy OPENAI/GEMINI proxy setting."
   );
 }
 
 export function getDefaultModel(provider: Provider): string {
+  if (process.env.IMG_MODEL) return process.env.IMG_MODEL;
   if (provider === "gemini-proxy") {
     return process.env.GEMINI_PROXY_IMAGE_MODEL || "gemini-2.5-flash";
   }
@@ -211,9 +193,9 @@ async function generateWithOpenAI(
   model: string,
   args: CliArgs
 ): Promise<Uint8Array> {
-  const baseURL = (process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("OPENAI_API_KEY is required");
+  const baseURL = (process.env.IMG_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "");
+  const apiKey = process.env.IMG_API_KEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("IMG_API_KEY is required");
 
   const body: Record<string, unknown> = {
     model,
@@ -243,10 +225,10 @@ async function generateWithGeminiProxy(
   model: string,
   args: CliArgs
 ): Promise<Uint8Array> {
-  const baseURL = normalizeGeminiProxyBaseUrl(process.env.GEMINI_PROXY_BASE_URL);
-  const apiKey = process.env.GEMINI_PROXY_API_KEY;
-  if (!baseURL) throw new Error("GEMINI_PROXY_BASE_URL is required");
-  if (!apiKey) throw new Error("GEMINI_PROXY_API_KEY is required");
+  const baseURL = normalizeGeminiProxyBaseUrl(process.env.IMG_BASE_URL || process.env.GEMINI_PROXY_BASE_URL);
+  const apiKey = process.env.IMG_API_KEY || process.env.GEMINI_PROXY_API_KEY;
+  if (!baseURL) throw new Error("IMG_BASE_URL is required for the configured image channel");
+  if (!apiKey) throw new Error("IMG_API_KEY is required for the configured image channel");
 
   const content: Array<Record<string, unknown>> = [];
   for (const file of args.referenceImages) {

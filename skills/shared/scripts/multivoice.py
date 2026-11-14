@@ -36,6 +36,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from model_registry import provider_required_env, resolve_provider as resolve_configured_provider
+
 NARRATOR = "旁白"
 DEFAULT_GAP = 0.35  # 行间停顿秒数
 
@@ -154,8 +156,16 @@ def combine_prosody(base_rate: str | None, base_pitch: str | None,
 
 # ── cast（显式文件路径）────────────────────────────────────────────────
 def _closed_source_configured() -> bool:
-    """是否已配闭源云 provider（环境变量 VOICE_PROVIDER 非空）——据此强制不许再用 edge(AI 音色)。"""
-    return bool((os.environ.get("VOICE_PROVIDER") or "").strip())
+    """是否有可用的闭源语音 provider；据此强制不许再用 edge。"""
+    return bool(configured_voice_provider())
+
+
+def configured_voice_provider(preferred: str | None = None) -> str | None:
+    """Resolve the shared voice channel to its first usable provider."""
+    return resolve_configured_provider(
+        "voice", dict(os.environ),
+        (preferred or os.environ.get("VOICE_PROVIDER") or "").strip(),
+    ) or None
 
 
 def cast_init(cast_file: Path, title: str = "", narrator_provider: str | None = None) -> dict:
@@ -165,7 +175,7 @@ def cast_init(cast_file: Path, title: str = "", narrator_provider: str | None = 
     退回 edge 并在 note 里标注「务必升级闭源」。"""
     if cast_file.exists():
         return {"path": str(cast_file), "created": False}
-    np = (narrator_provider or "").strip() or None
+    np = (narrator_provider or "").strip() or configured_voice_provider()
     preset = PRESET_NARRATOR_VOICE.get(np) if np else None
     if np and preset:
         narrator = {"name": NARRATOR, "role": "narrator", "engine": "clone",
@@ -496,7 +506,8 @@ def _preflight_closed_source(plan: list[dict], allow_edge: bool) -> bool:
         bad = _edge_resolved(plan)
         if bad:
             who = "、".join(sorted({str(p.get("speaker")) for p in bad}))
-            _die(f"已配闭源（VOICE_PROVIDER={os.environ.get('VOICE_PROVIDER')}）却有角色会用 edge(AI 音色)：{who}。"
+            _die(f"配音通道已有可用 provider（{configured_voice_provider() or os.environ.get('VOICE_PROVIDER', '')}）"
+                 f"却有角色会用 edge(AI 音色)：{who}。"
                  f"\n请把这些角色改成闭源：cast add --engine clone --provider <..> --voice-id <..>"
                  f"（先 `voice_clone.py check --provider <..>` 验 key、`cast check` 复核）。"
                  f"\n确实没有任何闭源 key、只能用 edge 时，才显式加 --allow-edge 放行。")
@@ -775,6 +786,12 @@ def dub_grouped(cast_file: Path, lines: list[dict], group_order: list,
 def _selftest() -> int:
     import tempfile
     ok = True
+    provider_env = {"VOICE_PROVIDER", *(
+        name for fields in provider_required_env("voice").values() for name, _required in fields
+    )}
+    saved_provider_env = {name: os.environ.get(name) for name in provider_env}
+    for name in provider_env:
+        os.environ.pop(name, None)
 
     def chk(name, cond):
         nonlocal ok
@@ -831,7 +848,11 @@ def _selftest() -> int:
             _edge_resolved([{"engine": "edge"}]) and _edge_resolved([{"engine": "clone", "voice_id": None}])
             and not _edge_resolved([{"engine": "clone", "voice_id": "v"}]))
         _saved = os.environ.get("VOICE_PROVIDER")
+        _saved_key = os.environ.get("VOICE_API_KEY")
+        _saved_base = os.environ.get("VOICE_BASE_URL")
         os.environ["VOICE_PROVIDER"] = "openai-compatible"
+        os.environ["VOICE_API_KEY"] = "selftest-voice-key"
+        os.environ["VOICE_BASE_URL"] = "https://voice.selftest/v1"
         try:
             edge_plan = [{"idx": 0, "speaker": "A", "engine": "edge", "voice": "x"}]
             died = False
@@ -849,6 +870,14 @@ def _selftest() -> int:
                 os.environ.pop("VOICE_PROVIDER", None)
             else:
                 os.environ["VOICE_PROVIDER"] = _saved
+            if _saved_key is None:
+                os.environ.pop("VOICE_API_KEY", None)
+            else:
+                os.environ["VOICE_API_KEY"] = _saved_key
+            if _saved_base is None:
+                os.environ.pop("VOICE_BASE_URL", None)
+            else:
+                os.environ["VOICE_BASE_URL"] = _saved_base
 
         lines = [{"speaker": "旁白", "text": "三年后。", "emotion": "平"},
                  {"speaker": "林策", "text": "你输了。", "emotion": "冷"},
@@ -962,6 +991,11 @@ def _selftest() -> int:
         chk("未知 shot 归最后一镜 + 告警", lay2["by_shot"].get(2) and lay2["warns"])
 
     print("✅ selftest 通过" if ok else "❌ selftest 失败")
+    for name, value in saved_provider_env.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
     return 0 if ok else 1
 
 
@@ -1021,12 +1055,12 @@ def main() -> int:
     if a.cmd == "cast":
         cf = Path(a.cast).expanduser()
         if a.castcmd == "init":
-            r = cast_init(cf, a.title, narrator_provider=os.environ.get("VOICE_PROVIDER"))
+            r = cast_init(cf, a.title, narrator_provider=configured_voice_provider())
             print(f"✅ {r['path']}" + ("（新建）" if r["created"] else "（已存在，未覆盖）"))
         elif a.castcmd == "add":
             provider = a.provider
             if a.engine == "clone" and not provider:
-                provider = (os.environ.get("VOICE_PROVIDER") or "").strip() or None
+                provider = configured_voice_provider()
             e = cast_add(cf, {"name": a.name, "role": a.role, "engine": a.engine,
                               "voice": a.voice or None, "rate": a.rate, "pitch": a.pitch,
                               "volume": a.volume, "provider": provider,

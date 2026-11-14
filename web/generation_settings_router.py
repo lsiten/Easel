@@ -7,7 +7,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from easel.channel_application_router import SecretSafeRoute
 from easel.generation_settings import GenerationSettingsUpdate, SETTINGS, decoded_rates, encoded_rates
-from web import app as server
+from web.server_binding import server
 
 
 def create_router() -> APIRouter:
@@ -18,9 +18,15 @@ def create_router() -> APIRouter:
         server._require_side_effect_access(request)
         values = {**server.read_settings(server.ENV_FILE), **os.environ}
         try:
-            return {'fields': [dict(item.model_dump(), configured=bool(values.get(item.name, '')),
-                value='' if item.secret else decoded_rates(values.get(item.name, '')) if item.name == 'EASEL_DRAFT_MODEL_RATES' else values.get(item.name, ''),
-                locked=item.name in os.environ) for item in SETTINGS]}
+            fields = []
+            for item in SETTINGS:
+                effective = values.get(item.name, '') or item.default
+                value = ('' if item.secret else
+                         decoded_rates(effective) if item.name == 'EASEL_DRAFT_MODEL_RATES' else
+                         effective)
+                fields.append(dict(item.model_dump(), configured=bool(effective), value=value,
+                                   locked=item.name in os.environ))
+            return {'fields': fields}
         except ValueError as error:
             raise HTTPException(409, 'generation_rates_encoding_invalid') from error
 

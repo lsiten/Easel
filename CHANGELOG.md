@@ -2,6 +2,29 @@
 
 All notable changes to Easel are documented in this file.
 
+## Unreleased
+
+### Improved
+
+- Unified provider credentials and model defaults in the six model channels. Legacy
+  `app-config.json` provider records now migrate once to `.env`, retain a private backup,
+  and can no longer be edited through the advanced settings API.
+- Batch planning and content memory now resolve their default model from the chat channel;
+  Anthropic chat models support structured completion, and vision-dependent plans reject
+  models without declared image input capability.
+- Moved Whisper, VOD, pricing, and media runtime options under their owning transcribe or
+  video channel. Profile defaults now select from real model catalogs instead of accepting
+  arbitrary model names and capability JSON.
+- Vision self-check and WeChat image generation now prefer the shared chat/image channel
+  configuration, while legacy `VISION_*`, `OPENAI_*`, and `GEMINI_PROXY_*` settings remain
+  read-compatible during migration.
+- Channel routing now puts configured providers first and then follows their visible
+  order. Capability models reuse the same provider credentials, and duplicate model
+  names can resolve through the first usable provider instead of becoming a conflict.
+- All six channels now use one provider-row configuration format. Model capabilities
+  expand from the owning provider row and are saved by the same channel-level action;
+  the separate model-catalog panel has been removed.
+
 ## [0.3.0] - 2026-10-12
 
 ### Added

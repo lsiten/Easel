@@ -15,15 +15,14 @@ from PIL import Image
 
 from easel.generation_models import (GeneratedAsset, GenerationError, GenerationJob,
                                      ImageReceipt, ImageRequest, ImageResult, ImageResultItem)
-from easel.generation_catalog import runtime_image_model, image_channel
-from easel.generation_gemini import native_ready, generate_native
+from easel.generation_catalog import image_channel, image_provider_ready, runtime_image_model
+from easel.generation_gemini import generate_native
 from easel.generation_inputs import local_image_request, prepare_image_inputs
 from easel.content_library_models import ContentError
 from easel.generation_store import GenerationStore
 from easel.harnesses.store import write_json
 from easel.ownership import OwnershipError, owned_media_path
 from easel.publish_recovery import worker_owner
-from skills.shared.scripts.model_registry import configured_providers
 from skills.shared.scripts.image_provider_config import ENV_ALIASES, detect_mode, detect_provider
 
 
@@ -39,13 +38,17 @@ class ImageGeneration:
         if existing is not None:
             return existing
         channel = image_channel(self.store.outputs, request, self.settings)
-        if not (native_ready(self.settings) if channel == 'gemini' else configured_providers('image', dict(self.settings))):
+        if not image_provider_ready(self.settings, channel):
             raise GenerationError('generation_configuration_required', 409)
         base = next((self.settings.get(key, '').strip() for key in ('IMG_BASE_URL', *ENV_ALIASES['IMG_BASE_URL'])
                      if self.settings.get(key, '').strip()), '')
         if request.mask and (detect_mode(base, None) == 'async' or detect_provider(base) == 'agnes'):
             raise GenerationError('generation_mask_unsupported')
-        return self.store.enqueue(request, runtime_image_model(self.store.outputs, request), channel)
+        return self.store.enqueue(
+            request,
+            runtime_image_model(self.store.outputs, request, channel),
+            channel,
+        )
 
     async def execute(self, identifier: str = '') -> GenerationJob | None:
         owner = worker_owner()
@@ -73,7 +76,7 @@ class ImageGeneration:
 
     async def _generate(self, job: GenerationJob, owner: str) -> ImageResult:
         request = job.request
-        if not (native_ready(self.settings) if job.channel == 'gemini' else configured_providers('image', dict(self.settings))):
+        if not image_provider_ready(self.settings, job.channel):
             raise GenerationError('generation_configuration_required', 409)
         inputs, imported = await anyio.to_thread.run_sync(prepare_image_inputs, self.store.outputs, job)
         if imported:

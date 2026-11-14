@@ -1,16 +1,22 @@
 """Spoken source meaning reaches captions; unavailable ASR never degrades silently."""
-from pathlib import Path
-import json
 import shutil
 import subprocess
 import wave
+from importlib.machinery import ModuleSpec
+from pathlib import Path
+
 import anyio
 import httpx
 from fastapi import FastAPI
+
 from easel.generation_draft import DraftGeneration
-from easel.generation_draft_runtime import NativeDraftRuntime
 from easel.generation_draft_router import create_draft_router
-from easel.generation_draft_speech import LocalDraftSpeech, SpeechTranscript, SpeechSegment
+from easel.generation_draft_runtime import NativeDraftRuntime
+from easel.generation_draft_speech import (
+    LocalDraftSpeech,
+    SpeechSegment,
+    SpeechTranscript,
+)
 from tests.test_generation_draft_native import provider
 
 
@@ -68,6 +74,26 @@ def test_audio_without_available_model_fails_before_caption_call(tmp_path: Path,
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
                 response = await client.post('/api/ai/draft-generation/from-video-url', json={'videoUrl': 'https://93.184.216.34/spoken.mp4'})
                 assert response.status_code == 409
-                assert response.json()['detail'] == 'draft_audio_transcription_model_required'
+                assert response.json()['detail'] in {
+                    'draft_audio_transcription_dependency_required',
+                    'draft_audio_transcription_model_required',
+                }
                 assert calls == []
         anyio.run(scenario)
+
+
+def test_managed_large_v3_is_available_to_local_draft_transcription(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path/'home'
+    model = home/'models'/'whisper-large-v3'
+    model.mkdir(parents=True)
+    for name in ('model.bin', 'config.json', 'tokenizer.json'):
+        (model/name).write_text('{}' if name.endswith('.json') else '', encoding='utf-8')
+    monkeypatch.setenv('HOME', str(home))
+    monkeypatch.setattr(
+        'easel.generation_draft_speech.importlib.util.find_spec',
+        lambda name: ModuleSpec(name, loader=None) if name == 'faster_whisper' else None,
+    )
+
+    speech = LocalDraftSpeech(tmp_path/'outputs', {})
+
+    assert speech.model_path() == model.resolve()

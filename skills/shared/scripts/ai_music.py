@@ -54,7 +54,8 @@ from pathlib import Path
 from output_paths import validate_output_path
 from typing import Any
 
-from model_registry import env_aliases, provider_ids, provider_required_env
+from model_registry import (env_aliases, provider_ids, provider_required_env,
+                            resolve_provider as resolve_configured_provider)
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -136,11 +137,15 @@ def require_env(name: str) -> str:
 
 
 def resolve_provider(explicit: str | None) -> str:
-    provider = (explicit or os.environ.get("MUSIC_PROVIDER", "") or "").strip()
+    requested = (explicit or "").strip()
+    provider = (requested or os.environ.get("MUSIC_PROVIDER", "") or "").strip()
+    available = resolve_configured_provider("music", dict(os.environ), provider)
+    if not requested and available:
+        provider = available
     if not provider:
         fail(
             "未指定 provider。请用 --provider 或设置 env MUSIC_PROVIDER。"
-            f"可选：{ '、'.join(PROVIDERS) }。"
+            f"可选：{ '、'.join(PROVIDERS) }。当前没有已配置好的 provider。"
         )
     if provider not in PROVIDERS:
         fail(f"不支持的 provider：{provider}。可选：{ '、'.join(PROVIDERS) }。")

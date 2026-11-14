@@ -102,18 +102,6 @@ def _load_unified_env() -> None:
 
     _set_env_if_present("WECHAT_PUBLISHER_IMAGE_GENERATOR", image.get("generator"))
 
-    openai = image.get("openai") or {}
-    if isinstance(openai, dict):
-        _set_env_if_present("OPENAI_API_KEY", openai.get("api_key"))
-        _set_env_if_present("OPENAI_BASE_URL", openai.get("base_url"))
-        _set_env_if_present("OPENAI_IMAGE_MODEL", openai.get("image_model"))
-
-    gemini_proxy = image.get("gemini_proxy") or {}
-    if isinstance(gemini_proxy, dict):
-        _set_env_if_present("GEMINI_PROXY_API_KEY", gemini_proxy.get("api_key"))
-        _set_env_if_present("GEMINI_PROXY_BASE_URL", gemini_proxy.get("base_url"))
-        _set_env_if_present("GEMINI_PROXY_IMAGE_MODEL", gemini_proxy.get("image_model"))
-
     gemini_web = image.get("gemini_web") or {}
     if isinstance(gemini_web, dict):
         _set_env_if_present("GEMINI_WEB_DATA_DIR", gemini_web.get("data_dir"))

@@ -153,7 +153,8 @@ class GenerationSummary(GenerationModel):
     kind: Literal['image', 'video', 'chat', 'agent', 'aideo', 'draft-generation', 'character'] = Field(serialization_alias='type')
     channel: str
     model: str
-    operation: Literal['generate', 'edit', 'create', 'remix', 'completion', 'stream', 'claude', 'agent', 'aideo', 'video', 'image-text', 'video-url', 'video-edit']
+    operation: Literal['generate', 'edit', 'create', 'remix', 'completion', 'stream', 'claude', 'claude_completion',
+                        'agent', 'aideo', 'video', 'image-text', 'video-url', 'video-edit']
     created_at: float
     updated_at: float
 

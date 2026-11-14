@@ -6,7 +6,7 @@ from easel.generation_models import GenerationError
 from easel.generation_router import generation_errors
 from web.generation_agent_bridge import authorize, service
 from web.generation_agent_media import session_id
-from web import app as server
+from web.server_binding import server
 
 
 class AgentAnswer(BaseModel):

@@ -13,7 +13,7 @@ from easel.generation_models import GenerationError
 from easel.generation_store import GenerationStore
 from easel.publish_recovery import _owner_alive, worker_owner
 from web.generation_agent_media import session_id, stage_prompt
-from web import app as server
+from web.server_binding import server
 
 INTERNAL_AGENT_CHAT: ContextVar[bool] = ContextVar('internal_agent_chat', default=False)
 

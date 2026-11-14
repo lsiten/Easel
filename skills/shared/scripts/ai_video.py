@@ -44,7 +44,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from model_registry import env_aliases, provider_ids, provider_required_env
+from model_registry import (env_aliases, provider_ids, provider_required_env,
+                            resolve_provider as resolve_configured_provider)
 
 try:
     from easel.remote_media import RemoteMediaError, download_to_file
@@ -282,10 +283,14 @@ def _put_audio(payload: dict[str, Any], params: dict[str, Any] | None,
 
 
 def resolve_provider(explicit: str | None) -> str:
-    provider = (explicit or os.environ.get("VIDEO_PROVIDER", "") or "").strip()
+    requested = (explicit or "").strip()
+    provider = (requested or os.environ.get("VIDEO_PROVIDER", "") or "").strip()
+    available = resolve_configured_provider("video", dict(os.environ), provider)
+    if not requested and available:
+        provider = available
     if not provider:
         fail("未指定 provider。请用 --provider 或设置 env VIDEO_PROVIDER。"
-             f"可选：{ '、'.join(PROVIDERS) }。")
+             f"可选：{ '、'.join(PROVIDERS) }。当前没有已配置好的 provider。")
     if provider not in PROVIDERS:
         fail(f"不支持的 provider：{provider}。可选：{ '、'.join(PROVIDERS) }。")
     return provider

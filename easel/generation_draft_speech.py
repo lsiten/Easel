@@ -1,15 +1,18 @@
 """Local-only speech evidence for video drafts; never silently drop an audio track."""
 from __future__ import annotations
+
 import importlib.util
 import os
-from collections.abc import Mapping
-from pathlib import Path
 import subprocess
 import sys
+from collections.abc import Mapping
+from pathlib import Path
+
 import anyio
 from pydantic import BaseModel, ConfigDict, Field
-from easel.generation_models import GenerationError
+
 from easel.generation_images import ImageGeneration
+from easel.generation_models import GenerationError
 from easel.ownership import owned_media_path
 
 
@@ -46,7 +49,7 @@ class LocalDraftSpeech:
         if importlib.util.find_spec('faster_whisper') is None:
             raise GenerationError('draft_audio_transcription_dependency_required', 409)
         requested = self.settings.get('EASEL_DRAFT_ASR_MODEL', '').strip()
-        names = (requested,) if requested else ('base', 'tiny')
+        names = (requested,) if requested else ('base', 'tiny', 'large-v3')
         candidates: list[Path] = []
         for name in names:
             candidate = Path(name).expanduser()
@@ -56,6 +59,8 @@ class LocalDraftSpeech:
                 candidates.append(Path.home()/'.cache/easel-models'/('faster-whisper-'+name))
                 cache = Path(os.environ.get('HF_HUB_CACHE', str(Path.home()/'.cache/huggingface/hub')))
                 candidates.extend(sorted((cache/('models--Systran--faster-whisper-'+name)/'snapshots').glob('*')))
+                if name == 'large-v3':
+                    candidates.append(Path.home()/'models'/'whisper-large-v3')
         for candidate in candidates:
             if all((candidate/name).is_file() for name in ('model.bin', 'config.json', 'tokenizer.json')):
                 return candidate.resolve()
@@ -111,8 +116,10 @@ class LocalDraftSpeech:
 def transcribe_local(audio: Path, model_path: Path, destination: Path) -> None:
     """Reuse ASR formatting, feeding PCM directly to avoid incompatible PyAV file decoders."""
     import wave
+
     import numpy as np
     from faster_whisper import WhisperModel
+
     from skills.shared.scripts.asr import _render_json, _split_long_segment
     with wave.open(str(audio)) as stream:
         if stream.getnchannels() != 1 or stream.getframerate() != 16000 or stream.getsampwidth() != 2:

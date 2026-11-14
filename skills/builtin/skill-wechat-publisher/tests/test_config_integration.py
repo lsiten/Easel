@@ -120,8 +120,8 @@ def test_generate_image_print_command_uses_skill_root_yaml_only(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("bun") is None, reason="bun is not installed")
-def test_bun_load_env_uses_skill_root_yaml_only(tmp_path):
-    """baoyu_image_gen_core.loadEnv() should ignore cwd/home YAML and export from its own skill root."""
+def test_bun_load_env_uses_image_channel_and_skill_root_yaml_metadata(tmp_path):
+    """Provider settings come from IMG_*; skill-root YAML only supplies skill metadata."""
     _, scripts_dir, cwd_dir = _prepare_isolated_skill_root(tmp_path)
     home_dir = tmp_path / "home"
 
@@ -147,7 +147,7 @@ def test_bun_load_env_uses_skill_root_yaml_only(tmp_path):
         await loadEnv();
         console.log(JSON.stringify({
           provider: detectProvider(args),
-          baseUrl: process.env.GEMINI_PROXY_BASE_URL,
+          baseUrl: process.env.IMG_BASE_URL,
           model: getDefaultModel("gemini-proxy"),
           generator: process.env.WECHAT_PUBLISHER_IMAGE_GENERATOR,
         }));
@@ -157,21 +157,28 @@ def test_bun_load_env_uses_skill_root_yaml_only(tmp_path):
     result = subprocess.run(
         ["bun", "--eval", code],
         cwd=tmp_path / "skill",
-        env={"PATH": os.pathsep.join((str(Path(sys.executable).parent), os.environ["PATH"])), "HOME": str(home_dir)},
+        env={
+            "PATH": os.pathsep.join((str(Path(sys.executable).parent), os.environ["PATH"])),
+            "HOME": str(home_dir),
+            "IMG_API_KEY": "easel-image-key",
+            "IMG_BASE_URL": "https://image-channel.example/v1",
+            "IMG_MODEL": "image-channel-model",
+            "IMG_PROVIDER": "gemini",
+        },
         capture_output=True,
         text=True,
         check=True,
     )
 
     assert result.stdout.strip() == (
-        '{"provider":"gemini-proxy","baseUrl":"https://skill-root.example",'
-        '"model":"gemini-3-pro-image-preview","generator":"baoyu-danger-gemini-web"}'
+        '{"provider":"gemini-proxy","baseUrl":"https://image-channel.example/v1",'
+        '"model":"image-channel-model","generator":"baoyu-danger-gemini-web"}'
     )
 
 
 @pytest.mark.skipif(shutil.which("bun") is None, reason="bun is not installed")
-def test_bun_load_env_prefers_canonical_yaml_over_ambient_provider_env(tmp_path):
-    """baoyu_image_gen_core.loadEnv() should let canonical YAML override conflicting shell provider env."""
+def test_bun_load_env_ignores_legacy_yaml_provider_credentials(tmp_path):
+    """Legacy image provider fields in YAML never override the shared image channel."""
     skill_root = tmp_path / "skill"
     scripts_dir = skill_root / "scripts"
     scripts_dir.mkdir(parents=True)
@@ -223,6 +230,8 @@ def test_bun_load_env_prefers_canonical_yaml_over_ambient_provider_env(tmp_path)
             "PATH": os.pathsep.join((str(Path(sys.executable).parent), os.environ["PATH"])),
             "HOME": str(tmp_path / "home"),
             "GEMINI_PROXY_API_KEY": "ambient-proxy-key",
+            "IMG_API_KEY": "easel-image-key",
+            "IMG_BASE_URL": "https://image-channel.example/v1",
         },
         capture_output=True,
         text=True,
@@ -270,17 +279,16 @@ def test_generate_image_uses_global_generator_when_accounts_are_incomplete(tmp_p
     assert "generator: baoyu-danger-gemini-web" in result.stdout
 
 
-@pytest.mark.parametrize(
-    "yaml_text",
-    [
-        "default: [broken\naccounts:\n  main: {}\n",
-        "",
-        "{}\n",
-    ],
-)
+@pytest.mark.parametrize("yaml_text,fails", [
+    ("default: [broken\naccounts:\n  main: {}\n", True),
+    ("", False),
+    ("{}\n", False),
+])
 @pytest.mark.skipif(shutil.which("bun") is None, reason="bun is not installed")
-def test_bun_load_env_does_not_mask_invalid_skill_root_yaml(tmp_path, yaml_text):
-    """baoyu_image_gen_core.loadEnv() should fail on invalid or empty skill-root YAML even if shell provider env exists."""
+def test_bun_load_env_handles_skill_metadata_yaml_without_owning_image_provider_env(
+    tmp_path, yaml_text, fails,
+):
+    """Malformed YAML fails, while empty metadata YAML leaves IMG_* channel compatibility intact."""
     skill_root = tmp_path / "skill"
     scripts_dir = skill_root / "scripts"
     scripts_dir.mkdir(parents=True)
@@ -328,5 +336,9 @@ def test_bun_load_env_does_not_mask_invalid_skill_root_yaml(tmp_path, yaml_text)
         check=False,
     )
 
-    assert result.returncode != 0
-    assert "openai" not in result.stdout
+    if fails:
+        assert result.returncode != 0
+        assert "openai" not in result.stdout
+    else:
+        assert result.returncode == 0
+        assert result.stdout.strip() == "openai"
