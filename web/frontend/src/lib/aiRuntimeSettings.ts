@@ -1,6 +1,6 @@
-import { document, rows } from './aiWorkspaceApi';
+import { document, rows, text } from './aiWorkspaceApi';
 
-const LABELS: Readonly<Record<string, string>> = {
+const FALLBACK_LABELS: Readonly<Record<string, string>> = {
   VOLCENGINE_ACCESS_KEY_ID: '火山引擎访问密钥 ID',
   VOLCENGINE_SECRET_ACCESS_KEY: '火山引擎访问密钥',
   VOLCENGINE_SPACE_NAME: '视频点播空间名称',
@@ -14,14 +14,22 @@ const LABELS: Readonly<Record<string, string>> = {
 };
 export type RuntimeSetting = {
   readonly name: string; readonly label: string; readonly secret: boolean; readonly configured: boolean;
-  readonly locked: boolean; readonly value: string;
+  readonly locked: boolean; readonly value: string; readonly description: string; readonly required: boolean;
+  readonly default: string; readonly section: string;
 };
-export function runtimeSettings(value: unknown): readonly RuntimeSetting[] {
-  return rows(document(value).fields).filter((field) => typeof field.name === 'string' && Object.hasOwn(LABELS, field.name)).map((field) => {
-    if (typeof field.name !== 'string' || typeof field.value !== 'string' || typeof field.secret !== 'boolean'
-      || typeof field.configured !== 'boolean' || typeof field.locked !== 'boolean') throw new Error('运行选项返回格式无效');
-    return { name: field.name, label: LABELS[field.name], secret: field.secret, configured: field.configured,
-      locked: field.locked, value: field.secret ? '' : field.value };
+export function runtimeSettings(value: unknown, allowed: readonly string[] = Object.keys(FALLBACK_LABELS)): readonly RuntimeSetting[] {
+  const permitted = new Set(allowed);
+  return rows(document(value).fields).filter((field) => typeof field.name === 'string' && permitted.has(field.name)).map((field) => {
+    if (typeof field.name !== 'string' || typeof field.label !== 'string' || typeof field.value !== 'string'
+      || typeof field.secret !== 'boolean' || typeof field.configured !== 'boolean'
+      || typeof field.locked !== 'boolean') throw new Error('运行选项返回格式无效');
+    return { name: field.name, label: FALLBACK_LABELS[field.name] || text(field.label), secret: field.secret,
+      configured: field.configured,
+      locked: field.locked, value: field.secret ? '' : field.value,
+      description: text(field.description),
+      required: field.required === true,
+      default: text(field.default),
+      section: text(field.section) || '通道参数' };
   });
 }
 export function runtimeSettingsUpdate(fields: readonly RuntimeSetting[], edits: Readonly<Record<string, string>>) {

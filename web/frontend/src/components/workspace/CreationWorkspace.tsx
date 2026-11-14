@@ -28,7 +28,7 @@ export function CreationWorkspace({ page, persona, session, onMakeVideo, onNavig
         onClick={() => onNavigate(id)}><Icon size={15} />{label}</button>)}
     </nav>
     <div className="section-body section-body-scroll">
-      {!persona && active !== 'create' && <div className="panel">请先在侧栏选择画像，再使用创作能力。</div>}
+      {!persona && <div className="panel">请先在侧栏选择画像，再使用创作能力。</div>}
       {persona && active === 'create' && <AiCreation persona={persona} />}
       {persona && active === 'create-drafts' && <AiDrafts persona={persona} />}
       {persona && active === 'create-memory' && <AiMemory persona={persona} />}

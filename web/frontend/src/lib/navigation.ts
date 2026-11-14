@@ -1,9 +1,11 @@
 export type PrimaryPage = 'dashboard' | 'content' | 'skills';
 
-export type WorkspaceSection = 'overview' | 'conversation' | 'planning' | 'create' | 'platform';
-export type ContentSection = 'projects' | 'assets' | 'drafts' | 'generated' | 'video';
+export type WorkspaceSection = 'overview' | 'conversation' | 'planning' | 'create' | 'profile' | 'platform';
+export type ContentSection = 'projects' | 'assets' | 'drafts' | 'generated';
 
-export type Page =
+export type LegacyPage = 'ai' | 'accounts' | 'channels' | 'publish' | 'video';
+
+export type CanonicalPage =
   | PrimaryPage
   | 'chat'
   | 'tasks'
@@ -17,17 +19,14 @@ export type Page =
   | 'create-video'
   | 'platform'
   | 'outputs'
+  | 'assets'
   | 'generated-history'
   | 'generated-assets'
   | 'content-drafts'
   | 'video-projects'
-  | 'profile'
-  // Retained as compatibility aliases for old hashes and internal callers.
-  | 'ai'
-  | 'accounts'
-  | 'channels'
-  | 'publish'
-  | 'video';
+  | 'profile';
+
+export type Page = CanonicalPage | LegacyPage;
 
 const ALIASES = {
   ai: 'create',
@@ -35,7 +34,7 @@ const ALIASES = {
   channels: 'platform',
   publish: 'platform',
   video: 'create-video',
-} as const satisfies Partial<Record<Page, Page>>;
+} as const satisfies Record<LegacyPage, CanonicalPage>;
 
 const WORKSPACE_SECTIONS = {
   dashboard: 'overview',
@@ -49,6 +48,7 @@ const WORKSPACE_SECTIONS = {
   'create-drafts': 'create',
   'create-memory': 'create',
   'create-video': 'create',
+  profile: 'profile',
   platform: 'platform',
 } as const satisfies Partial<Record<Page, WorkspaceSection>>;
 
@@ -59,7 +59,7 @@ const CONTENT_SECTIONS = {
   'content-drafts': 'drafts',
   'generated-history': 'generated',
   'generated-assets': 'generated',
-  'video-projects': 'video',
+  'video-projects': 'projects',
 } as const satisfies Partial<Record<Page, ContentSection>>;
 
 const WORKSPACE_HASHES = {
@@ -67,6 +67,7 @@ const WORKSPACE_HASHES = {
   conversation: '#/workspace/conversation',
   planning: '#/workspace/planning',
   create: '#/workspace/create',
+  profile: '#/workspace/profile',
   platform: '#/workspace/platforms',
 } as const satisfies Record<WorkspaceSection, `#/${string}`>;
 
@@ -75,7 +76,6 @@ const CONTENT_HASHES = {
   assets: '#/content/assets',
   drafts: '#/content/drafts',
   generated: '#/content/generated',
-  video: '#/content/video',
 } as const satisfies Record<ContentSection, `#/${string}`>;
 
 const PAGE_HASHES = {
@@ -97,13 +97,17 @@ const PAGE_HASHES = {
   'content-drafts': '#/content/drafts',
   'generated-history': '#/content/generated',
   'generated-assets': '#/content/generated/assets',
-  'video-projects': '#/content/video',
+  'video-projects': '#/content/projects?type=video',
   skills: '#/skills',
-  profile: '#/settings/profiles',
+  profile: '#/workspace/profile',
 } as const satisfies Partial<Record<Page, `#/${string}`>>;
 
-export function normalizePage(page: Page): Page {
-  return page in ALIASES ? ALIASES[page as keyof typeof ALIASES] : page;
+function isLegacyPage(page: Page): page is LegacyPage {
+  return page in ALIASES;
+}
+
+export function normalizePage(page: Page): CanonicalPage {
+  return isLegacyPage(page) ? ALIASES[page] : page;
 }
 
 export function primaryPageFor(page: Page): PrimaryPage {
@@ -123,6 +127,12 @@ export function contentSectionFor(page: Page): ContentSection | null {
   return page in CONTENT_SECTIONS ? CONTENT_SECTIONS[page as keyof typeof CONTENT_SECTIONS] : null;
 }
 
+export function moduleForPage(page: Page): 'workspace' | 'content' | null {
+  if (workspaceSectionFor(page)) return 'workspace';
+  if (contentSectionFor(page)) return 'content';
+  return null;
+}
+
 export function routeForPage(page: Page): string {
   const normalized = normalizePage(page);
   if (normalized in PAGE_HASHES) return PAGE_HASHES[normalized as keyof typeof PAGE_HASHES];
@@ -131,7 +141,6 @@ export function routeForPage(page: Page): string {
   const content = contentSectionFor(normalized);
   if (content) return CONTENT_HASHES[content];
   if (normalized === 'skills') return '#/skills';
-  if (normalized === 'profile') return '#/settings/profiles';
   return '#/workspace/overview';
 }
 
@@ -148,6 +157,7 @@ const PAGE_BY_HASH: Readonly<Record<string, Page>> = {
   '#/workspace/create/batch': 'create-drafts',
   '#/workspace/create/memory': 'create-memory',
   '#/workspace/create/video': 'create-video',
+  '#/workspace/profile': 'profile',
   '#/workspace/platforms': 'platform',
   '#/content': 'outputs',
   '#/content/projects': 'outputs',
@@ -171,5 +181,5 @@ const PAGE_BY_HASH: Readonly<Record<string, Page>> = {
 };
 
 export function pageFromHash(hash: string): Page | null {
-  return PAGE_BY_HASH[hash] ?? null;
+  return PAGE_BY_HASH[hash.split('?')[0]] ?? null;
 }

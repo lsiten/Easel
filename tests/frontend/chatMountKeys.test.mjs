@@ -34,6 +34,13 @@ function mountApp() {
       if (name === 'react/jsx-runtime') return jsxRuntime;
       if (name === './lib/store') return { loadSessions: () => sessions, saveSessions() {} };
       if (name === './lib/api') return {};
+      if (name === './lib/navigation') return {
+        normalizePage: page => page,
+        pageFromHash: () => null,
+        routeForPage: () => '#/workspace/overview',
+        moduleForPage: () => 'workspace',
+      };
+      if (name === './components/AppPageContent') return { AppPageContent: './components/AppPageContent' };
       if (name === './lib/useConversationReferences') return {
         useConversationReferences: () => ({ refs: [], clearRefs() {}, refsFor: () => [] }),
       };
@@ -70,7 +77,10 @@ test('conversation and Studio siblings have independent keys across session and 
     const keys = host.props.children.filter(child => child && child.key !== null).map(child => child.key);
     assert.equal(new Set(keys).size, keys.length, 'siblings must never share a reconciliation key');
   }
-  const chat = host => find(host, node => node.type === './components/ChatPage');
+  const chat = host => {
+    const page = find(host, node => node.type === './components/AppPageContent');
+    return find(page.props.chat, node => node.type === './components/ChatPage');
+  };
   assert.notEqual(chat(original).key, chat(changed).key);
   assert.notEqual(chat(changed).key, chat(personaChanged).key);
 });

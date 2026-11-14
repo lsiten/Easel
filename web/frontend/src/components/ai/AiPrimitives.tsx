@@ -3,8 +3,17 @@ import type { ReactNode } from 'react';
 import { mediaUrl, text, rows, document } from '../../lib/aiWorkspaceApi';
 import type { Document } from '../../lib/aiWorkspaceApi';
 
-export function Field({ label, children }: { readonly label: string; readonly children: ReactNode }) {
-  return <label className="ai-field"><span className="field-label">{label}</span>{children}</label>;
+export function Field({ label, children, hint, required = false }: {
+  readonly label: string;
+  readonly children: ReactNode;
+  readonly hint?: ReactNode;
+  readonly required?: boolean;
+}) {
+  return <label className="ai-field">
+    <span className="field-label">{label}{required && <span className="ai-required" aria-hidden="true"> *</span>}</span>
+    {children}
+    {hint && <span className="ai-field-hint">{hint}</span>}
+  </label>;
 }
 export function Feedback({ busy, error }: { readonly busy: boolean; readonly error: string }) {
   return <>{busy && <p role="status">正在处理…</p>}{error && <p role="alert">{error}</p>}</>;

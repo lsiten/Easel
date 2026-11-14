@@ -1,10 +1,10 @@
 import type { ComponentType } from 'react';
 import {
   IconChat, IconCompass, IconDashboard, IconLayers, IconOutputs,
-  IconPublish, IconVideo,
+  IconProfile, IconPublish,
 } from './icons';
 import type { Page } from '../lib/navigation';
-import { contentSectionFor, workspaceSectionFor } from '../lib/navigation';
+import { contentSectionFor } from '../lib/navigation';
 
 type NavItem = {
   readonly page: Page;
@@ -17,6 +17,7 @@ const WORKSPACE_NAV = [
   { page: 'chat', label: '对话', Icon: IconChat },
   { page: 'trends', label: '策划', Icon: IconCompass },
   { page: 'create', label: '创作', Icon: IconLayers },
+  { page: 'profile', label: '画像', Icon: IconProfile },
   { page: 'platform', label: '平台', Icon: IconPublish },
 ] as const satisfies readonly NavItem[];
 
@@ -27,9 +28,9 @@ function workspaceTarget(page: Page): Page {
   if (page === 'chat' || page === 'tasks') return 'chat';
   if (PLANNING_PAGES.has(page)) return 'trends';
   if (CREATION_PAGES.has(page)) return 'create';
+  if (page === 'profile') return 'profile';
   return page;
 }
-
 export function WorkspaceNav({ current, onNavigate }: {
   readonly current: Page;
   readonly onNavigate: (page: Page) => void;
@@ -56,7 +57,6 @@ export function ContentNav({ current, onNavigate }: {
     { section: 'assets', page: 'assets', label: '素材源', Icon: IconLayers },
     { section: 'drafts', page: 'content-drafts', label: '草稿文案', Icon: IconCompass },
     { section: 'generated', page: 'generated-history', label: '生成记录', Icon: IconLayers },
-    { section: 'video', page: 'video-projects', label: '视频项目', Icon: IconVideo },
   ] as const;
   return <nav className="module-nav" aria-label="内容">
     <span className="module-nav-title">内容</span>
@@ -67,10 +67,4 @@ export function ContentNav({ current, onNavigate }: {
         onClick={() => onNavigate(page)}><Icon size={15} />{label}</button>)}
     </div>
   </nav>;
-}
-
-export function moduleForPage(page: Page): 'workspace' | 'content' | null {
-  if (workspaceSectionFor(page)) return 'workspace';
-  if (contentSectionFor(page)) return 'content';
-  return null;
 }

@@ -27,7 +27,7 @@ export function PlanningWorkspace({ page, persona, onUseTopic, onNavigate }: {
         onClick={() => onNavigate(id)}><Icon size={15} />{label}</button>)}
     </nav>
     <div className="section-body">
-      {active === 'trends' && <TrendsPage onUseTopic={onUseTopic} />}
+      {active === 'trends' && <TrendsPage persona={persona} onUseTopic={onUseTopic} />}
       {active === 'ideas' && <IdeasPage onUseTopic={onUseTopic} />}
       {active === 'calendar' && <CalendarPage persona={persona} />}
       {active === 'breakdown' && <BreakdownPage persona={persona} />}

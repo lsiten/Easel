@@ -12,6 +12,7 @@ export default function VideoStudioPanel({ onAddRef, session, persona }: {
 }) {
   const { studio, loading, error: err, refresh: load } = useOpenfilmStudio({ session, persona }, 6000);
   const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState('');
   const [refFlash, setRefFlash] = useState<Reference | null>(null);
   const autoLaunched = useRef(false);
   const launchGeneration = useRef(0);
@@ -19,9 +20,13 @@ export default function VideoStudioPanel({ onAddRef, session, persona }: {
   useEffect(() => {
     autoLaunched.current = false;
     setLaunching(false);
+    setLaunchError('');
     setRefFlash(null);
     return () => { launchGeneration.current += 1; };
   }, [session, persona]);
+  useEffect(() => {
+    if (studio?.studio) setLaunchError('');
+  }, [studio?.studio]);
 
   // 「像 Codex 一样引用网页里的元素」：OpenFilm Studio（跨源 iframe）把被引用元素
   // 经 postMessage 交给本面板（openfilm:reference），点一下即引用到对话，不靠固定清单。
@@ -49,10 +54,14 @@ export default function VideoStudioPanel({ onAddRef, session, persona }: {
     if (launching) return;
     const generation = launchGeneration.current;
     setLaunching(true);
+    setLaunchError('');
     try {
       await launchOpenfilmStudio(undefined, session, persona);
-    } catch {
+    } catch (error) {
       /* 启动失败：保持轮询，用户可再点「启动」重试 */
+      if (generation === launchGeneration.current) {
+        setLaunchError(error instanceof Error ? error.message : 'Studio 启动失败，请稍后重试。');
+      }
     } finally {
       if (generation === launchGeneration.current) setLaunching(false);
     }
@@ -84,12 +93,12 @@ export default function VideoStudioPanel({ onAddRef, session, persona }: {
               <IconExternal size={13} /> 独立窗口
             </button>
           )}
-          <button className="btn btn-sm" onClick={load} title="刷新"><IconRefresh size={13} /> 刷新</button>
+          <button className="btn btn-sm" onClick={() => { setLaunchError(''); load(); }} title="刷新"><IconRefresh size={13} /> 刷新</button>
         </div>
       </div>
       {/* 醒目引用提示：明确「点 Studio 里的元素即引用」，让 Agent 可据此理解并操作 */}
       <div className="vsp-refer-hint">
-        <span className="vsp-refer-hint-icon" aria-hidden>👆</span>
+        <span className="vsp-refer-hint-icon" aria-hidden><IconVideo size={14} /></span>
         <span>点 Studio 里的 <b>镜头 / 元素</b> 即引用到对话 —— Agent 可据此理解并操作</span>
       </div>
       {refFlash && (
@@ -98,8 +107,14 @@ export default function VideoStudioPanel({ onAddRef, session, persona }: {
         </div>
       )}
       <div className="vsp-body">
-        {loading && !studio ? <div className="vsp-empty">检测 OpenFilm Studio…</div>
-          : err ? <div className="vsp-empty">{err}</div>
+        {loading && !studio ? <div className="vsp-empty vsp-loading" role="status">
+          <span className="spinner" aria-hidden />检测 OpenFilm Studio…
+        </div>
+          : (err || launchError) ? <div className="vsp-empty" role="alert">
+            <div>无法打开制作过程</div>
+            <div className="vsp-error">{launchError || err}</div>
+            <button className="btn btn-sm" onClick={() => { setLaunchError(''); load(); }}>重试连接</button>
+          </div>
           : studio?.studio ? (
             // key=rev：film 预览 URL 稳定，rev 变=Agent 改了 film.html→重载 iframe 实时反映制作过程；
             // rev 不变（未编辑）则不重载，不打断当前预览/播放。

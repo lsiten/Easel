@@ -2,20 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatPage from './components/ChatPage';
-import SkillPage from './components/SkillPage';
 import VideoStudioPanel from './components/VideoStudioPanel';
-import ChannelsPage from './components/ChannelsPage';
-import ProfilePage from './components/ProfilePage';
-import DashboardPage from './components/DashboardPage';
 import OnboardingWizard from './components/OnboardingWizard';
 import SettingsPanel from './components/SettingsPanel';
-import { AgentTasks } from './components/ai/AgentTasks';
-import { ContentNav, WorkspaceNav, moduleForPage } from './components/ModuleNav';
-import { PlanningWorkspace } from './components/workspace/PlanningWorkspace';
-import { CreationWorkspace } from './components/workspace/CreationWorkspace';
-import { ContentCenter } from './components/workspace/ContentCenter';
+import { AppPageContent } from './components/AppPageContent';
+import { ContentNav, WorkspaceNav } from './components/ModuleNav';
 import type { Page } from './lib/navigation';
-import { contentSectionFor, normalizePage, pageFromHash, routeForPage, workspaceSectionFor } from './lib/navigation';
+import { moduleForPage, normalizePage, pageFromHash, routeForPage } from './lib/navigation';
 import { fetchStatus, fetchPersonas, streamChat, fetchLastTurn, stopChat } from './lib/api';
 import type { PersonaItem, UploadedFile, ChatQuestion } from './lib/api';
 import { OpenfilmStudioContext, useOpenfilmStudio } from './lib/useOpenfilmStudio';
@@ -76,8 +69,12 @@ function initialPage(hash: string): Page {
   return pageFromHash(hash) ?? 'dashboard';
 }
 
+function currentHash(): string {
+  return typeof window === 'undefined' ? '' : window.location.hash;
+}
+
 export default function App() {
-  const initialHash = window.location.hash;
+  const initialHash = currentHash();
   const [currentPage, setCurrentPage] = useState<Page>(() => initialPage(initialHash));
   const [outputsJump, setOutputsJump] = useState(() => initialOutputsPath(initialHash));
   const [personas, setPersonas] = useState<PersonaItem[]>([]);
@@ -112,6 +109,10 @@ export default function App() {
       if (page) {
         setOutputsJump('');
         setCurrentPage(page);
+        const canonical = routeForPage(page);
+        if (window.location.hash !== canonical) {
+          window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${canonical}`);
+        }
       }
     };
     window.addEventListener('hashchange', onHash);
@@ -791,89 +792,46 @@ export default function App() {
   // 流式生命周期在 App，页面切换随意——ChatPage 可自由卸载/重挂，回来从 props 读流式态即可。
   const renderPage = () => {
     const page = normalizePage(currentPage);
-    switch (page) {
-      case 'dashboard':
-        return (
-          <DashboardPage
-            persona={selectedPersona}
-            gatewayStatus={gatewayStatus}
-            apiDirect={apiDirect}
-            agentRuntime={agentRuntime}
-            onNavigate={setCurrentPage}
-            onUseTopic={handleUseTopic}
-          />
-        );
-      case 'chat':
-        return activeSession ? (
-          <ChatPage
-            apiDirect={apiDirect}
-            key={JSON.stringify(['chat', activeSession.id, conversationPersona])}
-            session={activeSession}
-            persona={conversationPersona}
-            stream={streams[activeSession.id]}
-            refs={refs}
-            onRemoveRef={removeRef}
-            onSend={(displayText, attachments, quote) => handleSendMessage(activeSession.id, displayText, attachments, quote)}
-            onStop={() => handleStopStream(activeSession.id)}
-            onResend={(userIndex, displayText, attachments, legacyAgentText) => handleResend(
-              activeSession.id, userIndex, displayText, attachments, legacyAgentText,
-            )}
-            onQuestionAnswered={(qid) => {
-              answeredRef.current.add(qid);
-              // 已答题从流式状态中移除——切走/切回会话都不再重现（组件内部 state 会在重挂时清零，只藏不移除没用）
-              const a = streamAcc.current[activeSession.id];
-              if (a) {
-                const before = a.questions.length;
-                const kept = a.questions.filter((q) => q.id !== qid);
-                if (kept.length !== before) {
-                  a.questions = kept;
-                  setStreams((p) => {
-                    const cur = p[activeSession.id];
-                    if (!cur) return p;
-                    return { ...p, [activeSession.id]: { ...cur, questions: [...kept] } };
-                  });
-                }
-              }
-            }}
-            isVideoSession={videoPanel}
-          />
-        ) : null;
-      case 'tasks':
-        return <AgentTasks persona={selectedPersona} />;
-      case 'trends':
-      case 'ideas':
-      case 'calendar':
-      case 'breakdown':
-        return <PlanningWorkspace page={page} persona={selectedPersona}
-          onUseTopic={handleUseTopic} onNavigate={setCurrentPage} />;
-      case 'create':
-      case 'create-drafts':
-      case 'create-memory':
-      case 'create-video':
-        return <CreationWorkspace page={page} persona={selectedPersona} session={activeSession?.id}
-          onMakeVideo={handleMakeVideo} onNavigate={setCurrentPage} />;
-      case 'platform':
-        return <ChannelsPage key={selectedPersona} persona={selectedPersona} onConfigureApplication={configureChannelApplication} />;
-      case 'outputs':
-      case 'assets':
-      case 'content-drafts':
-      case 'generated-history':
-      case 'generated-assets':
-      case 'video-projects':
-        return <ContentCenter page={page} persona={selectedPersona} session={activeSession?.id}
-          jumpPath={outputsJump} onJumpHandled={clearOutputsJump}
-          onMakeVideo={handleMakeVideo} onNavigate={setCurrentPage} />;
-      case 'skills':
-        return <SkillPage persona={selectedPersona} />;
-      case 'profile':
-        return <ProfilePage persona={selectedPersona} onUsePersona={handlePersonaChange} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
-      case 'content':
-        return <ContentCenter page="outputs" persona={selectedPersona} session={activeSession?.id}
-          jumpPath={outputsJump} onJumpHandled={clearOutputsJump}
-          onMakeVideo={handleMakeVideo} onNavigate={setCurrentPage} />;
-      default:
-        return <div className="panel">页面暂不可用。</div>;
-    }
+    const chat = activeSession ? (
+      <ChatPage
+        apiDirect={apiDirect}
+        key={JSON.stringify(['chat', activeSession.id, conversationPersona])}
+        session={activeSession}
+        persona={conversationPersona}
+        stream={streams[activeSession.id]}
+        refs={refs}
+        onRemoveRef={removeRef}
+        onSend={(displayText, attachments, quote) => handleSendMessage(activeSession.id, displayText, attachments, quote)}
+        onStop={() => handleStopStream(activeSession.id)}
+        onResend={(userIndex, displayText, attachments, legacyAgentText) => handleResend(
+          activeSession.id, userIndex, displayText, attachments, legacyAgentText,
+        )}
+        onQuestionAnswered={(qid) => {
+          answeredRef.current.add(qid);
+          // 已答题从流式状态中移除——切走/切回会话都不再重现（组件内部 state 会在重挂时清零，只藏不移除没用）
+          const a = streamAcc.current[activeSession.id];
+          if (a) {
+            const before = a.questions.length;
+            const kept = a.questions.filter((q) => q.id !== qid);
+            if (kept.length !== before) {
+              a.questions = kept;
+              setStreams((p) => {
+                const cur = p[activeSession.id];
+                if (!cur) return p;
+                return { ...p, [activeSession.id]: { ...cur, questions: [...kept] } };
+              });
+            }
+          }
+        }}
+        isVideoSession={videoPanel}
+      />
+    ) : <div className="panel">正在准备会话…</div>;
+    return <AppPageContent page={page} persona={selectedPersona} gatewayStatus={gatewayStatus}
+      apiDirect={apiDirect} agentRuntime={agentRuntime} chat={chat}
+      content={{ session: activeSession?.id, jumpPath: outputsJump, onJumpHandled: clearOutputsJump }}
+      profile={{ onUsePersona: handlePersonaChange, onNewProfile: () => setShowWizard(true), onDeleted: handleProfileDeleted }}
+      onNavigate={setCurrentPage} onUseTopic={handleUseTopic} onMakeVideo={handleMakeVideo}
+      onConfigureApplication={configureChannelApplication} />;
   };
 
   const handlePersonaChange = useCallback((persona: string) => {
@@ -973,7 +931,6 @@ export default function App() {
       {showRecommend && (
         <div className="overlay">
           <div className="modal" style={{ width: 420, maxWidth: '100%', textAlign: 'center' }}>
-            <div style={{ fontSize: 40 }}>👋</div>
             <h2 style={{ margin: '12px 0 8px', fontSize: 20 }}>欢迎使用 Easel</h2>
             <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6 }}>
               配置你的账号画像，生成的内容会更贴合你的风格、受众和平台调性。<br />
@@ -995,8 +952,11 @@ export default function App() {
       {/* 设置（统一入口：模型配置 · 环境安装 · 更多设置） */}
       {settingsOpen && (
         <SettingsPanel
+          persona={selectedPersona}
           banner={needModelSetup
-            ? '还没有配置模型 —— 填一个 API Key 才能开始对话。保存后会自动同步配置并重启网关。'
+            ? apiDirect
+              ? 'API 直连模式还没有可用配置：请在「对话与脚本」的 provider 行填写地址、Key 和模型；保存后下一轮请求即生效，不需要重启网关。'
+              : `Agent 底座${agentRuntime ? `「${agentRuntime}」` : ''}尚未就绪：请先安装对应 CLI 并完成原生登录，也可切换到已安装的底座或仅聊天模式。`
             : ''}
           onClose={() => {
             setSettingsOpen(false);
@@ -1006,10 +966,6 @@ export default function App() {
               setAgentRuntime(data.runtime || '');
               setGatewayStatus(data.gateway ? 'connected' : 'disconnected');
             }).catch(() => setGatewayStatus('disconnected'));
-          }}
-          onOpenProfiles={() => {
-            setSettingsOpen(false);
-            setCurrentPage('profile');
           }}
         />
       )}

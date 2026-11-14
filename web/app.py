@@ -66,6 +66,11 @@ from easel.publish_projection import (PublishedProjection, queue_publish_project
 from easel.publish_readback import ReadbackQuery, ReadbackOutcome, verify_readback
 from easel.direct_api import (DirectAPIError, SYSTEM_PROMPT, api_config, api_mode,
                               history_path, read_settings, stream_chat)
+from easel.network_proxy import (
+    apply_process_proxy,
+    load_proxy_config,
+    proxy_environment,
+)
 from easel import harnesses
 from easel.harnesses.models import resolve_effective_model
 from easel import kb
@@ -76,6 +81,12 @@ from easel.openfilm_studio import StudioUrls, live_project_urls
 from easel.hypit_api import router as hypit_router
 from skills.shared.scripts.project_scope import in_persona_scope
 from skills.shared.scripts.asset_storage import _storage_lock
+if __package__:
+    from .output_catalog import project_catalog, reference_catalog
+    from .trend_personalization import persona_signals, public_personalization, rank_items
+else:
+    from output_catalog import project_catalog, reference_catalog
+    from trend_personalization import persona_signals, public_personalization, rank_items
 PROFILES_DIR = PROJECT_ROOT / "profiles"
 SKILLS_DIR = PROJECT_ROOT / "skills"
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
@@ -439,6 +450,7 @@ for _spec in SKILL_API_REQUIREMENTS.values():
             _ENV_ALLOWLIST.update(_key.get("aliases", []))
 
 ENV_FILE = PROJECT_ROOT / ".env"
+apply_process_proxy(load_proxy_config(ENV_FILE))
 _HARNESS_LOOP = None
 _PLACEHOLDER_RE = re.compile(r"replace_me|your[-_]?api[-_]?key|xxx|^\.{3}$|^<.*>$", re.I)
 
@@ -642,7 +654,7 @@ from easel.generation_videos import VideoGeneration
 from easel.generation_volcengine_router import create_router as generation_volcengine_router
 
 
-from easel.generation_app_config import effective_settings
+from easel.generation_app_config import effective_settings, migrate_provider_config
 from web.generation_config_router import create_router as config_editor_router
 
 app.include_router(config_editor_router())
@@ -659,6 +671,7 @@ def operational_metrics(request: Request):
 
 
 def _generation_settings():
+    migrate_provider_config(OUTPUTS_DIR, ENV_FILE)
     return effective_settings(OUTPUTS_DIR, read_settings(ENV_FILE))
 
 
@@ -1055,11 +1068,8 @@ def clean_agent_output(raw: str) -> str:
 
 def _proxy_env() -> dict[str, str]:
     """返回带外网代理的环境变量（保护内网直连）。"""
-    env = os.environ.copy()
+    env = proxy_environment(os.environ, load_proxy_config(ENV_FILE))
     env.setdefault('EASEL_ROOT', str(PROJECT_ROOT))
-    env.setdefault('http_proxy', os.environ.get('EASEL_PROXY', ''))
-    env.setdefault('https_proxy', os.environ.get('EASEL_PROXY', ''))
-    env.setdefault('no_proxy', 'localhost,127.0.0.1,10.*,*.xiaohongshu.com,*.devops.xiaohongshu.com,*.douyin.com,*.kuaishou.com,*.zhihu.com,*.bilibili.com,*.weixin.qq.com,*.qq.com')
     return env
 
 
@@ -1224,6 +1234,42 @@ def _valid_base_url(u: str) -> bool:
     return p.scheme in ('http', 'https') and bool(p.hostname)
 
 
+_PROXY_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+_NON_PUBLIC_HOST_SUFFIXES = (
+    ".invalid", ".localhost", ".local", ".test", ".example",
+)
+
+
+def _request_uses_proxy(u: str) -> bool:
+    """URL 是否会被 urllib 交给已配置的 HTTP(S) 代理处理。"""
+    try:
+        parsed = urllib.parse.urlparse(u)
+        host = parsed.hostname or ""
+        proxy = urllib.request.getproxies().get(parsed.scheme, "")
+        return bool(proxy and host and not urllib.request.proxy_bypass(host))
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_proxy_fake_ip(host: str, address: ipaddress._BaseAddress, u: str) -> bool:
+    """识别 Clash/Surge 等代理的 fake-IP，而不是 URL 里直接写的保留地址。
+
+    这些代理会把公网域名解析到 198.18.0.0/15，再由代理按域名转发。它不在本机
+    路由到真实内网，但 Python 的 ipaddress 会将其标为 private。只有请求确实走
+    代理、原始 host 是域名且地址位于该专用网段时才放行；直填 fake-IP、
+    NO_PROXY 命中的地址以及其它私网地址仍全部拒绝。
+    """
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    normalized_host = host.lower().rstrip(".")
+    if "." not in normalized_host or normalized_host.endswith(_NON_PUBLIC_HOST_SUFFIXES):
+        return False
+    return address in _PROXY_FAKE_IP_NETWORK and _request_uses_proxy(u)
+
+
 def _ssrf_safe(u: str) -> bool:
     """自测会带着真 Key 去打这个地址，所以不许指向本机/内网/云元数据——
     这些地址上的服务通常无鉴权，一旦被当成「模型端点」就成了打内网的跳板。"""
@@ -1238,7 +1284,8 @@ def _ssrf_safe(u: str) -> bool:
         except ValueError:
             return False
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            return False
+            if not _is_proxy_fake_ip(host, ip, u):
+                return False
     return True
 
 
@@ -1298,9 +1345,28 @@ def _write_env(updates: dict[str, str]) -> None:
     update_environment(ENV_FILE, updates)
 
 
+def _channel_env_owners() -> dict[str, str]:
+    """Map model-channel environment keys to their owning settings channel."""
+    labels = {'image': '生图', 'video': '视频', 'music': '音乐', 'voice': '配音'}
+    owners: dict[str, str] = {}
+    try:
+        import model_registry as _owners_registry
+        for group, label in labels.items():
+            group_spec = _owners_registry.MODEL_GROUPS[group]
+            for key in (*group_spec.get('settings', ()),
+                        *(key for provider in group_spec['providers'] for key in provider['keys'])):
+                owners.setdefault(key['env'], label)
+    except Exception:  # noqa: BLE001
+        pass
+    for name in ('SILICONFLOW_API_KEY', 'SILICONFLOW_BASE_URL', 'SILICONFLOW_ASR_MODEL'):
+        owners.setdefault(name, '语音转写')
+    return owners
+
+
 def _api_spec_status(skill: str, env: dict[str, str]) -> dict:
     '返回注册表项 + 每个 key 当前配置状态与脱敏值（不回传明文）。'
     spec = SKILL_API_REQUIREMENTS[skill]
+    owners = _channel_env_owners()
 
     def key_status(k: dict) -> dict:
         raw = env.get(k['env'], '')
@@ -1312,6 +1378,7 @@ def _api_spec_status(skill: str, env: dict[str, str]) -> dict:
             'choices': list(k.get('choices', [])),
             'configured': _key_configured(k, env),
             'masked': _mask(raw) if k['secret'] and _is_set(raw) else (raw if not k['secret'] else ''),
+            'managedBy': owners.get(k['env'], ''),
         }
 
     providers = []
@@ -1585,12 +1652,15 @@ def get_output_tree(persona: str | None = None) -> list[dict]:
             # OpenFilm 视频项目（含 film.html）：前端据此在视频预览显示「在 Studio 中编辑」。
             if (e / "film.html").is_file():
                 node["openfilmProject"] = True
+            node["catalog"] = project_catalog(node, meta)
             items.append(node)
     # 外部只读内容源（本地知识库）：作为顶层节点并入内容库，懒加载、只读、不可删除。
     # 按当前画像聚焦（kb_scopes.json）过滤其顶层子节点：查询结果随画像而不同。
     for name, root in _content_sources().items():
         try:
-            items.append(_build_external_source_node(name, root, kb_patterns))
+            node = _build_external_source_node(name, root, kb_patterns)
+            node["catalog"] = reference_catalog("reference")
+            items.append(node)
         except Exception:
             # 一个外部源出错（路径不可读等）不影响其余内容库展示。
             continue
@@ -1599,6 +1669,7 @@ def get_output_tree(persona: str | None = None) -> list[dict]:
         _am = _assets_mod()
         node = _am.tree_for_library(persona)
         if node:
+            node["catalog"] = reference_catalog("assets")
             items.append(node)
     except Exception:  # noqa: BLE001  素材库读取失败不影响其余内容库展示
         pass
@@ -1834,6 +1905,9 @@ async def api_env_save(req: EnvUpdateRequest):
     bad = [k for k in (req.updates or {}) if k not in _ENV_ALLOWLIST]
     if bad:
         raise HTTPException(400, f"不允许写入的变量：{', '.join(bad)}")
+    managed = [k for k in (req.updates or {}) if k in _channel_env_owners()]
+    if managed:
+        raise HTTPException(409, "model_config_managed_by_channels")
     _write_env(req.updates or {})
     env = _read_env()
     return {
@@ -1843,247 +1917,16 @@ async def api_env_save(req: EnvUpdateRequest):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 设置面板 · 环境安装（skills/shared/scripts/install_tool.py 引擎桥）
-# 体检走引擎 check --json；安装后台跑、前端轮询 /api/env/job/{id}。
+# 设置面板 · 环境安装（独立路由：解释器、目录选择与后台安装任务）
 # ═══════════════════════════════════════════════════════════════════════
 
-INSTALL_TOOL = SHARED_SCRIPTS / "install_tool.py"
-_ENV_TOOLS_CACHE: dict = {"ts": 0.0, "data": None}
-_ENV_JOBS: dict[str, dict] = {}
+from web.environment_install_router import install_tool_ids as _install_tool_ids
+from web.environment_install_router import router as environment_install_router
 
+app.include_router(environment_install_router)
+from web.network_settings_router import router as network_settings_router
 
-@app.get("/api/env/tools")
-async def api_env_tools(refresh: bool = False):
-    """环境体检：引擎 check --json（15 秒缓存；refresh=1 强制重测）。"""
-    if not refresh and _ENV_TOOLS_CACHE["data"] and time.time() - _ENV_TOOLS_CACHE["ts"] < 15:
-        return _ENV_TOOLS_CACHE["data"]
-    try:
-        proc = await asyncio.to_thread(lambda: subprocess.run(
-            [sys.executable, str(INSTALL_TOOL), "--json", "check"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=240, cwd=str(PROJECT_ROOT)))
-    except subprocess.TimeoutExpired:
-        raise HTTPException(504, "环境体检超时，请稍后再试")
-    if proc.returncode != 0 or not (proc.stdout or "").strip():
-        raise HTTPException(500, f"环境体检失败：{(proc.stderr or '').strip()[-300:] or '无输出'}")
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        raise HTTPException(500, f"体检输出解析失败：{e}")
-    data["cachedAt"] = int(time.time())
-    _ENV_TOOLS_CACHE.update({"ts": time.time(), "data": data})
-    return data
-
-
-class EnvInstallRequest(BaseModel):
-    id: str
-
-
-_INSTALL_IDS_CACHE: dict = {"ts": 0.0, "ids": frozenset()}
-
-
-def _install_tool_ids() -> frozenset[str]:
-    """引擎里真实存在的配方 id（缓存 5 分钟）。安装接口只认这张表里的 id——
-    只按正则放行的话，`--help` 这类带横线的串会被 argparse 当选项吃掉。"""
-    if _INSTALL_IDS_CACHE["ids"] and time.time() - _INSTALL_IDS_CACHE["ts"] < 300:
-        return _INSTALL_IDS_CACHE["ids"]
-    try:
-        p = subprocess.run([sys.executable, str(INSTALL_TOOL), "--json", "list"],
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=30, cwd=str(PROJECT_ROOT))
-        ids = frozenset(t["id"] for t in (json.loads(p.stdout).get("tools") or []) if t.get("id"))
-    except Exception:  # noqa: BLE001
-        return _INSTALL_IDS_CACHE["ids"]
-    if ids:
-        _INSTALL_IDS_CACHE.update({"ts": time.time(), "ids": ids})
-    return ids
-
-
-@app.post("/api/env/install")
-async def api_env_install(req: EnvInstallRequest):
-    """后台安装（引擎 install）：立即返回 jobId，前端轮询进度。"""
-    tid = (req.id or "").strip()
-    known = await asyncio.to_thread(_install_tool_ids)
-    if tid not in known:
-        raise HTTPException(400, f"无效的工具 id：{tid[:40]!r}")
-    job_id = uuid.uuid4().hex[:16]
-    if len(_ENV_JOBS) >= 200:                   # 任务表不能无限长：清掉最老的已结束任务
-        for k, _ in sorted((kv for kv in _ENV_JOBS.items() if kv[1].get("ended")),
-                           key=lambda kv: kv[1]["ended"])[:100]:
-            _ENV_JOBS.pop(k, None)
-    job = {"jobId": job_id, "id": tid, "state": "running", "lines": [],
-           "result": None, "started": int(time.time()), "ended": None}
-    _ENV_JOBS[job_id] = job
-
-    def _run() -> None:
-        proc = None
-        try:
-            proc = subprocess.Popen(
-                [sys.executable, str(INSTALL_TOOL), "--json", "install", tid],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace", cwd=str(PROJECT_ROOT))
-            # stdout 必须**并发**抽干：串行地先读完 stderr 再读 stdout，子进程一旦往 stdout
-            # 写满管道缓冲（64K）就会阻塞，而我们还堵在 stderr 上——双向死锁。
-            _out: list[str] = []
-            t_out = threading.Thread(target=lambda: _out.append(proc.stdout.read() or ""), daemon=True)
-            t_out.start()
-            for line in proc.stderr:            # 引擎进度日志走 stderr
-                line = line.rstrip()
-                if line:
-                    job["lines"] = (job["lines"] + [line])[-40:]   # 只留最近 40 行（换列表，避免读端正在序列化时被就地改）
-            try:
-                proc.wait(timeout=3600)
-            except subprocess.TimeoutExpired:   # 卡死的安装进程必须真的杀掉，否则线程与子进程永久泄漏
-                proc.kill()
-                proc.wait(timeout=30)
-                raise
-            t_out.join(timeout=30)
-            out = ("".join(_out)).strip()
-            if out:
-                job["result"] = (json.loads(out).get("results") or [None])[0]
-            job["state"] = "ok" if (job["result"] or {}).get("state") == "ok" else "fail"
-        except Exception as e:  # noqa: BLE001
-            job["state"] = "fail"
-            job["result"] = {"id": tid, "state": "fail", "detail": f"{type(e).__name__}: {e}"}
-        finally:
-            job["ended"] = int(time.time())
-            _ENV_TOOLS_CACHE["ts"] = 0.0        # 装完让下一次体检不吃旧缓存
-
-    threading.Thread(target=_run, daemon=True).start()
-    return {"jobId": job_id, "id": tid, "state": "running"}
-
-
-@app.get("/api/env/job/{job_id}")
-async def api_env_job(job_id: str):
-    """查安装进度：running / ok / fail + 最近日志行 + 最终结果。"""
-    job = _ENV_JOBS.get(job_id)
-    if not job:
-        raise HTTPException(404, "任务不存在（服务可能重启过）")
-    return job
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 设置面板 · 模型配置（v1：按真实 .env 只读展示 + 真自测）
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 设置面板 · 环境安装（skills/shared/scripts/install_tool.py 引擎桥）
-# 体检走引擎 check --json；安装后台跑、前端轮询 /api/env/job/{id}。
-# ═══════════════════════════════════════════════════════════════════════
-
-INSTALL_TOOL = SHARED_SCRIPTS / "install_tool.py"
-_ENV_TOOLS_CACHE: dict = {"ts": 0.0, "data": None}
-_ENV_JOBS: dict[str, dict] = {}
-
-
-@app.get("/api/env/tools")
-async def api_env_tools(refresh: bool = False):
-    """环境体检：引擎 check --json（15 秒缓存；refresh=1 强制重测）。"""
-    if not refresh and _ENV_TOOLS_CACHE["data"] and time.time() - _ENV_TOOLS_CACHE["ts"] < 15:
-        return _ENV_TOOLS_CACHE["data"]
-    try:
-        proc = await asyncio.to_thread(lambda: subprocess.run(
-            [sys.executable, str(INSTALL_TOOL), "--json", "check"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=240, cwd=str(PROJECT_ROOT)))
-    except subprocess.TimeoutExpired:
-        raise HTTPException(504, "环境体检超时，请稍后再试")
-    if proc.returncode != 0 or not (proc.stdout or "").strip():
-        raise HTTPException(500, f"环境体检失败：{(proc.stderr or '').strip()[-300:] or '无输出'}")
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as e:
-        raise HTTPException(500, f"体检输出解析失败：{e}")
-    data["cachedAt"] = int(time.time())
-    _ENV_TOOLS_CACHE.update({"ts": time.time(), "data": data})
-    return data
-
-
-class EnvInstallRequest(BaseModel):
-    id: str
-
-
-_INSTALL_IDS_CACHE: dict = {"ts": 0.0, "ids": frozenset()}
-
-
-def _install_tool_ids() -> frozenset[str]:
-    """引擎里真实存在的配方 id（缓存 5 分钟）。安装接口只认这张表里的 id——
-    只按正则放行的话，`--help` 这类带横线的串会被 argparse 当选项吃掉。"""
-    if _INSTALL_IDS_CACHE["ids"] and time.time() - _INSTALL_IDS_CACHE["ts"] < 300:
-        return _INSTALL_IDS_CACHE["ids"]
-    try:
-        p = subprocess.run([sys.executable, str(INSTALL_TOOL), "--json", "list"],
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=30, cwd=str(PROJECT_ROOT))
-        ids = frozenset(t["id"] for t in (json.loads(p.stdout).get("tools") or []) if t.get("id"))
-    except Exception:  # noqa: BLE001
-        return _INSTALL_IDS_CACHE["ids"]
-    if ids:
-        _INSTALL_IDS_CACHE.update({"ts": time.time(), "ids": ids})
-    return ids
-
-
-@app.post("/api/env/install")
-async def api_env_install(req: EnvInstallRequest):
-    """后台安装（引擎 install）：立即返回 jobId，前端轮询进度。"""
-    tid = (req.id or "").strip()
-    known = await asyncio.to_thread(_install_tool_ids)
-    if tid not in known:
-        raise HTTPException(400, f"无效的工具 id：{tid[:40]!r}")
-    job_id = uuid.uuid4().hex[:16]
-    if len(_ENV_JOBS) >= 200:                   # 任务表不能无限长：清掉最老的已结束任务
-        for k, _ in sorted((kv for kv in _ENV_JOBS.items() if kv[1].get("ended")),
-                           key=lambda kv: kv[1]["ended"])[:100]:
-            _ENV_JOBS.pop(k, None)
-    job = {"jobId": job_id, "id": tid, "state": "running", "lines": [],
-           "result": None, "started": int(time.time()), "ended": None}
-    _ENV_JOBS[job_id] = job
-
-    def _run() -> None:
-        proc = None
-        try:
-            proc = subprocess.Popen(
-                [sys.executable, str(INSTALL_TOOL), "--json", "install", tid],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, encoding="utf-8", errors="replace", cwd=str(PROJECT_ROOT))
-            # stdout 必须**并发**抽干：串行地先读完 stderr 再读 stdout，子进程一旦往 stdout
-            # 写满管道缓冲（64K）就会阻塞，而我们还堵在 stderr 上——双向死锁。
-            _out: list[str] = []
-            t_out = threading.Thread(target=lambda: _out.append(proc.stdout.read() or ""), daemon=True)
-            t_out.start()
-            for line in proc.stderr:            # 引擎进度日志走 stderr
-                line = line.rstrip()
-                if line:
-                    job["lines"] = (job["lines"] + [line])[-40:]   # 只留最近 40 行（换列表，避免读端正在序列化时被就地改）
-            try:
-                proc.wait(timeout=3600)
-            except subprocess.TimeoutExpired:   # 卡死的安装进程必须真的杀掉，否则线程与子进程永久泄漏
-                proc.kill()
-                proc.wait(timeout=30)
-                raise
-            t_out.join(timeout=30)
-            out = ("".join(_out)).strip()
-            if out:
-                job["result"] = (json.loads(out).get("results") or [None])[0]
-            job["state"] = "ok" if (job["result"] or {}).get("state") == "ok" else "fail"
-        except Exception as e:  # noqa: BLE001
-            job["state"] = "fail"
-            job["result"] = {"id": tid, "state": "fail", "detail": f"{type(e).__name__}: {e}"}
-        finally:
-            job["ended"] = int(time.time())
-            _ENV_TOOLS_CACHE["ts"] = 0.0        # 装完让下一次体检不吃旧缓存
-
-    threading.Thread(target=_run, daemon=True).start()
-    return {"jobId": job_id, "id": tid, "state": "running"}
-
-
-@app.get("/api/env/job/{job_id}")
-async def api_env_job(job_id: str):
-    """查安装进度：running / ok / fail + 最近日志行 + 最终结果。"""
-    job = _ENV_JOBS.get(job_id)
-    if not job:
-        raise HTTPException(404, "任务不存在（服务可能重启过）")
-    return job
+app.include_router(network_settings_router)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2101,11 +1944,10 @@ def _mask_key(v: str) -> str:
 
 
 def _model_channels(runtime: str | None = None) -> dict:
-    env = _read_env()
+    env = _generation_settings()
     primary = ""
     direct = runtime == "api" if runtime else _direct_api_enabled()
     if direct:
-        env = read_settings(ENV_FILE)
         primary = f"direct-api/{env.get('EASEL_DIRECT_API_MODEL', '')}"
     direct_ready = False
     if direct:
@@ -2182,19 +2024,25 @@ def _model_channels(runtime: str | None = None) -> dict:
         {"order": 0, "name": "自带字幕", "sub": "视频自带 SRT/VTT 时直接读", "type": "脚本层",
          "model": "—", "baseUrl": "—", "keyMasked": "—", "role": "免配", "result": "优先"},
         {"slot": "siliconflow", "order": 1, "name": "siliconflow", "sub": "硅基流动", "type": "openai",
-         "model": "SenseVoiceSmall", "baseUrl": "https://api.siliconflow.cn/v1",
+         "model": (env.get("SILICONFLOW_ASR_MODEL") or "XingChenAGI/XingChenGSR-V1.0").strip(),
+         "baseUrl": (env.get("SILICONFLOW_BASE_URL") or "https://api.siliconflow.cn/v1").strip(),
          "keyMasked": _mask_key(env.get("SILICONFLOW_API_KEY", "")), "role": "主",
-         "result": "已配置" if sf else "缺 key"},
+         "result": "已配置" if sf else "缺 key", "modelEditable": True, "baseEditable": True},
     ]
     channels: dict = {"chat": {"rows": chat_rows}, "transcribe": {"rows": trans_rows}}
     try:
         import model_registry as _mr  # skills/shared/scripts 已在 sys.path 上
-        _setting_env = {"video": "VIDEO_PROVIDER", "music": "MUSIC_PROVIDER", "voice": "VOICE_PROVIDER"}
+        _setting_env = {"image": "IMG_PROVIDER", "video": "VIDEO_PROVIDER",
+                        "music": "MUSIC_PROVIDER", "voice": "VOICE_PROVIDER"}
         for _gid, _ch in (("image", "image"), ("video", "video"), ("music", "music"), ("voice", "speech")):
             _spec = _mr.MODEL_GROUPS[_gid]
             _chosen = (env.get(_setting_env.get(_gid, ""), "") or "").strip()
+            _provider_specs = {provider["id"]: provider for provider in _spec["providers"]}
+            _routes = _mr.provider_catalog(_gid, env, _chosen)
+            _effective = next((row["id"] for row in _routes if row["configured"]), "")
             _rows = []
-            for _p in _spec["providers"]:
+            for _route in _routes:
+                _p = _provider_specs[_route["id"]]
                 _req = [k for k in _p["keys"] if k["required"]]
                 _bk = next((k for k in _p["keys"] if not k["secret"]
                             and ("BASE" in k["env"] or "URL" in k["env"])), None)
@@ -2202,8 +2050,7 @@ def _model_channels(runtime: str | None = None) -> dict:
                 _edit_keys = [k for k in _req if k is not _bk and k is not _mk]
                 _k1 = _edit_keys[0] if _edit_keys else None
                 _k2 = _edit_keys[1] if len(_edit_keys) > 1 else None
-                _ok = all(_is_set(env.get(k["env"])) or any(_is_set(env.get(a)) for a in k.get("aliases", []))
-                          for k in _req)
+                _ok = bool(_route["configured"])
                 _masked = ""
                 if _k1:
                     _raw = env.get(_k1["env"], "")
@@ -2214,11 +2061,11 @@ def _model_channels(runtime: str | None = None) -> dict:
                                 break
                     _masked = _mask_key(_raw)
                 _rows.append({
-                    "slot": _p["id"], "order": 0, "name": _p["name"], "sub": _gid,
+                    "slot": _p["id"], "order": _route["order"], "name": _p["name"], "sub": _gid,
                     "type": _p["id"], "model": (env.get(_mk["env"]) or "").strip() if _mk else "",
                     "baseUrl": (env.get(_bk["env"]) or "").strip() if _bk else "",
-                    "keyMasked": _masked, "role": "主" if (_gid == "image" or _chosen == _p["id"]) else "备",
-                    "result": "已配置" if _ok else "未配置",
+                    "keyMasked": _masked, "role": "主" if _effective == _p["id"] else "备",
+                    "result": "已配置" if _ok else "未配置", "providerConfigured": _ok,
                     "key2Label": _k2["label"] if _k2 else "",
                     "key2Masked": _mask_key(env.get(_k2["env"], "")) if _k2 and _k2["secret"] else "",
                     "modelEditable": _mk is not None,
@@ -2366,7 +2213,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
         _gid0 = {"speech": "voice", "image": "image", "video": "video", "music": "music"}[ch0]
         _spec0 = _mr2.MODEL_GROUPS[_gid0]
         _by_id = {p["id"]: p for p in _spec0["providers"]}
-        _setting0 = {"video": "VIDEO_PROVIDER", "music": "MUSIC_PROVIDER", "voice": "VOICE_PROVIDER"}.get(_gid0)
+        _setting0 = {"image": "IMG_PROVIDER", "video": "VIDEO_PROVIDER",
+                     "music": "MUSIC_PROVIDER", "voice": "VOICE_PROVIDER"}.get(_gid0)
         _mupd: dict[str, str] = {}
         _primary0 = ""
         _env0 = _read_env()
@@ -2406,6 +2254,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
             _mupd[_setting0] = _primary0
         if not _mupd:
             raise HTTPException(400, "没有可保存的改动（key 留空表示不改）")
+        if any(name in os.environ for name in _mupd):
+            raise HTTPException(409, "运行环境已锁定该通道配置，请修改启动环境后重启")
         _write_env_direct(_mupd)
         _resp0 = {"ok": True, "note": ""}
         _resp0.update(_model_channels())
@@ -2478,6 +2328,8 @@ async def api_settings_models_save(req: ModelSaveRequest):
             if is_chat:
                 pkey = 'anthropic'
         elif slot == 'siliconflow':
+            if model:
+                updates['SILICONFLOW_ASR_MODEL'] = model
             if base:
                 updates['SILICONFLOW_BASE_URL'] = base
             if key:
@@ -4335,11 +4187,24 @@ class AssetsAddRequest(BaseModel):
     directory: str
 
 
+class AssetsEntryUpdate(BaseModel):
+    path: str
+    category: str | None = None
+    tags: list[str] | None = None
+    summary: str | None = None
+    capturedAt: str | None = None
+    location: str | None = None
+    project: str | None = None
+    role: str | None = None
+
+
 @app.post("/api/assets/sources")
 def api_assets_add(req: AssetsAddRequest, persona: str | None = None):
-    """登记一个素材源目录到当前画像素材库。"""
+    """登记素材源；物理移动只在用户发起 AI 整理或基线整理时执行."""
     try:
-        return _assets_mod().add(persona or "", [req.directory])
+        library = _assets_mod()
+        result = library.add(persona or "", [req.directory])
+        return result
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(400, str(exc))
 
@@ -4351,6 +4216,44 @@ def api_assets_remove(directory: str, persona: str | None = None):
         return _assets_mod().remove(persona or "", directory)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(400, str(exc))
+
+
+@app.get("/api/assets/entry")
+def api_assets_entry(path: str, persona: str | None = None):
+    """Return the indexed metadata for one managed asset path."""
+    try:
+        library = _assets_mod()
+        sub = path.removeprefix("@assets/").strip("/")
+        for entry in library.list_items(persona or ""):
+            if f"{entry.get('category', '')}/{entry.get('stored_name', entry.get('name', ''))}" == sub:
+                return entry
+        raise HTTPException(404, "素材索引不存在")
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BROAD_EXCEPT_OK — HTTP boundary.
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/assets/entry")
+def api_assets_update_entry(req: AssetsEntryUpdate, persona: str | None = None):
+    """Persist a user-confirmed asset correction and lock it against AI overwrite."""
+    try:
+        library = _assets_mod()
+        sub = req.path.removeprefix("@assets/").strip("/")
+        current = next(
+            (entry for entry in library.list_items(persona or "")
+             if f"{entry.get('category', '')}/{entry.get('stored_name', entry.get('name', ''))}" == sub),
+            None,
+        )
+        if current is None:
+            raise HTTPException(404, "素材索引不存在")
+        changes = {key: value for key, value in req.model_dump(exclude={"path"}).items()
+                   if value is not None}
+        return library.update_entry(persona or "", str(current["source"]), **changes)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BROAD_EXCEPT_OK — HTTP boundary.
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/assets/tree")
@@ -4425,8 +4328,20 @@ def _organize_asset_agent(prompt: str, profile: str, session: str) -> str:
 
 
 from web.asset_organization import AssetOrganizer, organization_router
+from easel.project_organization import ProjectOrganizer
 _ASSET_ORGANIZER = AssetOrganizer(OUTPUTS_DIR / "_asset_jobs", _assets_mod, _organize_asset_agent)
 app.include_router(organization_router(_ASSET_ORGANIZER, profile_exists, _asset_agent_required))
+
+
+def _organize_project_agent(prompt: str, profile: str, session: str) -> str:
+    return run_agent_sync(chat_turn_message(prompt, profile), TIMEOUT_PRODUCE, session)
+
+
+from web.project_organization_router import create_project_organization_router
+_PROJECT_ORGANIZER = ProjectOrganizer(OUTPUTS_DIR, _organize_project_agent)
+app.include_router(create_project_organization_router(
+    _PROJECT_ORGANIZER, profile_exists, _asset_agent_required,
+))
 
 
 @app.get("/api/assets/pick-dir")
@@ -6447,10 +6362,16 @@ def _fetch_platform(pf: str) -> list[dict]:
 
 
 @app.get("/api/trends")
-async def api_trends(platforms: str = "weibo,douyin,zhihu", limit: int = 12):
+async def api_trends(platforms: str = "weibo,douyin,zhihu", limit: int = 12,
+                     persona: str | None = None):
     pfs = [p.strip() for p in platforms.split(",") if p.strip() in TREND_SOURCES]
     now = time.time()
     loop = asyncio.get_event_loop()
+    signals = None
+    if persona and profile_exists(persona):
+        profile_text = load_profile_text(persona)
+        if profile_text:
+            signals = persona_signals(profile_text)
     result = []
     for pf in pfs:
         c = _TREND_CACHE.get(pf)
@@ -6462,13 +6383,20 @@ async def api_trends(platforms: str = "weibo,douyin,zhihu", limit: int = 12):
                 _TREND_CACHE[pf] = (now, items)
             elif c:
                 items = c[1]
+        ranked_items = rank_items(items, signals, pf) if signals else items
         result.append({
             "platform": pf,
             "label": TREND_LABELS.get(pf, pf),
-            "items": items[:max(1, min(limit, 30))],
+            "items": ranked_items[:max(1, min(limit, 30))],
             "ok": bool(items),
+            "personalized": signals is not None,
         })
-    return {"trends": result, "updated": int(now)}
+    return {
+        "trends": result,
+        "updated": int(now),
+        "persona": persona or "",
+        "personalization": public_personalization(signals),
+    }
 
 
 SCHEDULE_FILE = OUTPUTS_DIR / "_schedule.json"

@@ -334,7 +334,7 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
     if (!runId) return;
     const actionGeneration = generation.current;
     setBusy(`import:${artifact.name}`); setNotice('');
-    try { await importHypitArtifact(String(runId), scope, artifact.name); if (actionGeneration === generation.current) setNotice(`已导入 ${safeText(artifact.name)} 到内容库。`); }
+    try { await importHypitArtifact(String(runId), scope, artifact.name); if (actionGeneration === generation.current) setNotice(`已导入 ${safeText(artifact.name)} 到项目与成品。`); }
     catch (error) { if (actionGeneration === generation.current) setNotice(safeError(error, '产物导入失败')); }
     finally { if (actionGeneration === generation.current) setBusy(''); }
   };
@@ -394,7 +394,7 @@ export default function HypitReplicationWorkspace({ session, persona }: Props) {
 
       <Card title="报告与产物" eyebrow="Outputs">
         {reports.length ? <div className="hypit-reports">{reports.map((report, index) => <pre key={index}>{describe(report)}</pre>)}</div> : <div className="hypit-muted">Build 完成后显示报告。</div>}
-        <div className="hypit-artifacts">{artifacts.length ? artifacts.map(artifact => <div key={`${artifact.kind}-${artifact.name}`} className="hypit-artifact"><span><strong>{safeText(artifact.name)}</strong><small>{safeText(artifact.kind)}</small></span><button className="btn btn-sm" disabled={busy === `import:${artifact.name}`} onClick={() => void importArtifact(artifact)}>导入到内容库</button></div>) : <div className="hypit-muted">暂无可导入产物。</div>}</div>
+        <div className="hypit-artifacts">{artifacts.length ? artifacts.map(artifact => <div key={`${artifact.kind}-${artifact.name}`} className="hypit-artifact"><span><strong>{safeText(artifact.name)}</strong><small>{safeText(artifact.kind)}</small></span><button className="btn btn-sm" disabled={busy === `import:${artifact.name}`} onClick={() => void importArtifact(artifact)}>导入到项目与成品</button></div>) : <div className="hypit-muted">暂无可导入产物。</div>}</div>
       </Card>
     </div>
     {compareIds.length > 0 && <div className="hypit-compare-bar" role="status">正在对比 {compareIds.map(id => safeText(id)).join(' 与 ')}<button className="btn btn-sm" onClick={() => setCompareIds([])}>清除</button></div>}

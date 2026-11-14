@@ -1,23 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import EnvBoard from './EnvBoard';
+import { DirectoryPickerModal } from './DirectoryPickerModal';
 import HarnessSettings from './HarnessSettings';
 import { OptionsDropdown } from './SettingsSelect';
 import type { JobView } from './EnvBoard';
 import {
-  fetchEnvTools, startEnvInstall, fetchEnvJob,
+  fetchEnvTools, fetchEnvDirEntries, startEnvInstall, startEnvUninstall, fetchEnvJob,
   fetchModelChannels, runChannelSelftest, saveModelConfig,
   fetchAvailableModels,
 } from '../lib/api';
 import type { EnvTool, ModelRow, SelftestResult } from '../lib/api';
 import { IconSlidersHorizontal, IconPackage, IconEllipsis } from './settingsIcons';
-import { IconProfile } from './icons';
+import { SettingsMore } from './settings/SettingsMore';
+import { AiRuntimeSettings } from './ai/AiRuntimeSettings';
+import { ProviderModelCapabilities } from './ai/ChannelModelCatalog';
+import { aiRequest, document, text } from '../lib/aiWorkspaceApi';
+import type { Document } from '../lib/aiWorkspaceApi';
+import { localWhisperStatus } from '../lib/localWhisperStatus';
 
 interface Props {
   onClose: () => void;
   /** 非空时在面板顶部显示一条提示条。首开未配置模型时由 App 传入。 */
   banner?: string;
-  onOpenProfiles?: () => void;
+  persona?: string;
 }
 
 type Sec = 'model' | 'env' | 'more';
@@ -31,6 +37,19 @@ const CHANNELS: { id: Chan; label: string }[] = [
   { id: 'video', label: '视频' },
   { id: 'music', label: '音乐' },
 ];
+
+const TRANSCRIBE_RUNTIME_FIELDS = ['EASEL_DRAFT_ASR_MODEL'] as const;
+const VIDEO_RUNTIME_FIELDS = [
+  'VOLCENGINE_ACCESS_KEY_ID',
+  'VOLCENGINE_SECRET_ACCESS_KEY',
+  'VOLCENGINE_SPACE_NAME',
+  'VOLCENGINE_VOD_BASE_URL',
+  'VOLCENGINE_REGION',
+  'VOLCENGINE_PLAYBACK_BASE_URL',
+  'VOLCENGINE_URL_AUTH_PRIMARY_KEY',
+  'EASEL_DRAFT_MODEL_RATES',
+  'EASEL_CHANNEL_MEDIA_BASE_URL',
+] as const;
 
 /** 后台繁忙（整机高负载）时的抗抖动取数：单次超时即重试，撑过多秒级接口延迟。 */
 async function fetchWithRetry<T>(fn: () => Promise<T>, tries = 4, timeoutMs = 18000): Promise<T> {
@@ -54,14 +73,22 @@ async function fetchWithRetry<T>(fn: () => Promise<T>, tries = 4, timeoutMs = 18
 
 /** 后端放在 model/baseUrl 里的展示占位串——提交前要清掉，它们不是真实配置值。 */
 const PLACEHOLDERS = new Set(['—', '官方', '（未配置）', '本机', '内建默认']);
+const REMOTION_DIR_KEY = 'easel.env.remotion-dir';
 
 const hhmm = (ts: number) => {
   const d = new Date(ts * 1000);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+function capabilityProviderSlot(channel: Chan, slot: string): string {
+  if (channel === 'video') {
+    return ({ openai: 'openai-compatible', volcengine: 'ark' } as Record<string, string>)[slot] || slot;
+  }
+  return slot;
+}
+
 /** 设置（统一入口）：竖＝功能分类（模型配置 / 环境安装 / 更多设置），横＝模型六通道。 */
-export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: Props) {
+export default function SettingsPanel({ onClose, banner = '', persona = '' }: Props) {
   const [sec, setSec] = useState<Sec>('model');
   const [chan, setChan] = useState<Chan>('chat');
   const [harness, setHarness] = useState('');
@@ -73,13 +100,15 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
   const [envLoading, setEnvLoading] = useState(true);
   const [envError, setEnvError] = useState('');
   const [jobs, setJobs] = useState<Record<string, JobView>>({});
+  const [envDir, setEnvDir] = useState(() => window.localStorage.getItem(REMOTION_DIR_KEY) || '');
+  const [envDirOpen, setEnvDirOpen] = useState(false);
   const runningRef = useRef(false);
 
-  const refreshEnv = useCallback(async (force = false) => {
+  const refreshEnv = useCallback(async (force = false, directory = envDir) => {
     setEnvLoading(true);
     setEnvError('');
     try {
-      const d = await fetchWithRetry(() => fetchEnvTools(force));
+      const d = await fetchWithRetry(() => fetchEnvTools(force, directory));
       setTools(d.tools || []);
       setPython(d.python || '');
     } catch (e) {
@@ -87,7 +116,7 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
     } finally {
       setEnvLoading(false);
     }
-  }, []);
+  }, [envDir]);
 
   useEffect(() => {
     if (sec === 'env') void refreshEnv();
@@ -113,7 +142,7 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
         const last = (st.lines || [])[st.lines.length - 1] || '';
         setJobs((j) => ({
           ...j,
-          [id]: { state: st.state, line: last.trim().slice(0, 140), detail: st.result?.detail || null },
+          [id]: { ...j[id], state: st.state, line: last.trim().slice(0, 140), detail: st.result?.detail || null },
         }));
         if (st.state !== 'running') { clearInterval(timer); resolve(); }
       } catch {
@@ -124,22 +153,40 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
   }), []);
 
   const installOne = useCallback(async (id: string) => {
-    setJobs((j) => ({ ...j, [id]: { state: 'running', line: '启动中…' } }));
+    setJobs((j) => ({ ...j, [id]: { state: 'running', operation: 'install', line: '启动中…' } }));
     try {
-      const { jobId } = await startEnvInstall(id);
+      const { jobId } = await startEnvInstall(id, envDir);
       await pollJob(id, jobId);
     } catch (e) {
       setJobs((j) => ({ ...j, [id]: { state: 'fail', line: '', detail: e instanceof Error ? e.message : '启动失败' } }));
     }
     if (!batchMode.current) await settleJobs();   // 单卡装完立即收尾刷新
-  }, [pollJob, settleJobs]);
+  }, [envDir, pollJob, settleJobs]);
+
+  const uninstallOne = useCallback(async (id: string) => {
+    setJobs((j) => ({ ...j, [id]: { state: 'running', operation: 'uninstall', line: '准备卸载…' } }));
+    try {
+      const { jobId } = await startEnvUninstall(id, envDir);
+      await pollJob(id, jobId);
+    } catch (e) {
+      setJobs((j) => ({ ...j, [id]: { state: 'fail', operation: 'uninstall', line: '', detail: e instanceof Error ? e.message : '卸载失败' } }));
+    }
+    if (!batchMode.current) await settleJobs();
+  }, [envDir, pollJob, settleJobs]);
+
+  const chooseEnvDir = useCallback((directory: string) => {
+    setEnvDirOpen(false);
+    setEnvDir(directory);
+    window.localStorage.setItem(REMOTION_DIR_KEY, directory);
+    void refreshEnv(true, directory);
+  }, [refreshEnv]);
 
   const installMany = useCallback(async (ids: string[]) => {
     runningRef.current = true;
     batchMode.current = true;
     setJobs((j) => {
       const n = { ...j };
-      ids.forEach((id) => { n[id] = { state: 'running', line: '排队中…' }; });
+      ids.forEach((id) => { n[id] = { state: 'running', operation: 'install', line: '排队中…' }; });
       return n;
     });
     for (const id of ids) {
@@ -159,6 +206,9 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
   const [chatRows, setChatRows] = useState<ModelRow[]>([]);
   const [transRows, setTransRows] = useState<ModelRow[]>([]);
   const [mediaRows, setMediaRows] = useState<Record<string, ModelRow[]>>({});
+  const [catalogSnapshot, setCatalogSnapshot] = useState<Document | null>(null);
+  const [catalogConfig, setCatalogConfig] = useState<Document | null>(null);
+  const [catalogError, setCatalogError] = useState('');
   const [modelLoading, setModelLoading] = useState(true);
   const [modelErr, setModelErr] = useState('');
   const [selftest, setSelftest] = useState<{ testedAt: number; byBase: Record<string, SelftestResult> } | null>(null);
@@ -202,6 +252,22 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
     } catch (e) {
       setModelLists((m) => ({ ...m, [key]: { loading: false, models: m[key]?.models || [], err: e instanceof Error ? e.message : '拉取失败' } }));
     }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void aiRequest('/api/ai/config', controller.signal).then((value) => {
+      if (controller.signal.aborted) return;
+      const snapshot = document(value);
+      setCatalogSnapshot(snapshot);
+      setCatalogConfig(document(snapshot.config));
+      setCatalogError('');
+    }).catch((failure: unknown) => {
+      if (!controller.signal.aborted) {
+        setCatalogError(failure instanceof Error ? failure.message : '模型能力读取失败');
+      }
+    });
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -268,23 +334,44 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
         thinkingFormat: r.slot === 'custom' && r.thinking && r.protocol !== 'anthropic'
           ? (r.thinkingFormat || undefined) : undefined,
       }));
-    if (!payload.length) {
+    const catalogDirty = catalogConfig !== null && catalogSnapshot !== null
+      && JSON.stringify(catalogConfig) !== JSON.stringify(document(catalogSnapshot.config));
+    if (!payload.length && !catalogDirty) {
       setSavedNote('当前通道没有可保存的配置');
       return;
     }
     setSaving(true);
     setSavedNote('');
     try {
-      const d = await fetchWithRetry(() => saveModelConfig(chan, payload), 3, 20000);
-      setChatRows(d.channels.chat.rows || []);
-      setTransRows(d.channels.transcribe.rows || []);
-      setMediaRows({
-        image: d.channels.image?.rows || [],
-        video: d.channels.video?.rows || [],
-        music: d.channels.music?.rows || [],
-        speech: d.channels.speech?.rows || [],
-      });
-      setSavedNote(d.note ? `✓ 已保存（${d.note}）` : '✓ 已保存');
+      let providerNote = '';
+      if (payload.length) {
+        try {
+          const d = await fetchWithRetry(() => saveModelConfig(chan, payload), 3, 20000);
+          setChatRows(d.channels.chat.rows || []);
+          setTransRows(d.channels.transcribe.rows || []);
+          setMediaRows({
+            image: d.channels.image?.rows || [],
+            video: d.channels.video?.rows || [],
+            music: d.channels.music?.rows || [],
+            speech: d.channels.speech?.rows || [],
+          });
+          providerNote = text(d.note);
+        } catch (failure) {
+          const message = failure instanceof Error ? failure.message : '';
+          if (!catalogDirty || !message.includes('没有可保存的改动')) throw failure;
+        }
+      }
+      if (catalogConfig && catalogSnapshot && catalogDirty) {
+        const saved = document(await aiRequest('/api/ai/config', new AbortController().signal, {
+          config: catalogConfig,
+          revision: text(catalogSnapshot.revision),
+          clearSecrets: [],
+        }, 'PUT'));
+        setCatalogSnapshot(saved);
+        setCatalogConfig(document(saved.config));
+        setCatalogError('');
+      }
+      setSavedNote(providerNote ? `✓ 已保存（${providerNote}）` : '✓ 已保存');
       void refreshEnv();
     } catch (e) {
       setSavedNote(e instanceof Error ? `保存失败：${e.message}` : '保存失败');
@@ -292,25 +379,29 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
       setSaving(false);
       setTimeout(() => setSavedNote(''), 6000);
     }
-  }, [chan, chatRows, transRows, mediaRows, refreshEnv]);
+  }, [chan, chatRows, transRows, mediaRows, catalogConfig, catalogSnapshot, refreshEnv]);
 
   // Esc 关闭
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !event.defaultPrevented) onClose();
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (envDirOpen) {
+        setEnvDirOpen(false);
+        return;
+      }
+      onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [envDirOpen, onClose]);
 
-  // 本地兜底 whisper：从环境工具状态推出来（fw + 模型都在才算就绪）
-  const fw = tools.find((t) => t.id === 'fw');
-  const modelTool = tools.find((t) => t.id === 'model');
-  const localReady = fw?.state === 'ok' && modelTool?.state === 'ok';
+  // 本地兜底 whisper：运行时与模型分别展示，避免缺模型时误报为“未安装”。
+  const localWhisper = localWhisperStatus(tools);
+  const localReady = localWhisper.state === 'ready';
   const localRow: ModelRow = {
     order: 2, name: 'local-whisper', sub: '本机兜底 · 免 key', type: 'local',
     model: 'faster-whisper', baseUrl: '本机', keyMasked: '—', role: '备',
-    result: localReady ? '✓ 已就绪' : (tools.length ? '未装（去环境安装）' : '检测中…'),
+    result: localWhisper.label,
   };
 
   const resultText = (row: ModelRow): { text: string; cls: string } => {
@@ -405,7 +496,7 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
 
   const renderBoard = (
     rows: ModelRow[],
-    ops?: { onRow?: (i: number, patch: Partial<ModelRow>) => void; onPrimary?: (i: number) => void; onRemove?: (i: number) => void; media?: boolean },
+    ops?: { onRow?: (i: number, patch: Partial<ModelRow>) => void; onPrimary?: (i: number) => void; onRemove?: (i: number) => void; media?: boolean; capabilities?: boolean },
     board = 'chat',
   ) => {
     // 每行的会话态键：通道#行号 —— 不同通道/删除行后错位不再互相污染（见 modelLists 注释）
@@ -425,12 +516,13 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
         {rows.map((r, i) => {
           const rt = resultText(r);
           const ed = SLOT_EDIT[r.slot || '']
-            || (ops?.media && r.slot
+            || (r.slot
               ? { model: r.modelEditable !== false, base: r.baseEditable !== false }
               : undefined);
           const isCustom = r.slot === 'custom';
           return (
-            <div className="prow" key={i}>
+            <Fragment key={i}>
+            <div className="prow">
               <span className={`step${r.order === 0 ? ' ghost' : ''}`}>{isCustom ? i + 1 : r.order}</span>
               {isCustom ? (
                 <span className="pname">
@@ -574,7 +666,7 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
                   {r.baseUrl
                     || (ops?.media
                       ? r.baseOptional === false
-                        ? '需填写（点「高级」）'
+                        ? '需填写（点「配置」）'
                         : '默认（内建）'
                       : '')}
                 </span>
@@ -623,14 +715,25 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
               <span className={`stt ${rt.cls}`}>{rt.text}</span>
               {isCustom && ops?.onRemove ? (
                 <button className="row-del" onClick={() => ops.onRemove?.(i)} title="删除该供应商">✕</button>
-              ) : ops?.media && r.slot ? (
+              ) : (ops?.media || ops?.capabilities) && r.slot ? (
                 <button className="adv-btn" onClick={() => ops?.onRow?.(i, { adv: !r.adv })}>
-                  {r.adv ? '收起' : '高级'}
+                  {r.adv ? '收起' : '配置'}
                 </button>
               ) : (
                 <span />
               )}
             </div>
+            {r.adv && r.slot && <div className="provider-config-detail">
+              <ProviderModelCapabilities
+                channel={chan}
+                providerSlot={capabilityProviderSlot(chan, r.slot)}
+                providerName={r.name}
+                modelName={r.model}
+                config={catalogConfig}
+                onChange={setCatalogConfig}
+              />
+            </div>}
+            </Fragment>
           );
         })}
       </div>
@@ -650,7 +753,7 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
         <div className="settings-head">
           <div>
             <h2 className="settings-title">设置</h2>
-            <div className="settings-sub">模型配置 · 环境安装 · 更多设置</div>
+            <div className="settings-sub">模型配置 · 环境安装 · AI 与平台高级设置</div>
           </div>
           <div className="settings-actions">
             <button
@@ -721,7 +824,7 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
                       <span className="spacer" />
                       <button className="btn btn-sm" onClick={() => void doSelftest('chat')} disabled={testing || selectedHarness !== harness}>自测本通道</button>
                     </div>
-                    {renderBoard(chatRows, { onRow: (i, p) => updateRow(setChatRows, i, p), onPrimary: setPrimaryRow, onRemove: removeRow }, 'chat')}
+                    {renderBoard(chatRows, { onRow: (i, p) => updateRow(setChatRows, i, p), onPrimary: setPrimaryRow, onRemove: removeRow, capabilities: true }, 'chat')}
                     {selectedHarness === 'api' ? <div className="foot-note">此通道使用独立的 EASEL_DIRECT_API_* 配置，与原有 OpenAI 通道分开保存。支持聊天、画像、文本和图片附件（需模型支持图片）。没有本机文件、浏览器或技能执行工具。</div>
                       : <div className="add-row" onClick={addProvider}>＋ 添加供应商（填名称 / 模型 / Base URL / Key；点「设为主」切换生效通道）</div>}
                     <div className="foot-note">改完点右上角「保存配置」（key 留空=不改）；自动降级链随统一网关接入开放。</div>
@@ -731,13 +834,15 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
                 {chan === 'transcribe' && (
                   <section className="st-panel active">
                     <div className="panel-top">
-                      <span className={`pill ${transOk ? 'ok' : 'warn'}`}><span className="dot" />{transOk ? '主通道在线' : (localReady ? '本地兜底生效' : '备用待安装')}</span>
+                      <span className={`pill ${transOk ? 'ok' : 'warn'}`}><span className="dot" />{transOk ? '主通道在线' : (localReady ? '本地兜底生效' : localWhisper.state === 'runtime-only' ? '缺本地模型' : '备用待安装')}</span>
                       <span className="desc">三级链：自带字幕 → API → 本地兜底</span>
                       <span className="spacer" />
                       <button className="btn btn-sm" onClick={() => void doSelftest('transcribe')} disabled={testing}>自测本通道</button>
                     </div>
-                    {renderBoard([...transRows, localRow], { onRow: (i, p) => updateRow(setTransRows, i, p) }, 'transcribe')}
+                    {renderBoard([...transRows, localRow], { onRow: (i, p) => updateRow(setTransRows, i, p), capabilities: true }, 'transcribe')}
                     <div className="foot-note">有字幕不下模型；API 通道缺 key 自动落到本地 whisper（本地组件在「环境安装」页装）。保存即写入 .env 生效。</div>
+                    <AiRuntimeSettings names={TRANSCRIBE_RUNTIME_FIELDS} title="本地转写高级项"
+                      description="仅本地 Whisper 使用；云端语音转写模型仍在上方 provider 行配置。" />
                   </section>
                 )}
 
@@ -757,11 +862,11 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
                   <section className="st-panel active">
                     <div className="panel-top">
                       <span className={`pill ${mediaOk('image') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('image') ? '已配置' : '未配置'}</span>
-                      <span className="desc">只填 Key 即用（地址/模型内建，点「高级」可覆盖）</span>
+                      <span className="desc">只填 Key 即用；地址、模型和能力都在该 provider 的「配置」内维护</span>
                       <span className="spacer" />
                     </div>
-                    {renderBoard(mediaRows.image || [], { onRow: (i, p) => updateMediaRow('image', i, p), media: true }, 'image')}
-                    <div className="foot-note">按 Base URL 自动选同步 / 异步（apimart）模式；模型名留空用服务端默认。</div>
+                    {renderBoard(mediaRows.image || [], { onRow: (i, p) => updateMediaRow('image', i, p), onPrimary: (i) => setMediaPrimary('image', i), media: true }, 'image')}
+                    <div className="foot-note">首个「已配置」provider 按列表顺序优先；模型能力只复用对应 provider 的地址与密钥。</div>
                   </section>
                 )}
 
@@ -769,11 +874,13 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
                   <section className="st-panel active">
                     <div className="panel-top">
                       <span className={`pill ${mediaOk('video') ? 'ok' : 'off'}`}><span className="dot" />{mediaOk('video') ? '有可用提供商' : '未配置'}</span>
-                      <span className="desc">只填 Key 即用（地址/模型内建，点「高级」可覆盖）；「主/备」= 默认</span>
+                      <span className="desc">只填 Key 即用；地址、模型和能力都在该 provider 的「配置」内维护；「主/备」= 默认</span>
                       <span className="spacer" />
                     </div>
                     {renderBoard(mediaRows.video || [], { onRow: (i, p) => updateMediaRow('video', i, p), onPrimary: (i) => setMediaPrimary('video', i), media: true }, 'video')}
                     <div className="foot-note">脚本按「主」provider 出片；同类多家的自动降级随统一网关接入开放。</div>
+                    <AiRuntimeSettings names={VIDEO_RUNTIME_FIELDS} title="视频处理与模型高级项"
+                      description="普通文/图生视频只需上方 provider；下方火山 VOD 账号仅用于智能视频、风格转换、解说和轨道编辑。公开媒体地址仅在本机素材需要被外部读取时填写。" />
                   </section>
                 )}
 
@@ -789,6 +896,7 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
                 )}
 
                 {modelErr && <div className="env-error">{modelErr}</div>}
+                {catalogError && <div className="env-error">模型能力读取失败：{catalogError}</div>}
                 {selftestNote && <div className="foot-note">{selftestNote}</div>}
               </section>
             )}
@@ -798,31 +906,23 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
                 <EnvBoard
                   tools={tools}
                   python={python}
+                  directory={envDir}
                   loading={envLoading}
                   error={envError}
                   jobs={jobs}
                   anyRunning={anyRunning}
                   onRefresh={() => void refreshEnv(true)}
                   onInstall={installOne}
+                  onUninstall={uninstallOne}
                   onInstallMany={installMany}
+                  onPickDirectory={() => setEnvDirOpen(true)}
                 />
               </section>
             )}
 
             {sec === 'more' && (
               <section className="st-sec active">
-                <div className="panel-top">
-                  <span className="pill off"><span className="dot" />可扩展位</span>
-                  <span className="desc">同一个面板，以后放更多设置</span>
-                </div>
-                <div className="board">
-                  {onOpenProfiles && <button className="stub-row" onClick={onOpenProfiles}>
-                    <span className="tag2">画像</span><IconProfile size={15} />管理画像资料与创作身份<span className="future">打开</span>
-                  </button>}
-                  <div className="stub-row"><span className="tag2">预留</span>网关参数（端口 / 绑定 / 会话）<span className="future">就挂在这页旁边</span></div>
-                  <div className="stub-row"><span className="tag2">预留</span>通用设置（语言 / 更新 / 数据目录）<span className="future">按需加</span></div>
-                </div>
-                <div className="foot-note">扩展方式：在这个面板里加标签即可——模型、环境已各就位，其余按需加。</div>
+                <SettingsMore persona={persona} />
               </section>
             )}
           </div>
@@ -830,10 +930,19 @@ export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: 
 
         <div className="settings-foot">
           {harness === 'api'
-            ? 'ⓘ 供应商配置保存到 .env；API 直连仅聊天、无工具。切换底座或对话模式后请新建对话。'
-            : 'ⓘ 原生 Agent 认证由其 CLI 管理；「保存底座」只保存底座、模型覆盖和权限设置。媒体通道仍单独配置。'}
+            ? 'ⓘ 六个通道是供应商、服务地址和密钥的唯一编辑入口；API 直连仅聊天、无工具。切换底座后请新建对话。'
+            : 'ⓘ 原生 Agent 认证由其 CLI 管理；「保存底座」只保存底座、模型覆盖和权限设置。供应商与媒体能力统一在六个通道配置。'}
         </div>
       </div>
+      {envDirOpen ? (
+        <DirectoryPickerModal
+          title="选择 Remotion 工程目录"
+          initialPath={envDir}
+          load={fetchEnvDirEntries}
+          onClose={() => setEnvDirOpen(false)}
+          onPick={chooseEnvDir}
+        />
+      ) : null}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { fetchPersonas, fetchPersonaFiles, savePersonaFile, deletePersona, fetch
 import type { PersonaItem, PersonaFile, AccountAnalytics } from '../lib/api';
 import { renderMarkdown } from '../lib/sanitize';
 import { IconProfile, IconPlus } from './icons';
+import { ChannelProfileSettings } from './ChannelProfileSettings';
 
 // 粉丝量级：把粉丝数映射成人话档位（画像里“粉丝量级”一栏要的是量级而非精确值）
 function fanTier(n: number): string {
@@ -252,6 +253,9 @@ function ProfileDetail({ persona, onDeleted, onBack, onUsePersona, inUse }: Prof
       </div>
 
       {error && <div style={{ color: 'var(--red)', fontSize: 14, marginTop: 12 }}>{error}</div>}
+      <div className="profile-account-settings">
+        <ChannelProfileSettings persona={persona} />
+      </div>
 
       {loading ? (
         <div className="loading"><div className="spinner" />加载中…</div>

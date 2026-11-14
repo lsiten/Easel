@@ -6,7 +6,7 @@ function getBasePath(): string {
 
 const BASE = getBasePath();
 
-async function request<T>(url: string, options?: RequestInit): Promise<T> {
+export async function request<T>(url: string, options?: RequestInit): Promise<T> {
   // 全部是动态应用接口（登录态/数据等），禁止浏览器 HTTP 缓存——否则 /api/accounts 等可能被启发式
   // 缓存住旧响应（曾表现为“扫码登录后卡片仍显示未登录”）。调用方可用 options.cache 覆盖。
   const res = await fetch(`${BASE}${url}`, { cache: 'no-store', ...options });
@@ -105,6 +105,7 @@ export interface ApiKeySpec {
   configured: boolean;
   masked: string;   // 脱敏值或非 secret 明文
   choices: string[];
+  managedBy: string;
 }
 
 export interface ApiProviderSpec {
@@ -144,6 +145,22 @@ export interface OutputMeta {
   deliverablePaths?: string[];  // 成品的 outputs 相对路径（后端已解析存在性）
 }
 
+export interface ProjectCatalog {
+  libraryKind: 'project' | 'reference' | 'assets';
+  visibleInProjects: boolean;
+  projectKind: 'video' | 'image' | 'article' | 'mixed' | 'unknown';
+  projectKindLabel: string;
+  status: string;
+  deliverableCount: number;
+  processFileCount: number;
+  mediaCount: number;
+  videoCount: number;
+  imageCount: number;
+  textCount: number;
+  needsAttention: boolean;
+  hiddenReason: string;
+}
+
 /** 产物树节点：文件或目录（目录带 children，可无限嵌套点开）。 */
 export interface OutputNode {
   name: string;
@@ -158,6 +175,7 @@ export interface OutputNode {
   external?: boolean;        // 外部只读内容源（本地知识库）：前端隐藏删除、后端拒写/删
   openfilmProject?: boolean; // 该视频项目可由 openfilm Studio 直接编辑（含 film.html）
   assets?: boolean;          // 素材库节点（@assets/…）：懒加载/媒体走 /api/assets/*，只读、不可删
+  catalog?: ProjectCatalog;  // 顶层内容源/项目自动分类与展示生命周期
 }
 
 /** @deprecated 用 OutputNode（type==='file'）。保留别名减少改动面。 */
@@ -221,10 +239,27 @@ export function deletePersona(name: string): Promise<{ ok: boolean; deleted: str
 }
 
 // ---- 热点雷达 ----
-export interface TrendItem { title: string; hot: string; url: string; }
-export interface TrendGroup { platform: string; label: string; items: TrendItem[]; ok?: boolean; }
-export function fetchTrends(platforms: string, limit = 12): Promise<{ trends: TrendGroup[]; updated: number }> {
-  return request(`/api/trends?platforms=${encodeURIComponent(platforms)}&limit=${limit}`);
+export interface TrendItem {
+  title: string;
+  hot: string;
+  url: string;
+  score?: number;
+  reasons?: readonly string[];
+  originalRank?: number;
+  relevance?: number;
+  matched?: boolean;
+}
+export interface TrendGroup { platform: string; label: string; items: TrendItem[]; ok?: boolean; personalized?: boolean; }
+export interface TrendPersonalization { enabled: boolean; focusTerms: readonly string[]; platforms: readonly string[]; }
+export function fetchTrends(platforms: string, limit = 12, persona = ''): Promise<{
+  trends: TrendGroup[];
+  updated: number;
+  persona: string;
+  personalization: TrendPersonalization;
+}> {
+  const query = new URLSearchParams({ platforms, limit: String(limit) });
+  if (persona) query.set('persona', persona);
+  return request(`/api/trends?${query.toString()}`);
 }
 
 // ---- 内容排期 ----
@@ -501,6 +536,7 @@ export function handshakeHypitStudio(scope: HypitScope, studio: Pick<HypitStudio
 // ── 素材库（每账号素材源 → 按内容理解整理 → 供视频/文章创作取用）：随画像，仅本画像素材库 ──
 export interface AssetsStatus {
   profile: string; registered: boolean; sources: string[]; registered_all: number;
+  registered_paths: number; missing_sources: string[];
   organized: number; categories: number; asset_dir: string;
 }
 export interface AssetsItem {
@@ -528,8 +564,14 @@ export function assetsStatus(persona?: string): Promise<AssetsStatus> {
 export function fetchAssetsSources(persona?: string): Promise<{ profile: string; sources: string[] }> {
   return request<{ profile: string; sources: string[] }>(persona ? `/api/assets/sources?persona=${encodeURIComponent(persona)}` : '/api/assets/sources');
 }
-/** 登记一个素材源目录到当前画像素材库。 */
-export function assetsAdd(directory: string, persona?: string): Promise<{ added: string[]; already: string[]; invalid: string[]; sources: string[] }> {
+/** 登记一个素材源目录，后端立即完成确定性基线归位。 */
+export function assetsAdd(directory: string, persona?: string): Promise<{
+  added: string[];
+  already: string[];
+  invalid: string[];
+  sources: string[];
+  auto_organize?: { placed: number; skipped: readonly string[] };
+}> {
   return request('/api/assets/sources' + (persona ? `?persona=${encodeURIComponent(persona)}` : ''), {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ directory }),
   });
@@ -1101,6 +1143,7 @@ export interface EnvTool {
   group_name?: string;
   desc: string;
   big?: boolean;
+  uninstallable?: boolean;
 }
 
 export interface EnvToolsResponse {
@@ -1109,8 +1152,18 @@ export interface EnvToolsResponse {
   cachedAt?: number;
 }
 
-export function fetchEnvTools(refresh = false): Promise<EnvToolsResponse> {
-  return request(`/api/env/tools${refresh ? '?refresh=1' : ''}`);
+export function fetchEnvTools(refresh = false, directory = ''): Promise<EnvToolsResponse> {
+  const query = new URLSearchParams();
+  if (refresh) query.set('refresh', '1');
+  if (directory) query.set('dir', directory);
+  const suffix = query.size ? `?${query.toString()}` : '';
+  return request(`/api/env/tools${suffix}`);
+}
+
+/** List local folders for choosing the Remotion project directory. */
+export function fetchEnvDirEntries(path = ''): Promise<DirListing> {
+  const query = path ? `?path=${encodeURIComponent(path)}` : '';
+  return request(`/api/env/pick-dir${query}`);
 }
 
 export interface EnvJobResult {
@@ -1131,16 +1184,56 @@ export interface EnvJob {
   ended: number | null;
 }
 
-export function startEnvInstall(id: string): Promise<{ jobId: string; id: string; state: string }> {
+export function startEnvInstall(id: string, directory = ''): Promise<{ jobId: string; id: string; state: string }> {
   return request('/api/env/install', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify(directory ? { id, dir: directory } : { id }),
+  });
+}
+
+export function startEnvUninstall(id: string, directory = ''): Promise<{ jobId: string; id: string; state: string }> {
+  return request('/api/env/uninstall', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(directory ? { id, dir: directory } : { id }),
   });
 }
 
 export function fetchEnvJob(jobId: string): Promise<EnvJob> {
   return request(`/api/env/job/${encodeURIComponent(jobId)}`);
+}
+
+// ═══ 设置面板 · 网络代理 ═══
+
+export type ProxyMode = 'system' | 'custom' | 'direct';
+
+export interface ProxyValueView {
+  configured: boolean;
+  value: string;
+}
+
+export interface ProxySettingsView {
+  mode: ProxyMode;
+  httpProxy: ProxyValueView;
+  httpsProxy: ProxyValueView;
+  allProxy: ProxyValueView;
+  noProxy: ProxyValueView;
+}
+
+export function fetchProxySettings(): Promise<ProxySettingsView> {
+  return request('/api/settings/proxy');
+}
+
+export function saveProxySettings(
+  mode: ProxyMode,
+  updates: Record<string, string>,
+): Promise<ProxySettingsView> {
+  return request('/api/settings/proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, updates }),
+  });
 }
 
 // ═══ 设置面板 · 模型通道（只读 + 真自测） ═══
@@ -1156,6 +1249,7 @@ export interface ModelRow {
   keyMasked: string;
   role: string;
   result: string;
+  providerConfigured?: boolean;
   protocol?: string;
   thinking?: boolean;
   thinkingFormat?: string;

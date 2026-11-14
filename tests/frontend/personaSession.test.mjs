@@ -37,7 +37,7 @@ function setup(sessions, activeSessionId) {
   return { state, changePersona };
 }
 
-test('changing persona on a populated conversation preserves its identity and history', () => {
+test('changing persona on a populated conversation preserves its identity, history, and current route', () => {
   const original = { id: 'original', persona: '旧画像', messages: [{ role: 'user', content: '历史' }] };
   const { state, changePersona } = setup([original], original.id);
   changePersona('新画像');
@@ -49,7 +49,7 @@ test('changing persona on a populated conversation preserves its identity and hi
   assert.equal(original.messages[0].content, '历史');
   assert.equal(state.selectedPersona, '新画像');
   assert.equal(state.saved, state.sessions);
-  assert.equal(state.page, 'chat');
+  assert.equal(state.page, undefined);
 });
 
 test('an empty conversation adopts its persona without creating another conversation', () => {

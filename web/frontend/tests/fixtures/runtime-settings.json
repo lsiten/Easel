@@ -233,14 +233,6 @@
       "locked": false
     },
     {
-      "name": "EASEL_DRAFT_PLANNER_MODEL",
-      "label": "Draft planner model",
-      "secret": false,
-      "configured": false,
-      "value": "",
-      "locked": false
-    },
-    {
       "name": "EASEL_DRAFT_MODEL_RATES",
       "label": "Draft model rate JSON",
       "secret": false,

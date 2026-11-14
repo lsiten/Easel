@@ -92,6 +92,9 @@ export const IconPlus = ({ size, className, strokeWidth }: P) => (
 export const IconChevron = ({ size, className, strokeWidth }: P) => (
   <svg {...svg(size, strokeWidth)} className={className}><path d="m9 18 6-6-6-6" /></svg>
 );
+export const IconClose = ({ size, className, strokeWidth }: P) => (
+  <svg {...svg(size, strokeWidth)} className={className}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+);
 
 // ---- 分类图标（SKILL 卡 / Outputs 文件）----
 export const IconVideo = ({ size, className, strokeWidth }: P) => (

@@ -275,8 +275,10 @@ EASEL_DIRECT_API_KEY=你的_API_Key
 不会因选择底座而复制上述凭证。推理能力与参数支持以所选底座和模型的实际能力为准，
 不能将某个底座的配置字段套用到其它底座。详见 [Agent 底座](docs/agent-harnesses.md)。
 
-`.env.example` 还列出了视频、音乐、语音等可选模型配置。只需要配置实际使用的能力，也可以在 Web
-工作台的“技能库”中填写；没有配置的媒体 Skill 不会影响聊天、策划和文本创作。常见可选项包括：
+供应商、Base URL、API Key 和默认模型统一在 Web 设置的“模型配置 · 六个通道”维护，并写入项目
+根 `.env`。不要在其他页面保存第二套连接或模型目录。队列费率等非供应商参数仍在高级运行设置中。
+完整路由和迁移规则见 [模型配置与执行路由](docs/model-configuration.md)。没有配置的媒体通道
+不会影响聊天、策划和文本创作。常见可选项包括：
 
 | 能力 | 配置入口 | 额外依赖 |
 |---|---|---|
@@ -337,7 +339,7 @@ python skills/shared/scripts/assets.py organize <画像>                        
 python skills/shared/scripts/assets.py query <画像> <主题>                        # 按主题检索相关素材
 ```
 
-登记清单存 `profiles/asset_scopes.json`（与 `kb_scopes.json` 同构），整理后的素材树落在 `profiles/<画像>/assets/`（按分类目录 + `manifest.json` + `_index.json`，文件以软链落位、失败回退拷贝）。Web 内容库里会显示「**素材库**」节点，可浏览分类与文件、一键「整理素材」；创作时视频/文章 skill 会随当前画像调用 `query` 检索相关素材。
+登记清单存 `profiles/asset_scopes.json`（与 `kb_scopes.json` 同构）。点击「AI 一键整理」后，素材文件会**物理移动**到 `profiles/<画像>/assets/` 的分类目录，并写入 `manifest.json` 与 `_index.json`；不是软链或虚拟标签。Web 内容库里会显示「**素材库**」节点，可浏览分类与文件；创作时视频/文章 skill 会随当前画像调用 `query` 检索相关素材。
 
 Web 登记目录后自动交给当前 Agent 理解和整理，页面显示进度，离开或刷新后任务继续；失败会显示原因。
 同名素材不会互相覆盖，重新整理会更新摘要、标签和分类。仅 API 聊天模式需要先切换到具备文件工具的 Agent。

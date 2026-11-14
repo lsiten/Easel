@@ -83,6 +83,15 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
   const agentImageFallback = missingApi && detail?.apiSpec?.providers.some((provider) =>
     provider.keys.some((key) => key.env === 'IMG_API_KEY' && key.required));
   const blocked = missingApi && !agentImageFallback;
+  const managedChannels = [...new Set((detail?.apiSpec
+    ? [...detail.apiSpec.settings, ...detail.apiSpec.providers.flatMap((provider) => provider.keys)]
+    : []).map((key) => key.managedBy).filter(Boolean))];
+  const editableSettings = detail?.apiSpec?.settings.filter((key) => !key.managedBy) || [];
+  const editableProviders = detail?.apiSpec?.providers.map((provider) => ({
+    ...provider,
+    keys: provider.keys.filter((key) => !key.managedBy),
+  })).filter((provider) => provider.keys.length > 0) || [];
+  const hasEditableApiConfig = editableSettings.length > 0 || editableProviders.length > 0;
 
   return (
     <div className="drawer-overlay" onClick={onClose}>
@@ -116,10 +125,15 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
                   （任选一个服务商填齐即可用）
                 </span>
               </div>
-              {detail.apiSpec.settings.length > 0 && (
+              {managedChannels.length > 0 && <div className="managed-config-note">
+                模型和通道配置统一由「设置 → 模型配置」管理：
+                {managedChannels.map((channel) => <strong key={channel}>{channel}</strong>)}
+                技能页不再保存第二份地址或密钥。
+              </div>}
+              {editableSettings.length > 0 && (
                 <div className="provider-block">
                   <div className="provider-head"><strong style={{ fontSize: 13 }}>默认选择与能力</strong></div>
-                  {detail.apiSpec.settings.map((k) => (
+                  {editableSettings.map((k) => (
                     <div key={k.env}>
                       <label className="field-label">
                         {k.label} · 可选
@@ -149,7 +163,7 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
                   ))}
                 </div>
               )}
-              {detail.apiSpec.providers.map((prov) => {
+              {editableProviders.map((prov) => {
                 const provOk = prov.keys.filter(k => k.required).every(k => k.configured);
                 return (
                   <div key={prov.id} className={`provider-block ${provOk ? 'configured' : ''}`}>
@@ -187,12 +201,12 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
                   </div>
                 );
               })}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
+              {hasEditableApiConfig && <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
                 <button className="btn btn-primary btn-sm" onClick={handleSaveEnv} disabled={saving}>
                   {saving ? '保存中…' : '保存到 .env'}
                 </button>
                 {savedMsg && <span style={{ fontSize: 13, color: savedMsg.includes('✓') ? 'var(--green)' : 'var(--text-secondary)' }}>{savedMsg}</span>}
-              </div>
+              </div>}
             </div>
           )}
 
@@ -203,7 +217,9 @@ export default function SkillDrawer({ skillName, persona, onClose, onConfigured 
               <div style={{ fontSize: 13, color: 'var(--amber)', marginBottom: 10 }}>
                 {agentImageFallback
                   ? '未配置生图 API。若当前 Agent 底座提供生图工具，将直接使用；否则会提示补充配置。'
-                  : '该 SKILL 需要先配置上面的 API 才能运行。'}
+                  : managedChannels.length > 0
+                    ? `该 SKILL 的模型配置尚未就绪，请到「设置 → 模型配置」检查：${managedChannels.join('、')}。`
+                    : '该 SKILL 需要先配置上面的 API 才能运行。'}
               </div>
             )}
             <textarea

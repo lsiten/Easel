@@ -68,6 +68,7 @@ export default function Sidebar({
 
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 700px)').matches);
   const activePrimary = primaryPageFor(currentPage);
+  const settingsActive = currentPage === 'profile';
   const conversationActive = workspaceSectionFor(currentPage) === 'conversation';
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopCollapsed, setDesktopCollapsed] = useState(() => {
@@ -187,7 +188,7 @@ export default function Sidebar({
         {NAV.map(({ page, Icon, label }) => (
           <button
             key={page}
-            className={`nav-item ${activePrimary === page ? 'active' : ''}`}
+            className={`nav-item ${!settingsActive && activePrimary === page ? 'active' : ''}`}
             onClick={() => { setMobileOpen(false); onPageChange(page); }}
             title={label}
           >
@@ -225,7 +226,7 @@ export default function Sidebar({
           : gatewayStatus === 'disconnected'
             ? (apiDirect ? 'API 配置不完整' : `${agentRuntime} CLI 未配置`)
             : '连接中…'}</span>
-        <button className="settings-gear" onClick={() => { setMobileOpen(false); onOpenSettings(); }} title="设置（模型 · 环境 · 更多）">
+        <button className={`settings-gear${settingsActive ? ' active' : ''}`} onClick={() => { setMobileOpen(false); onOpenSettings(); }} title="设置（模型 · 环境 · AI 与平台）">
           <IconGear size={13} /> 设置
         </button>
       </div>
