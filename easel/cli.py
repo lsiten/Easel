@@ -27,6 +27,7 @@ from easel.persona import chat_turn_message
 from easel.persona import load_profile_text
 from easel.direct_api import (DirectAPIError, SYSTEM_PROMPT, history_path,
                               read_settings, stream_chat)
+from easel.network_proxy import load_proxy_config, proxy_environment
 from easel.timeouts import TIMEOUT_CHAT
 from easel import harnesses
 from easel.harnesses.base import HarnessError
@@ -37,11 +38,8 @@ PROFILES_DIR = PROJECT_ROOT / "profiles"
 
 def _proxy_env() -> dict[str, str]:
     """返回带外网代理的环境变量（保护内网直连）。"""
-    env = os.environ.copy()
+    env = proxy_environment(os.environ, load_proxy_config(PROJECT_ROOT / ".env"))
     env.setdefault("EASEL_ROOT", str(PROJECT_ROOT))
-    env.setdefault("http_proxy", os.environ.get("EASEL_PROXY", ""))
-    env.setdefault("https_proxy", os.environ.get("EASEL_PROXY", ""))
-    env.setdefault("no_proxy", "localhost,127.0.0.1,*.xiaohongshu.com,*.devops.xiaohongshu.com,10.*")
     return env
 
 CYAN = "\033[0;36m"

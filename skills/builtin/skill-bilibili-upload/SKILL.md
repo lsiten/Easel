@@ -16,7 +16,7 @@ layer: publish
 
 | 依赖 | 说明 |
 |------|------|
-| biliup CLI | `pip install biliup`（Rust 后端投稿工具） |
+| biliup CLI | `npm install -g @biliup/cli`（官方原生二进制） |
 | B站 cookie | 首次需 `login` 扫码登录生成（默认 `cookies.json`），之后复用 |
 | 外网 | 登录与投稿需访问 B站 |
 
@@ -73,5 +73,5 @@ python <skill>/scripts/bili_upload.py upload --video out.mp4 --title "标题" \
 
 ## 参考来源
 
-包装 biliup（biliup/biliup-rs，成熟的 B站命令行投稿工具，Rust 后端），支持完整投稿参数
+包装 biliup（biliup/biliup-rs，成熟的 B站命令行投稿工具，官方原生二进制），支持完整投稿参数
 （分区 tid、标签、封面、转载、定时）。本 SKILL 加中文分区映射、参数校验与 dry-run 预览。

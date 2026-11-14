@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ComponentType } from 'react';
 import type { EnvTool } from '../lib/api';
 import {
@@ -7,6 +8,7 @@ import {
 
 export interface JobView {
   state: 'running' | 'ok' | 'fail';
+  operation?: 'install' | 'uninstall';
   line: string;
   detail?: string | null;
 }
@@ -14,13 +16,16 @@ export interface JobView {
 interface Props {
   tools: EnvTool[];
   python: string;
+  directory: string;
   loading: boolean;
   error: string;
   jobs: Record<string, JobView>;
   anyRunning: boolean;
   onRefresh: () => void;
   onInstall: (id: string) => Promise<void>;
+  onUninstall: (id: string) => Promise<void>;
   onInstallMany: (ids: string[]) => Promise<void>;
+  onPickDirectory: () => void;
 }
 
 const ICONS: Record<string, ComponentType<{ size?: number }>> = {
@@ -36,7 +41,11 @@ const GROUPS: { id: string; title: string; en: string }[] = [
 ];
 
 /** 环境安装页：引擎（install_tool）的真实体检 + 后台安装 + 进度轮询。 */
-export default function EnvBoard({ tools, python, loading, error, jobs, anyRunning, onRefresh, onInstall, onInstallMany }: Props) {
+export default function EnvBoard({
+  tools, python, directory, loading, error, jobs, anyRunning,
+  onRefresh, onInstall, onUninstall, onInstallMany, onPickDirectory,
+}: Props) {
+  const [pendingUninstall, setPendingUninstall] = useState<EnvTool | null>(null);
   const total = tools.length;
   const okCount = tools.filter((t) => t.state === 'ok').length;
   const allDone = total > 0 && okCount === total;
@@ -56,7 +65,7 @@ export default function EnvBoard({ tools, python, loading, error, jobs, anyRunni
 
   const view = (t: EnvTool): { state: 'ok' | 'missing' | 'busy' | 'fail' | 'nodir'; badge: string; cls: string } => {
     const job = jobs[t.id];
-    if (job?.state === 'running') return { state: 'busy', badge: '安装中', cls: 'warn' };
+    if (job?.state === 'running') return { state: 'busy', badge: job.operation === 'uninstall' ? '卸载中' : '安装中', cls: 'warn' };
     if (t.state === 'ok') return { state: 'ok', badge: '已装', cls: 'ok' };
     // 刚装完、面板还在重新体检的过渡窗口：显示「校验中」，别闪回「未装」
     if (job?.state === 'ok') return { state: 'busy', badge: '校验中', cls: 'warn' };
@@ -72,8 +81,14 @@ export default function EnvBoard({ tools, python, loading, error, jobs, anyRunni
         <span className="pill sum" aria-live="polite">{allDone ? '全就绪' : `就绪 ${okCount} / ${total}`}</span>
         <span className="desc">
           装完自动校验{pid ? ` · 目标解释器 ${pid}` : ''} · 给其他机器＝整个目录拷过去
+          {directory ? ` · Remotion 工程 ${directory}` : ''}
         </span>
         <span className="spacer" />
+        {directory ? (
+          <button className="btn btn-sm" onClick={onPickDirectory} disabled={loading || anyRunning}>
+            更换工程目录
+          </button>
+        ) : null}
         <button className="btn btn-sm" onClick={onRefresh} disabled={loading || anyRunning}>
           {loading ? '检测中…' : '重新检测'}
         </button>
@@ -124,7 +139,7 @@ export default function EnvBoard({ tools, python, loading, error, jobs, anyRunni
                             <div className="bar"><i /></div>
                             <span className="spin" />
                           </div>
-                          <button className="btn btn-sm" disabled>安装中</button>
+                          <button className="btn btn-sm" disabled>{job?.operation === 'uninstall' ? '卸载中' : '安装中'}</button>
                         </>
                       ) : (
                         <>
@@ -141,17 +156,26 @@ export default function EnvBoard({ tools, python, loading, error, jobs, anyRunni
                                   : ''}
                           </span>
                           {v.state === 'nodir' ? (
-                            <button className="btn btn-sm" disabled title="需要 --dir 工程目录（随独立版内置）">需目录</button>
+                            <button className="btn btn-sm btn-fill" onClick={onPickDirectory}>
+                              选择目录
+                            </button>
                           ) : v.state === 'fail' ? (
                             <button className="btn btn-sm btn-fill" onClick={() => void onInstall(t.id)} disabled={anyRunning}>重试</button>
                           ) : (
-                            <button
-                              className={`btn btn-sm ${v.state === 'ok' ? '' : 'btn-fill'}`}
-                              onClick={() => void onInstall(t.id)}
-                              disabled={anyRunning}
-                            >
-                              {v.state === 'ok' ? '重装' : '安装'}
-                            </button>
+                            <>
+                              {v.state === 'ok' && t.uninstallable ? (
+                                <button className="btn btn-sm btn-danger" onClick={() => setPendingUninstall(t)} disabled={anyRunning}>
+                                  卸载
+                                </button>
+                              ) : null}
+                              <button
+                                className={`btn btn-sm ${v.state === 'ok' ? '' : 'btn-fill'}`}
+                                onClick={() => void onInstall(t.id)}
+                                disabled={anyRunning}
+                              >
+                                {v.state === 'ok' ? '重装' : '安装'}
+                              </button>
+                            </>
                           )}
                         </>
                       )}
@@ -165,6 +189,23 @@ export default function EnvBoard({ tools, python, loading, error, jobs, anyRunni
       })}
 
       <div className="foot-note">装到哪：本机用户环境（Python 用户级 · PATH 自动接好）；给其他机器＝把独立版整个目录拷过去，双击即开。</div>
+      {pendingUninstall ? (
+        <div className="overlay" onClick={() => setPendingUninstall(null)}>
+          <div className="modal env-uninstall-dialog" role="dialog" aria-modal="true"
+            aria-label={`卸载 ${pendingUninstall.name}`} onClick={(event) => event.stopPropagation()}>
+            <h3>卸载 {pendingUninstall.name}？</h3>
+            <p>会从本机移除该组件。工程源文件、账号和应用数据不会被删除，之后仍可重新安装。</p>
+            <div className="actions">
+              <button className="btn btn-sm" onClick={() => setPendingUninstall(null)}>取消</button>
+              <button className="btn btn-sm btn-danger" onClick={() => {
+                const tool = pendingUninstall;
+                setPendingUninstall(null);
+                void onUninstall(tool.id);
+              }}>确认卸载</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

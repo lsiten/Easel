@@ -190,6 +190,49 @@ def test_ssrf_guard_rejects_internal(url):
     assert web._ssrf_safe(url) is False
 
 
+def test_ssrf_guard_allows_proxy_fake_ip_for_public_domain(monkeypatch):
+    """Clash/Surge 的 fake-IP 是代理标记，不是本机可访问的真实内网地址。"""
+    monkeypatch.setattr(
+        web.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (web.socket.AF_INET, web.socket.SOCK_STREAM, 6, "", ("198.18.1.91", 0)),
+        ],
+    )
+    monkeypatch.setattr(
+        web.urllib.request,
+        "getproxies",
+        lambda: {"https": "socks5h://127.0.0.1:50553"},
+    )
+    monkeypatch.setattr(web.urllib.request, "proxy_bypass", lambda _host: False)
+
+    assert web._ssrf_safe("https://api.openai.com/v1") is True
+
+
+def test_ssrf_guard_still_rejects_fake_ip_without_proxy(monkeypatch):
+    monkeypatch.setattr(
+        web.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (web.socket.AF_INET, web.socket.SOCK_STREAM, 6, "", ("198.18.1.91", 0)),
+        ],
+    )
+    monkeypatch.setattr(web.urllib.request, "getproxies", lambda: {})
+
+    assert web._ssrf_safe("https://api.openai.com/v1") is False
+
+
+def test_ssrf_guard_rejects_literal_fake_ip_even_with_proxy(monkeypatch):
+    monkeypatch.setattr(
+        web.urllib.request,
+        "getproxies",
+        lambda: {"https": "http://127.0.0.1:7890"},
+    )
+    monkeypatch.setattr(web.urllib.request, "proxy_bypass", lambda _host: False)
+
+    assert web._ssrf_safe("https://198.18.1.91/v1") is False
+
+
 def test_selftest_probe_has_guards():
     import inspect
     src = inspect.getsource(web.api_models_selftest)

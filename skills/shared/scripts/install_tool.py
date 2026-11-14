@@ -26,6 +26,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
 # ═══════════════════════════════════════════════════════════════════════
 # 工具配方
 #   check[0] 为 "@pyfn:<名字>" 时走内置函数检查；否则按 argv 跑（占位符：
@@ -45,6 +47,7 @@ class Tool:
     install: list[tuple]
     needs_dir: bool = False
     big: bool = False   # 大件（面板上标注体积/耗时）
+    uninstallable: bool = False
 
 
 def _pip_chain(*pkgs: str, timeout: int = 1200) -> list[tuple]:
@@ -75,7 +78,7 @@ def _pyfn_check_cft() -> tuple[bool, str]:
 
 def _pyfn_check_model() -> tuple[bool, str]:
     d = Path(os.path.expanduser("~/models/whisper-large-v3"))
-    if d.is_dir() and any(d.iterdir()):
+    if d.is_dir() and all((d / name).is_file() for name in ("model.bin", "config.json", "tokenizer.json")):
         return True, "模型目录已就绪"
     return False, ""
 
@@ -120,37 +123,40 @@ TOOLS: list[Tool] = [
             "--accept-source-agreements", "--accept-package-agreements"], 900)]),
     Tool("fw", "faster-whisper", "rm", "GPU 转录（cu121）",
          ["{python}", "-c", "import faster_whisper as f;print(getattr(f,'__version__','ok'))"],
-         _pip_chain("faster-whisper", timeout=1800)),
+         _pip_chain("faster-whisper", timeout=1800), uninstallable=True),
     Tool("model", "Whisper large-v3 模型", "rm", "约 3.1GB · hf-mirror 直拉 · 不入包",
          ["@pyfn:model"],
-         _pip_chain("huggingface_hub", timeout=600)
+         _pip_chain("huggingface_hub", "httpx[socks]", timeout=600)
          + [("hf-mirror 下载 large-v3", ["{python}", "-c", WHISPER_MODEL_PY], 7200)],
-         big=True),
+         big=True, uninstallable=True),
     Tool("rmdeps", "Remotion 工程依赖", "rm", "蓝本内置 · npm ci 还原（镜像加速）",
          ["{python}", "-c",
           "import os,sys;sys.exit(0 if os.path.isdir(os.path.join(sys.argv[1],'node_modules')) else 1)",
           "{dir}"],
          [("npm ci · npmmirror 镜像", ["npm", "ci", "--registry=https://registry.npmmirror.com"], 1800)],
-         needs_dir=True),
+         needs_dir=True, uninstallable=True),
     Tool("shell", "Chrome Headless Shell", "rm", "渲染用 · 随 Remotion 下载",
          ["@pyfn:shell"],
          [("npx remotion browser ensure", ["npx", "--yes", "remotion", "browser", "ensure"], 1800)],
-         needs_dir=True),
+         needs_dir=True, uninstallable=True),
     # ── 发布链 ──
-    Tool("biliup", "biliup", "pub", "B站投稿 CLI · python 包装",
+    Tool("biliup", "biliup", "pub", "B站投稿 CLI · 官方原生二进制",
          ["biliup", "--version"],
-         _pip_chain("biliup", timeout=1800)),
+         [("npm 全局安装 @biliup/cli",
+           ["npm", "install", "-g", "@biliup/cli@latest"], 1800)],
+         uninstallable=True),
     Tool("pw", "Playwright Chromium", "pub", "小红书 / 快手 / 知乎 发布链浏览器",
          ["{python}", "-c", "import playwright;print('playwright ok')"],
          _pip_chain("playwright")
-         + [("下载 Chromium", ["{python}", "-m", "playwright", "install", "chromium"], 1800)]),
+         + [("下载 Chromium", ["{python}", "-m", "playwright", "install", "chromium"], 1800)],
+         uninstallable=True),
     Tool("cft", "平台浏览器（Ego / Chrome）", "pub", "已安装 Ego 时优先使用，否则使用 Chrome",
          ["@pyfn:cft"],
          [("安装 Chrome", ["{python}", "-m", "playwright", "install", "chrome"], 1800)]),
     # ── 常用库 ──
     Tool("pylibs", "常用 Python 库", "common", "Pillow · edge-tts · pdfplumber · requests",
          ["{python}", "-c", "import PIL,edge_tts,pdfplumber,requests;print('4/4 ok')"],
-         _pip_chain("Pillow", "edge-tts", "pdfplumber", "requests")),
+         _pip_chain("Pillow", "edge-tts", "pdfplumber", "requests"), uninstallable=True),
     # ── OpenFilm 视频制作 ──
     Tool("openfilm", "OpenFilm", "of", "视频制作引擎 + Studio 可视化（子项目；npm 全局装或 npx 兜底）",
          ["@pyfn:openfilm"],
@@ -166,6 +172,25 @@ GROUP_NAMES = {"rm": "视频产线套件（Remotion）", "of": "OpenFilm 视频�
 # ═══════════════════════════════════════════════════════════════════════
 
 _PY_LIST: list[str] | None = None
+
+
+def _virtualenv_python() -> str | None:
+    """Return the current or project virtualenv interpreter, if one exists."""
+    roots = [
+        os.environ.get("VIRTUAL_ENV", ""),
+        sys.prefix if sys.prefix != sys.base_prefix else "",
+        str(PROJECT_ROOT / ".venv"),
+    ]
+    relative = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
+    for root in roots:
+        if not root:
+            continue
+        candidate = Path(root) / relative
+        if candidate.is_file():
+            # Keep the venv entry path: resolving its symlink points at the base
+            # interpreter and silently loses site-packages.
+            return str(candidate.absolute())
+    return None
 
 
 def _candidate_pythons() -> list[str]:
@@ -216,17 +241,18 @@ def _python_version(python: str) -> tuple:
 
 
 def resolve_python() -> str:
-    """选目标解释器；结果缓存。可选 --python 覆盖（见 main）。"""
+    """选目标解释器；项目虚拟环境优先。可选 --python 覆盖（见 main）。"""
     global _PY_LIST
     if _PY_LIST:
         return _PY_LIST[0]
+    virtualenv_python = _virtualenv_python()
     path_env = os.environ.get("PATH", "").lower()
     scored = []
     for p in _candidate_pythons():
         sd = _scripts_dir(p).lower()
         scored.append((bool(sd) and sd in path_env, _python_version(p), p))
     scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
-    _PY_LIST = [t[2] for t in scored]
+    _PY_LIST = ([virtualenv_python] if virtualenv_python else []) + [t[2] for t in scored]
     if not _PY_LIST:
         _die("找不到任何可用的 Python 解释器", 3)
     return _PY_LIST[0]
@@ -360,7 +386,8 @@ def check_all(python: str, dir_: str | None = None, only: list[str] | None = Non
         r = check_tool(t, python, dir_)
         r.update({"name": t.name, "group": t.group,
                   "group_name": GROUP_NAMES.get(t.group, t.group),
-                  "desc": t.desc, "big": bool(t.big)})
+                  "desc": t.desc, "big": bool(t.big),
+                  "uninstallable": bool(t.uninstallable)})
         out.append(r)
     return out
 
@@ -513,7 +540,8 @@ def cmd_list(a) -> int:
         for t in TOOLS:
             if t.group == gid:
                 big = "（大件）" if t.big else ""
-                print(f"  {t.id:<9} {t.name:<22} {t.desc}{big}")
+                removable = " · 可卸载" if t.uninstallable else ""
+                print(f"  {t.id:<9} {t.name:<22} {t.desc}{big}{removable}")
     return 0
 
 

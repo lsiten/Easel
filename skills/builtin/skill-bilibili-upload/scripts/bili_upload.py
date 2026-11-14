@@ -112,7 +112,7 @@ def cmd_check(_a) -> int:
         except Exception:
             print("✅ biliup 已安装")
     else:
-        print("❌ 未安装 biliup（pip install biliup）"); ok = False
+        print("❌ 未安装 biliup（npm install -g @biliup/cli）"); ok = False
     print(f"分区映射：内置 {len(PARTITIONS)} 个常用分区，其余用 --tid 数字")
     print("cookie：投稿前需 `login` 扫码登录生成（默认 cookies.json）")
     return 0 if ok else 3
@@ -120,7 +120,7 @@ def cmd_check(_a) -> int:
 
 def cmd_login(a) -> int:
     if not _has_biliup():
-        _die("未安装 biliup（pip install biliup）", 3)
+        _die("未安装 biliup（npm install -g @biliup/cli）", 3)
     cookie = a.cookie or "cookies.json"
     print(f"启动 B站扫码登录，cookie 将保存到 {cookie} ...", file=sys.stderr)
     print("（需终端可显示二维码 + 手机 B站 App 扫码 + 外网）", file=sys.stderr)
