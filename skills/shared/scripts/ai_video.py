@@ -47,6 +47,12 @@ from typing import Any
 from model_registry import env_aliases, provider_ids, provider_required_env
 
 try:
+    from easel.remote_media import RemoteMediaError, download_to_file
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from easel.remote_media import RemoteMediaError, download_to_file
+
+try:
     # Windows 非交互式/管道 stdout 默认落到系统 ANSI 代码页（如 cp1252），打印中文
     # 提示（必填/可选/缺失……）会抛 UnicodeEncodeError 而不是正常退出。
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -348,15 +354,11 @@ def download_video(url: str, output: Path, timeout: int = 300, direct: bool = Fa
         suffix = Path(urllib.parse.urlparse(url).path).suffix or ".mp4"
         output = output.with_suffix(suffix)
     print(f"  下载视频：{url}", file=sys.stderr)
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    open_fn = _NO_PROXY_OPENER.open if direct else urllib.request.urlopen
     try:
-        with open_fn(req, timeout=timeout) as resp:
-            output.write_bytes(resp.read())
-    except urllib.error.URLError as exc:
-        fail(f"无法下载视频：{exc.reason}")
-    except TimeoutError:
-        fail("下载视频超时。")
+        download_to_file(url, output, max_bytes=2 * 1024**3,
+                         timeout=timeout, headers={"User-Agent": UA}, direct=direct)
+    except RemoteMediaError as exc:
+        fail(f"无法下载视频：{exc}")
     return output
 
 

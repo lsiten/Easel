@@ -363,6 +363,10 @@ def cmd_stats(a):
                 print(json.dumps(result, ensure_ascii=False))
                 return 1
             result["loggedIn"] = True
+            from browser_identity import authenticated_uid
+            result['account_uid'] = authenticated_uid('wechat-oa', page)
+            if not result['account_uid']:
+                result['account_uid'] = _editor_ctx(page, token).get('user_name', '')
             # 打开发表记录页，让 Vue 自然发出带正确参数的数据 XHR（我们拦截它，避免自己拼易变参数/fingerprint）
             page.goto(f"https://mp.weixin.qq.com/cgi-bin/appmsgpublish?sub=list&begin=0&count={a.count}"
                       f"&token={token}&lang=zh_CN", wait_until="commit", timeout=60000)
@@ -798,6 +802,10 @@ def cmd_whoami(a):
                 while time.monotonic() < deadline:
                     if _extract_token(page.url):
                         out.update(loggedIn=True, **_account_identity(page))
+                        from browser_identity import authenticated_uid
+                        out['accountUid'] = authenticated_uid('wechat-oa', page)
+                        if not out['accountUid']:
+                            out['accountUid'] = _editor_ctx(page, _extract_token(page.url)).get('user_name', '')
                         if out["name"] and out["avatar"]:
                             break
                     elif page.query_selector("img.login__type__container__scan__qrcode, img[src*='qrcode']"):

@@ -17,6 +17,10 @@ def client(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
     env_file.write_text("", encoding="utf-8")
     monkeypatch.setattr(web, "ENV_FILE", env_file)
+    monkeypatch.setattr(web, '_publish_account_uid', lambda platform, profile: 'verified-test-account')
+    async def verified_actor(platform, profile, expected_uid):
+        return None
+    monkeypatch.setattr(web, '_verify_publish_actor', verified_actor)
     monkeypatch.delenv("EASEL_PUBLISH_MODE", raising=False)
     def unexpected_publish(*args, **kwargs):
         pytest.fail("Manual publishing must never run a platform subprocess")
@@ -43,9 +47,10 @@ def test_export_does_not_mark_content_as_published(client, tmp_path):
     media = tmp_path / "my-project" / "cover.png"
     media.parent.mkdir()
     media.write_bytes(b"example-image")
+    (media.parent / ".easel.json").write_text(json.dumps({"profile": "禾城AI造物局"}), encoding="utf-8")
     response = client.post("/api/manual-publish/xiaohongshu/export", json={
         "title": "人工审核稿", "body": "第一段\n\n第二段", "tags": "工具,日常",
-        "media": ["my-project/cover.png"], "reviewed": True,
+        "media": ["my-project/cover.png"], "reviewed": True, "persona": "禾城AI造物局",
     })
     assert response.status_code == 200, response.text
     payload = response.json()
@@ -112,7 +117,9 @@ def test_default_and_configured_automatic_workflow_use_existing_publisher(client
         return SimpleNamespace(returncode=1, stdout="", stderr="mocked platform failure")
     monkeypatch.setattr(web.subprocess, "run", fake_publish)
     assert client.get("/api/publishing-policy").json() == {"mode": "automated", "automaticSubmission": True}
-    response = client.post("/api/publish/zhihu", json={"title": "Test", "body": "Draft"})
+    intent = {'title': 'Test', 'body': 'Draft', 'reviewed': True}
+    intent['approval_digest'] = client.post('/api/publish/zhihu/precheck', json=intent).json()['approvalDigest']
+    response = client.post('/api/publish/zhihu', json=intent)
     assert response.status_code == 200, response.text
     assert response.json()["ok"] is False
     assert len(calls) == 1 and "--exec" in calls[0]

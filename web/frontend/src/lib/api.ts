@@ -245,24 +245,24 @@ export interface ScheduleContext {
   upcoming_events?: ScheduleItem[];
   suggestions?: string[];
 }
-export function fetchSchedule(): Promise<ScheduleItem[]> {
-  return request('/api/schedule');
+export function fetchSchedule(persona?: string): Promise<ScheduleItem[]> {
+  return request(appendPersona('/api/schedule', persona));
 }
-export function fetchScheduleContext(days = 14): Promise<ScheduleContext> {
-  return request(`/api/schedule/context?days=${days}`);
+export function fetchScheduleContext(days = 14, persona?: string): Promise<ScheduleContext> {
+  return request(appendPersona(`/api/schedule/context?days=${days}`, persona));
 }
-export function createSchedule(item: ScheduleInput): Promise<ScheduleItem> {
-  return request('/api/schedule', {
+export function createSchedule(item: ScheduleInput, persona?: string): Promise<ScheduleItem> {
+  return request(appendPersona('/api/schedule', persona), {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item),
   });
 }
-export function updateSchedule(id: string, item: ScheduleInput): Promise<ScheduleItem> {
-  return request(`/api/schedule/${encodeURIComponent(id)}`, {
+export function updateSchedule(id: string, item: ScheduleInput, persona?: string): Promise<ScheduleItem> {
+  return request(appendPersona(`/api/schedule/${encodeURIComponent(id)}`, persona), {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item),
   });
 }
-export function deleteSchedule(id: string): Promise<{ ok: boolean }> {
-  return request(`/api/schedule/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export function deleteSchedule(id: string, persona?: string): Promise<{ ok: boolean }> {
+  return request(appendPersona(`/api/schedule/${encodeURIComponent(id)}`, persona), { method: 'DELETE' });
 }
 
 // ---- 选题库 ----
@@ -688,20 +688,22 @@ export async function questionStatus(
   }
 }
 /** 上传素材到当前会话的隔离 inbox，返回后端可校验的附件引用。 */
-export async function uploadFiles(files: File[], sessionId: string): Promise<UploadedFile[]> {
+export async function uploadFiles(files: File[], sessionId: string, persona?: string): Promise<UploadedFile[]> {
   const fd = new FormData();
   for (const f of files) fd.append('files', f);
   fd.append('sessionId', sessionId);
+  if (persona) fd.append('persona', persona);
   const r = await request<{ ok: boolean; files: UploadedFile[] }>('/api/upload', { method: 'POST', body: fd });
   return r.files;
 }
 
 /** 超限文件复制通道：返回与 uploadFiles 同构的附件引用。 */
 export interface AdoptedFile { id: string; name: string; path: string; }
-export async function adoptOversize(files: File[], sessionId: string): Promise<AdoptedFile[]> {
+export async function adoptOversize(files: File[], sessionId: string, persona?: string): Promise<AdoptedFile[]> {
   const fd = new FormData();
   for (const f of files) fd.append('files', f);
   fd.append('sessionId', sessionId);
+  if (persona) fd.append('persona', persona);
   const r = await request<{ ok: boolean; files: AdoptedFile[] }>('/api/upload/local', { method: 'POST', body: fd });
   return r.files;
 }
@@ -740,16 +742,17 @@ export interface CredentialStatus {
 }
 
 /** 读取凭证式平台（公众号）已配置状态（AppSecret 不回传）。 */
-export function getCredentials(platform: string): Promise<CredentialStatus> {
-  return request<CredentialStatus>(`/api/accounts/${encodeURIComponent(platform)}/credentials`);
+export function getCredentials(platform: string, persona?: string): Promise<CredentialStatus> {
+  return request<CredentialStatus>(appendPersona(`/api/accounts/${encodeURIComponent(platform)}/credentials`, persona));
 }
 
 /** 保存公众号 AppID/AppSecret（后端会调官方接口验证连通性）。 */
 export function saveCredentials(
   platform: string,
   payload: { appId: string; appSecret: string; name?: string; author?: string },
+  persona?: string,
 ): Promise<{ ok: boolean; message: string }> {
-  return request(`/api/accounts/${encodeURIComponent(platform)}/credentials`, {
+  return request(appendPersona(`/api/accounts/${encodeURIComponent(platform)}/credentials`, persona), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -797,6 +800,8 @@ export function logoutAccount(platform: string, persona?: string): Promise<{ ok:
 
 export interface PublishResult {
   ok?: boolean;
+  run_id?: string;
+  state?: string;
   message: string;
   detail?: string;
   async?: boolean;   // true = 异步发布（抖音，可能触发短信验证），需轮询 publishStatus
@@ -814,8 +819,8 @@ export function fetchPublishingPolicy(): Promise<PublishingPolicy> {
 
 /** Create a local export only; no social platform is contacted. */
 export function exportManualPackage(platform: string, payload: {
-  title: string; body: string; tags: string; media: string[]; reviewed: boolean;
-}): Promise<{ path: string; filename: string; published: false }> {
+  title: string; body: string; tags: string; media: string[]; reviewed: boolean; persona?: string; run_id?: string;
+}): Promise<{ path: string; filename: string; published: false; run_id?: string }> {
   return request(`/api/manual-publish/${encodeURIComponent(platform)}/export`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   });
@@ -825,7 +830,7 @@ export function exportManualPackage(platform: string, payload: {
  * 抖音返回 {async:true}，需轮询 publishStatus；其他平台同步返回结果。 */
 export function publishNow(
   platform: string,
-  payload: { title: string; body: string; media: string[]; tags?: string; persona?: string },
+  payload: { title: string; body: string; media: string[]; tags?: string; persona?: string; reviewed?: boolean; approval_digest?: string },
 ): Promise<PublishResult> {
   return request<PublishResult>(`/api/publish/${encodeURIComponent(platform)}`, {
     method: 'POST',
@@ -834,23 +839,33 @@ export function publishNow(
   });
 }
 
+export function precheckPublish(platform: string, payload: {
+  title: string; body: string; media: string[]; tags?: string; persona?: string; reviewed: boolean;
+}): Promise<{ approvalDigest: string }> {
+  return request(`/api/publish/${encodeURIComponent(platform)}/precheck`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+}
+
 export interface PublishStatus {
   mode: 'publish';
+  run_id?: string;
   state: string;     // starting | sms_required | verifying | success | error | unknown
   message: string;
 }
 
 /** 轮询异步发布状态（抖音）。 */
-export function publishStatus(platform: string, persona?: string): Promise<PublishStatus> {
-  return request<PublishStatus>(appendPersona(`/api/publish/${encodeURIComponent(platform)}/status`, persona));
+export function publishStatus(platform: string, persona?: string, runId?: string): Promise<PublishStatus> {
+  const suffix = runId ? `?run_id=${encodeURIComponent(runId)}` : '';
+  return request<PublishStatus>(appendPersona(`/api/publish/${encodeURIComponent(platform)}/status${suffix}`, persona));
 }
 
 /** 发布触发短信墙时回填验证码。 */
-export function submitPublishSms(platform: string, code: string, persona?: string): Promise<{ ok: boolean }> {
+export function submitPublishSms(platform: string, code: string, persona?: string, runId?: string): Promise<{ ok: boolean }> {
   return request(appendPersona(`/api/publish/${encodeURIComponent(platform)}/sms`, persona), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, run_id: runId || '' }),
   });
 }
 

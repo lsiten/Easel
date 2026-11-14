@@ -62,3 +62,16 @@ def test_file_shaped_branch_roots_are_rejected(tmp_path):
     source = tmp_path / "source-file"; source.write_text("x")
     with pytest.raises(BranchOverwriteError):
         store.create_variant(variant_id="v-file", profile_id="profile", session_id="session", brief={}, treatment={}, analysis={}, timeline={}, source_root=source)
+
+
+def test_reference_evidence_is_scoped_per_profile_and_session(tmp_path):
+    store = HypitVariantStore(tmp_path / "hypit")
+    first = store.create_variant(variant_id="v-one", profile_id="profile-a", session_id="session-a",
+                                brief={}, treatment={}, analysis={}, timeline={},
+                                reference_evidence=[{"source_id": "a", "sha256": "a" * 64}])
+    second = store.create_variant(variant_id="v-two", profile_id="profile-b", session_id="session-b",
+                                 brief={}, treatment={}, analysis={}, timeline={},
+                                 reference_evidence=[{"source_id": "b", "sha256": "b" * 64}])
+    assert first.reference_evidence != second.reference_evidence
+    assert (tmp_path / "hypit" / "_reference" / "profile-a" / "session-a" / "v-one" / "evidence.json").is_file()
+    assert (tmp_path / "hypit" / "_reference" / "profile-b" / "session-b" / "v-two" / "evidence.json").is_file()

@@ -448,8 +448,10 @@ def _click_publish(page, content_length: int = 0):
     点前等按钮就绪 → 复核/提交双停顿 → 点击。REF publishVideo step8。"""
     btn = _wait_publish_button_ready(page)
     human_pace.pause_before_commit(content_length)
+    from publish_guard import require_publish_commit
     btn.scroll_into_view_if_needed()
     page.wait_for_timeout(300)
+    require_publish_commit('douyin', page)
     btn.click()
 
 
@@ -519,6 +521,8 @@ def _publish_verified(page) -> bool:
 
 
 def _handle_publish_sms_inner(page, code_file: Path, sf, wait_s: int) -> bool:
+    from publish_guard import require_publish_allowed
+    require_publish_allowed('douyin')
     _dump_sms_dom(page, DEFAULT_QR_OUT, tag="publish")
     login_state.write_status(sf, "sms_required", "发布需短信验证，正在发送验证码…")
     login_state.read_sms_code(str(code_file))                 # 清旧码
@@ -530,6 +534,7 @@ def _handle_publish_sms_inner(page, code_file: Path, sf, wait_s: int) -> bool:
     deadline = time.time() + wait_s
     resend_file = Path(str(code_file) + ".resend")
     while time.time() < deadline:
+        require_publish_allowed('douyin')
         if _publish_verified(page):                          # 墙没了/已跳转 = 验证已过（或平台直接放行）
             return True
         if resend_file.exists():                             # 请求重发信号（一次性）：点「重新发送」再下发
@@ -544,6 +549,7 @@ def _handle_publish_sms_inner(page, code_file: Path, sf, wait_s: int) -> bool:
             page.wait_for_timeout(1500)
             continue
         login_state.write_status(sf, "verifying", "正在验证验证码…")
+        require_publish_allowed('douyin')
         _sms_fill_and_submit(page, code)
         # 轮询等验证放行（墙消失或已跳转）——服务端校验有往返，单次检查太短会误判「未通过」
         ok, err = False, ""
@@ -770,6 +776,7 @@ def _sms_click_submit(page) -> bool:
     `role=button`）——旧的 `button,[class*=button]` 选择器匹配不到（真机实测：码填对、按钮已
     激活，却因点不到而从不提交 →「验证未完成」）。改为找**文本恰为提交词的最内层可见元素**，
     不靠 tag/class。「验证」为弹窗独有（背景『验证码登录』表单的按钮是「登录」），优先点。"""
+    from publish_guard import PublishGuardError, require_publish_commit
     for label in ("验证", "验证并登录", "确定", "提交", "登录"):
         for el in page.query_selector_all(f":text-is('{label}')"):
             try:
@@ -779,8 +786,12 @@ def _sms_click_submit(page) -> bool:
                 if any((k.inner_text() or "").strip() == label
                        for k in el.query_selector_all("*")):
                     continue
+                if os.environ.get('EASEL_PUBLISH_ACCOUNT_UID'):
+                    require_publish_commit('douyin', page)
                 el.click(timeout=3000)
                 return True
+            except PublishGuardError:
+                raise
             except Exception:
                 continue
     return False
@@ -826,6 +837,9 @@ def _sms_fill_and_submit(page, code: str) -> bool:
     # ⚠️ 不再用 `if _logged_in(page): return` 短路——发布页顶部恒有「高清发布」按钮，
     #    _logged_in 会永远 True 导致填了码却不点「验证」（真机实测：发布短信验证卡死的根因）。
     if not _sms_click_submit(page):
+        if os.environ.get('EASEL_PUBLISH_ACCOUNT_UID'):
+            from publish_guard import require_publish_commit
+            require_publish_commit('douyin', page)
         try:
             page.keyboard.press("Enter")
             page.wait_for_timeout(400)
@@ -1300,6 +1314,7 @@ def _publish(a, kind: str) -> int:
         login_state.write_status(sf, "success",
                                  f"发布成功（读回核验：作品 {m.platform_content_id}，{m.status}{_who}）")
         print(f"✅ 抖音发布成功（读回核验：{m.platform_content_id}{_who}）")
+        print(json.dumps({'easel_publish_receipt': readback.as_dict()}, ensure_ascii=False))
         # 落统一内容日历（对话页自动；发布页由 web 设 AUTORECORD=0 跳过防重复）
         try:
             import calendar_ops
@@ -1354,6 +1369,8 @@ def cmd_whoami(a) -> int:
                 account = _account_identity(response)
                 if account is not None:
                     result.update(loggedIn=True, **account)
+                    user = response['body'].get('user_info') or response['body'].get('user')
+                    result['accountUid'] = str(user.get('uid') or user.get('sec_uid') or user.get('open_id'))
                 elif not logged:
                     body = response.get("body") if isinstance(response, dict) else None
                     status = body.get("status_code") if isinstance(body, dict) else None

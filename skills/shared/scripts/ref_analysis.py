@@ -30,16 +30,32 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
-_URL_RE = re.compile(r"^(https?|ftp)://", re.IGNORECASE)
+try:
+    from easel.remote_media import validate_public_url
+    from easel.remote_media_proxy import public_download_proxy
+    from easel.reference_output import bind_reference_owner, safe_reference_metadata, source_digest
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from easel.remote_media import validate_public_url
+    from easel.remote_media_proxy import public_download_proxy
+    from easel.reference_output import bind_reference_owner, safe_reference_metadata, source_digest
+
+_URL_RE = re.compile(r"^(https?)://", re.IGNORECASE)
 _VIDEO_EXT = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".m4v", ".ts", ".wmv"}
+MAX_DOWNLOAD_BYTES = 2 * 1024**3
+DOWNLOAD_TIMEOUT_SECONDS = 15 * 60
+DOWNLOAD_SOCKET_TIMEOUT_SECONDS = 30
 
 
 def _die(msg: str, code: int = 1) -> None:
@@ -51,6 +67,10 @@ def _check_ffmpeg() -> None:
     for t in ("ffmpeg", "ffprobe"):
         if shutil.which(t) is None:
             _die(f"未找到 {t}，请先安装 ffmpeg（含 ffprobe）。", 3)
+
+
+def _validate_remote_url(source: str) -> str:
+    return validate_public_url(source)
 
 
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
@@ -88,13 +108,35 @@ def _probe(path: Path) -> dict:
 
 def _download(source: str, out_dir: Path) -> Path:
     """URL 源：yt-dlp 可用则下载，否则报错提示。"""
+    try:
+        source = _validate_remote_url(source)
+    except ValueError as exc:
+        _die(str(exc), 2)
     if shutil.which("yt-dlp") is None and shutil.which("yt_dlp") is None:
         _die("需要下载 URL 但未找到 yt-dlp；请 `pip install yt-dlp` 或先把视频存为本地文件。", 4)
-    cmd = [shutil.which("yt-dlp") or "yt-dlp", "-f", "mp4[height<=720]/*[height<=720]/*",
-           "-o", str(out_dir / "download.%(ext)s"), "--no-playlist", source]
-    _run(cmd, check=True)
+    protocol_filter = "[protocol~='^(https?|m3u8(_native)?|http_dash_segments)$']"
+    formats = "/".join(option + protocol_filter for option in ("mp4[height<=720]", "*[height<=720]", "*"))
+    cmd = [shutil.which("yt-dlp") or "yt-dlp", "-f", formats,
+           "-o", str(out_dir / "download.%(ext)s"), "--no-playlist",
+           "--max-filesize", str(MAX_DOWNLOAD_BYTES),
+           "--socket-timeout", str(DOWNLOAD_SOCKET_TIMEOUT_SECONDS),
+           "--ignore-config", "--downloader", "native", "--hls-prefer-native", "--fixup", "never",
+           "--match-filters", "!is_live",
+           "--retries", "2", "--fragment-retries", "2", source]
+    try:
+        with tempfile.TemporaryDirectory(prefix="easel-native-download-") as native_only:
+            with public_download_proxy(max_bytes=MAX_DOWNLOAD_BYTES, timeout=DOWNLOAD_TIMEOUT_SECONDS) as proxy:
+                _run(cmd[:-1] + ["--proxy", proxy, "--ffmpeg-location", native_only, cmd[-1]],
+                     check=True, timeout=DOWNLOAD_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        _die("参考视频下载超时，已停止下载。", 4)
+    except subprocess.CalledProcessError:
+        _die("参考视频下载失败，目标或网络请求未通过下载边界。", 4)
     for p in out_dir.iterdir():
         if p.suffix.lower() in _VIDEO_EXT:
+            if p.stat().st_size > MAX_DOWNLOAD_BYTES:
+                p.unlink(missing_ok=True)
+                _die("参考视频超过 2GB 大小上限。", 4)
             return p
     _die("yt-dlp 下载后未找到视频文件。", 4)
 
@@ -345,6 +387,12 @@ def cmd_analyze(a) -> int:
     out_dir = Path(a.out).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
     start = time.time()
+    persona = getattr(a, 'persona', '') or os.environ.get('EASEL_PERSONA', '') or os.environ.get('EASEL_ACTIVE_PROFILE', '')
+    if persona:
+        try:
+            bind_reference_owner(out_dir, Path(__file__).resolve().parents[3] / 'outputs', persona)
+        except ValueError as error:
+            _die(str(error), 2)
 
     # 1) 源
     if _URL_RE.match(a.source):
@@ -354,7 +402,11 @@ def cmd_analyze(a) -> int:
         if not src_path.is_file():
             _die(f"输入文件不存在: {src_path}", 2)
 
+    if src_path.stat().st_size > MAX_DOWNLOAD_BYTES:
+        _die('参考视频超过 2GB 大小上限', 2)
     meta = _probe(src_path)
+    if meta.get('duration', 0) > 4 * 3600:
+        _die('参考视频时长超过 4 小时上限', 2)
     brief: dict = {
         "source": a.source,
         "file": str(src_path),
@@ -401,6 +453,9 @@ def cmd_analyze(a) -> int:
     }
 
     _semanticize(brief, out_dir)
+    brief['source_sha256'] = source_digest(src_path)
+    brief['persona'] = persona
+    brief = safe_reference_metadata(brief, out_dir)
 
     brief_path = out_dir / "video_analysis_brief.json"
     tmp_brief = brief_path.with_suffix(".json.tmp")
@@ -441,6 +496,7 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd")
 
     p = sub.add_parser("analyze", help="分析参考视频 → brief + keyframes")
+    p.add_argument("--persona", default="", help="参考分析产物所属画像")
     p.add_argument("--source", required=True, help="本地视频路径或 URL")
     p.add_argument("--depth", choices=["transcript_only", "standard", "deep"],
                   default="standard")

@@ -223,24 +223,15 @@ def import_artifact(req: ArtifactImportRequest):
     """Import one declared derived Hypit artifact into the shared output surface."""
     rec = _get(req.run_id, req)
     if rec.state != "succeeded": raise HTTPException(409, f"artifacts unavailable while {rec.state}")
-    source_root = ROOT / "runs" / req.run_id
-    candidates = []
-    for raw in rec.outputs:
-        path = Path(raw).expanduser().resolve()
-        try: relative = path.relative_to(source_root.resolve()).as_posix()
-        except ValueError: continue
-        if path.is_file() and path.name == req.artifact: candidates.append((path, relative))
-    if len(candidates) != 1: raise HTTPException(404, "artifact not found")
-    path, relative = candidates[0]
-    import hashlib
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    kind = {".mp4": "mp4", ".png": "thumbnail", ".jpg": "thumbnail", ".jpeg": "thumbnail", ".webp": "thumbnail", ".md": "brief", ".txt": "brief", ".html": "report", ".pdf": "report", ".json": "report"}.get(path.suffix.lower())
-    if not kind: raise HTTPException(400, "unsupported artifact type")
-    manifest = {"artifacts": [{"kind": kind, "path": relative, "checksum": digest, "attribution": "Hypit derived artifact"}]}
+    from .hypit_import import import_run_artifact
     try:
-        records = import_artifacts(source_root=source_root, destination_root=ROOT.parent, source_engine="hypit", target_profile=req.profile_id, manifest=manifest)
-    except ArtifactBoundaryError as exc: raise HTTPException(400, str(exc)) from exc
-    return {"imported": True, "run_id": req.run_id, "artifact": _safe(records[0].to_dict())}
+        imported = import_run_artifact(ROOT, rec, req.artifact)
+    except ArtifactBoundaryError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {'imported': True, 'run_id': req.run_id, 'project': imported.project,
+            'output_path': imported.output_path,
+            'artifact': {'kind': imported.kind, 'checksum': imported.checksum,
+                         'source_engine': 'hypit', 'target_profile': req.profile_id}}
 
 @router.post("/runs/{run_id}/artifacts/import")
 def import_run_artifact(run_id: str, req: ArtifactImportRequest):

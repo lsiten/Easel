@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import mimetypes
 import os
 if os.name == "nt":
@@ -19,6 +20,9 @@ import signal
 import socket
 import subprocess
 import sys
+if __name__ == '__main__':
+    # CLI startup and integration modules must share the same app and runtime state.
+    sys.modules['web.app'] = sys.modules[__name__]
 import threading
 import time
 import urllib.error
@@ -50,6 +54,16 @@ from easel.persona import (load_profile_text, persona_prefix, chat_turn_message,
                            _persona_skill_scope, _skill_in_scope)
 from easel.timeouts import TIMEOUT_CHAT, TIMEOUT_DIRECT, TIMEOUT_PRODUCE
 from easel.manual_publish import build_package, publishing_mode
+from easel.ownership import OwnershipError, MediaManifestEntry, build_media_manifest, freeze_media
+from easel.analytics_snapshots import append_snapshot, normalize_snapshot, load_snapshots
+from easel.platform_capabilities import project_capabilities
+from easel.publish_ledger import (PublishLedger, RunState, digest_mapping,
+                                  IdempotencyConflict, InvalidTransition, LeaseBusy, LeaseRequired)
+from easel.publish_models import PublishLease
+from easel.publish_recovery import recover_interrupted, worker_owner
+from easel.publish_projection import (PublishedProjection, queue_publish_projection,
+                                      deliver_publish_projection, drain_publish_projections)
+from easel.publish_readback import ReadbackQuery, ReadbackOutcome, verify_readback
 from easel.direct_api import (DirectAPIError, SYSTEM_PROMPT, api_config, api_mode,
                               history_path, read_settings, stream_chat)
 from easel import harnesses
@@ -61,6 +75,7 @@ from easel.openfilm_references import reference_context
 from easel.openfilm_studio import StudioUrls, live_project_urls
 from easel.hypit_api import router as hypit_router
 from skills.shared.scripts.project_scope import in_persona_scope
+from skills.shared.scripts.asset_storage import _storage_lock
 PROFILES_DIR = PROJECT_ROOT / "profiles"
 SKILLS_DIR = PROJECT_ROOT / "skills"
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
@@ -189,8 +204,14 @@ LOGIN_RUNNERS: dict[str, dict] = {
 def _valid_login_persona(persona: str | None) -> bool:
     return bool(persona) and valid_persona_name(persona) and profile_exists(persona)
 
+
+def _require_login_scope(persona: str | None) -> None:
+    if persona and persona != '_general' and not _valid_login_persona(persona):
+        raise HTTPException(400, '画像不存在或名称非法')
+
 def _login_dir(persona: str | None) -> Path:
     """登录状态目录：命名画像 outputs/_login/<画像>/；通用沿用 outputs/_login/（向后兼容）。"""
+    _require_login_scope(persona)
     return (LOGIN_DIR / persona) if _valid_login_persona(persona) else LOGIN_DIR
 
 def _login_dir_rel(persona: str | None) -> str:
@@ -199,10 +220,12 @@ def _login_dir_rel(persona: str | None) -> str:
 
 def _persona_profile_base(persona: str | None) -> Path:
     """浏览器登录态根目录：命名画像 ~/.easel-browser-profiles/<画像>/；通用沿用 ~/.easel-browser-profiles/。"""
+    _require_login_scope(persona)
     return (BROWSER_PROFILES / persona) if _valid_login_persona(persona) else BROWSER_PROFILES
 
 def _persona_cookie_file(persona: str | None) -> Path:
     """biliup cookie 文件：命名画像 <profile-base>/cookies.json；通用沿用 PROJECT_ROOT/cookies.json。"""
+    _require_login_scope(persona)
     if _valid_login_persona(persona):
         return _persona_profile_base(persona) / "cookies.json"
     return PROJECT_ROOT / "cookies.json"
@@ -233,51 +256,64 @@ def _wechat_load_yaml() -> dict:
         return {}
 
 
-def _wechat_web_account() -> dict:
-    """返回 web 端配置的公众号账号（accounts.web），无则空 dict。"""
+def _wechat_account_key(persona: str = '') -> str:
+    return WECHAT_WEB_ACCOUNT + '-' + hashlib.sha256(persona.encode()).hexdigest()[:20] if persona else WECHAT_WEB_ACCOUNT
+
+
+def _wechat_web_account(persona: str = '') -> dict:
+    """Return only the requested persona account; empty persona reads legacy accounts.web."""
     cfg = _wechat_load_yaml()
     accts = cfg.get("accounts") if isinstance(cfg.get("accounts"), dict) else {}
-    acc = accts.get(WECHAT_WEB_ACCOUNT)
+    key = _wechat_account_key(persona.strip())
+    acc = accts.get(key)
+    if acc is None and persona:
+        acc = accts.get(f'{WECHAT_WEB_ACCOUNT}::{persona.strip()}')
     return acc if isinstance(acc, dict) else {}
 
 
-def _wechat_has_credentials() -> bool:
-    acc = _wechat_web_account()
+def _wechat_has_credentials(persona: str = '') -> bool:
+    acc = _wechat_web_account(persona) if persona else _wechat_web_account()
     return bool(acc.get("app_id") and acc.get("app_secret"))
 
 
-def _wechat_save_credentials(app_id: str, app_secret: str, name: str = "", author: str = "") -> None:
-    """把 AppID/AppSecret 写入 wechat-publisher.yaml 的 accounts.web（原子写，保留其它账号）。"""
+def _wechat_save_credentials(app_id: str, app_secret: str, name: str = "", author: str = "", persona: str = "") -> None:
+    """Save credentials under a persona-scoped account key; preserve legacy accounts.web."""
     import yaml
     cfg = _wechat_load_yaml()
     if not isinstance(cfg.get("accounts"), dict):
         cfg["accounts"] = {}
-    acc = cfg["accounts"].get(WECHAT_WEB_ACCOUNT)
+    key = _wechat_account_key(persona.strip())
+    acc = cfg["accounts"].get(key)
     if not isinstance(acc, dict):
         acc = {}
     acc["name"] = name or acc.get("name") or "微信公众号"
     acc["app_id"] = app_id
     acc["app_secret"] = app_secret
+    acc["persona"] = persona
+    acc["account_uid"] = app_id
     if author:
         acc["author"] = author
     acc.setdefault("author", "")
-    cfg["accounts"][WECHAT_WEB_ACCOUNT] = acc
+    cfg["accounts"][key] = acc
     # web 账号存在即设为默认，方便 CLI 直接用
-    cfg.setdefault("default", WECHAT_WEB_ACCOUNT)
+    cfg.setdefault("default", key)
     WECHAT_CONFIG_YAML.parent.mkdir(parents=True, exist_ok=True)
     tmp = WECHAT_CONFIG_YAML.with_suffix(".yaml.tmp")
     tmp.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
     os.replace(tmp, WECHAT_CONFIG_YAML)
 
 
-def _wechat_clear_credentials() -> None:
+def _wechat_clear_credentials(persona: str = '') -> None:
     """删除 accounts.web 及其 token 缓存。"""
     import yaml
     cfg = _wechat_load_yaml()
     accts = cfg.get("accounts")
-    if isinstance(accts, dict) and WECHAT_WEB_ACCOUNT in accts:
-        accts.pop(WECHAT_WEB_ACCOUNT, None)
-        if cfg.get("default") == WECHAT_WEB_ACCOUNT:
+    key = _wechat_account_key(persona)
+    keys = {key, f'web::{persona}'} if persona else {key}
+    if isinstance(accts, dict) and keys.intersection(accts):
+        for stored_key in keys:
+            accts.pop(stored_key, None)
+        if cfg.get("default") in keys:
             cfg["default"] = next(iter(accts), "") if accts else ""
         try:
             tmp = WECHAT_CONFIG_YAML.with_suffix(".yaml.tmp")
@@ -285,15 +321,17 @@ def _wechat_clear_credentials() -> None:
             os.replace(tmp, WECHAT_CONFIG_YAML)
         except Exception:
             pass
-    for cache in (WECHAT_SKILL_SCRIPTS / f".token_cache_{WECHAT_WEB_ACCOUNT}.json",
-                  WECHAT_SKILL_SCRIPTS / ".token_cache.json"):
+    caches = [WECHAT_SKILL_SCRIPTS / f'.token_cache_{key}.json']
+    if not persona:
+        caches.append(WECHAT_SKILL_SCRIPTS / '.token_cache.json')
+    for cache in caches:
         try:
             cache.unlink()
         except OSError:
             pass
 
 
-def _wechat_verify_token() -> tuple[bool, str]:
+def _wechat_verify_token(persona: str = '') -> tuple[bool, str]:
     """用当前 accounts.web 凭证调官方 token 接口验证。返回 (ok, message)。
     在子进程里跑，避免把 skill 的 import 副作用带进 web 进程。"""
     code = (
@@ -306,7 +344,7 @@ def _wechat_verify_token() -> tuple[bool, str]:
         "    print('OK' if t else 'EMPTY')\n"
         "except Exception as e:\n"
         "    print('ERR:' + str(e))\n"
-    ) % (str(WECHAT_SKILL_SCRIPTS), WECHAT_WEB_ACCOUNT)
+    ) % (str(WECHAT_SKILL_SCRIPTS), _wechat_account_key(persona.strip()))
     try:
         proc = subprocess.run([sys.executable, "-c", code], cwd=str(WECHAT_SKILL_SCRIPTS),
                               env=_wechat_env(), capture_output=True, text=True, timeout=30)
@@ -389,6 +427,8 @@ SKILL_API_REQUIREMENTS: dict[str, dict] = {
 _ENV_ALLOWLIST: set[str] = {
     "EASEL_DIRECT_API_BASE_URL", "EASEL_DIRECT_API_KEY", "EASEL_DIRECT_API_MODEL",
 }
+from easel.generation_settings import SETTINGS as GENERATION_SETTINGS
+_ENV_ALLOWLIST.update(item.name for item in GENERATION_SETTINGS)
 for _spec in SKILL_API_REQUIREMENTS.values():
     for _key in _spec.get("settings", []):
         _ENV_ALLOWLIST.add(_key["env"])
@@ -412,7 +452,33 @@ async def _lifespan(_app: FastAPI):
     """应用生命周期：关机时回收公众号扫码进程（替代已弃用的 on_event）。"""
     global _HARNESS_LOOP
     _HARNESS_LOOP = asyncio.get_running_loop()
-    yield
+    recover_interrupted(_publish_ledger())
+    drain_publish_projections(_publish_ledger(), OUTPUTS_DIR)
+    from easel.publish_dispatch import dispatch_loop
+    from easel.publish_tasks import TaskStore
+    dispatcher = asyncio.create_task(dispatch_loop(
+        lambda: TaskStore(OUTPUTS_DIR / '_publish'), _publish_ledger, _submit_scheduled_publish,
+        _finalize_scheduled_publish, _reconcile_channel_notification, _prepare_scheduled_publish,
+        _process_native_app_webhooks))
+    try:
+        from anyio import create_task_group
+        from easel.generation_images import dispatch_images
+        from easel.generation_videos import dispatch_videos
+        from easel.generation_draft import dispatch_drafts
+        from easel.generation_aideo_dispatch import dispatch_aideo
+        async with create_task_group() as generation_tasks:
+            _app.state.generation_tasks = generation_tasks
+            generation_tasks.start_soon(dispatch_images, _image_generation)
+            generation_tasks.start_soon(dispatch_videos, _video_generation)
+            generation_tasks.start_soon(dispatch_drafts, _draft_generation)
+            generation_tasks.start_soon(dispatch_aideo, _aideo_generation)
+            try:
+                yield
+            finally:
+                generation_tasks.cancel_scope.cancel()
+    finally:
+        dispatcher.cancel()
+        await asyncio.gather(dispatcher, return_exceptions=True)
     tasks = list(_HARNESS_TASKS)
     for task in tasks:
         task.cancel()
@@ -472,8 +538,354 @@ def _loopback_peer(request: Request) -> bool:
         return False
 
 
+def _require_side_effect_access(request: Request) -> None:
+    """Require loopback or an explicit shared-secret token for state-changing actions.
+
+    Origin/Host checks remain useful browser CSRF protection, but they are not an
+    identity boundary for LAN clients that can forge headers.  Automatic publishing,
+    credential writes and manual package exports therefore require loopback unless
+    ``EASEL_WRITE_TOKEN`` is configured and presented in ``X-Easel-Write-Token``.
+    """
+    if getattr(request.state, 'caller_key', None) and request.state.caller_key['permission'] == 'write':
+        return
+    if _loopback_peer(request) or (request.client is not None and request.client.host == "testclient"):
+        return
+    expected = os.environ.get("EASEL_WRITE_TOKEN", "").strip()
+    supplied = request.headers.get("x-easel-write-token", "")
+    if expected and supplied and hmac.compare_digest(expected.encode(), supplied.encode()):
+        return
+    raise HTTPException(403, "写操作仅允许本机回环或配置 EASEL_WRITE_TOKEN 后访问")
+
+
 app.add_middleware(CORSMiddleware, allow_origins=_LOCAL_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=['localhost', '127.0.0.1'] + _EXTRA_HOSTS)
+
+from easel.channels.router import create_router as channel_router
+
+
+def _resolve_channel_webhook_targets(platform: str, candidate_ids: list[str]) -> list[tuple[str, str]]:
+    from easel.channels.native_config import native_setting
+    client = native_setting({**read_settings(ENV_FILE), **os.environ}, platform, 'CLIENT_ID')
+    if not client:
+        return []
+    with _publish_ledger()._connect() as db:
+        rows = db.execute("SELECT * FROM publish_runs WHERE platform=? AND state IN ('running','submitted','unknown')", (platform,)).fetchall()
+    targets = []
+    for row in rows:
+        payload = json.loads(row['payload_json'])
+        if payload.get('app_client_id') != client:
+            continue
+        if row['account_id'].startswith('app-handoff:') and not (payload.get('auth_mode') == 'app_handoff' and payload.get('handoff_template')):
+            continue
+        ids = {row['external_request_id'], row['platform_work_id']}
+        progress = payload.get('channel_progress') or {}
+        receipt = progress.get('receipt') or {}
+        details = receipt.get('details') or {}
+        ids.update(str(details[key]) for key in ('share_id', 'resource_id', 'video_id', 'item_id', 'publish_id', 'upload_token') if details.get(key))
+        ids.update(str(receipt[key]) for key in ('external_request_id', 'platform_work_id') if receipt.get(key))
+        action = payload.get('user_action') or {}
+        if action.get('share_id'):
+            ids.add(str(action['share_id']))
+        if set(candidate_ids) & (ids - {''}):
+            targets.append((row['persona'], row['account_id']))
+    return targets
+
+
+def _process_native_app_webhooks() -> int:
+    from easel.channels import CredentialStore
+    from easel.channels.native_webhooks import process_pending_app_events
+    if not (OUTPUTS_DIR / '_channels/channels.sqlite3').is_file():
+        return 0
+    return process_pending_app_events(CredentialStore(OUTPUTS_DIR / '_channels'),
+        {**read_settings(ENV_FILE), **os.environ}, _resolve_channel_webhook_targets)
+
+app.include_router(channel_router(
+    lambda: OUTPUTS_DIR,
+    lambda: {**read_settings(ENV_FILE), **os.environ},
+    lambda persona: valid_persona_name(persona) and profile_exists(persona),
+    _require_side_effect_access,
+))
+
+from easel.channel_publish_router import create_router as channel_publish_router
+
+app.include_router(channel_publish_router(
+    lambda: OUTPUTS_DIR,
+    lambda: {**read_settings(ENV_FILE), **os.environ},
+    lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona),
+    _require_side_effect_access,
+))
+
+from easel.local_access_router import create_router as access_router, validate_caller_key
+
+app.include_router(access_router(
+    lambda: OUTPUTS_DIR,
+    lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona),
+    _require_side_effect_access,
+))
+
+from easel.channel_application_router import create_router as channel_application_router
+
+app.include_router(channel_application_router(
+    lambda: OUTPUTS_DIR,
+    lambda: {**read_settings(ENV_FILE), **os.environ},
+    lambda: ENV_FILE,
+    lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona),
+    _require_side_effect_access,
+    lambda values: _write_env_direct(values),
+    lambda: _harness_settings()['runtime'] != 'api' and bool(harnesses.describe(_harness_settings()['runtime'])['installed']),
+))
+
+from easel.generation_images import ImageGeneration
+from easel.generation_router import create_router as generation_router
+from easel.generation_video_router import create_router as generation_video_router
+from easel.generation_videos import VideoGeneration
+from easel.generation_volcengine_router import create_router as generation_volcengine_router
+
+
+from easel.generation_app_config import effective_settings
+from web.generation_config_router import create_router as config_editor_router
+
+app.include_router(config_editor_router())
+from easel.http_metrics import HttpMetrics, HttpMetricsMiddleware
+app.state.http_metrics = HttpMetrics()
+app.add_middleware(HttpMetricsMiddleware, metrics=app.state.http_metrics)
+
+
+@app.get('/metrics')
+def operational_metrics(request: Request):
+    from fastapi.responses import Response
+    _require_side_effect_access(request)
+    return Response(app.state.http_metrics.render(OUTPUTS_DIR), media_type='text/plain; version=0.0.4')
+
+
+def _generation_settings():
+    return effective_settings(OUTPUTS_DIR, read_settings(ENV_FILE))
+
+
+def _image_generation() -> ImageGeneration:
+    return ImageGeneration(OUTPUTS_DIR, PROJECT_ROOT, _generation_settings())
+
+
+def _video_generation() -> VideoGeneration:
+    return VideoGeneration(OUTPUTS_DIR, _generation_settings())
+
+
+app.include_router(generation_router(
+    _image_generation,
+    lambda persona: not persona or valid_persona_name(persona) and profile_exists(persona),
+    _require_side_effect_access,
+))
+app.include_router(generation_video_router(
+    _video_generation,
+    lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona),
+    _require_side_effect_access,
+))
+app.include_router(generation_volcengine_router(
+    _video_generation,
+    lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona),
+    _require_side_effect_access,
+))
+
+from easel.generation_video_generic_router import create_router as generic_video_router
+from easel.generation_chat_router import create_router as ai_chat_router
+from easel.generation_chat_service import ChatGeneration
+from easel.generation_store import GenerationStore
+from easel.generation_agent_router import create_agent_router
+from web.generation_agent_questions import create_router as agent_questions_router
+from web.generation_settings_router import create_router as generation_settings_router
+from web.generation_agent_bridge import authorize as _authorize_ai_persona, service as _agent_generation
+from easel.generation_aideo_router import create_router as aideo_router
+from easel.generation_aideo_service import AideoGeneration
+from easel.generation_draft import DraftGeneration
+from easel.generation_draft_runtime import NativeDraftRuntime
+from easel.generation_characters import CharacterGeneration
+from easel.generation_character_router import create_router as character_router
+from easel.generation_direct_edit_service import DirectEditGeneration
+from easel.generation_direct_edit_router import create_router as direct_edit_router
+from easel.generation_draft_router import create_draft_router, create_internal_draft_router
+
+
+def _ai_chat_generation() -> ChatGeneration:
+    return ChatGeneration(GenerationStore(OUTPUTS_DIR), _generation_settings())
+
+
+def _aideo_generation() -> AideoGeneration:
+    return AideoGeneration(OUTPUTS_DIR, _generation_settings())
+
+
+def _character_generation() -> CharacterGeneration:
+    return CharacterGeneration(OUTPUTS_DIR, _generation_settings())
+
+
+def _direct_edit_generation() -> DirectEditGeneration:
+    return DirectEditGeneration(OUTPUTS_DIR, _generation_settings())
+
+
+def _draft_generation() -> DraftGeneration:
+    return DraftGeneration(OUTPUTS_DIR, NativeDraftRuntime(OUTPUTS_DIR, PROJECT_ROOT, _generation_settings()))
+
+
+for _creation_router, _creation_factory in ((generic_video_router, _video_generation),
+        (ai_chat_router, _ai_chat_generation), (aideo_router, _aideo_generation),
+        (character_router, _character_generation), (direct_edit_router, _direct_edit_generation)):
+    app.include_router(_creation_router(_creation_factory,
+        lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona), _require_side_effect_access))
+app.include_router(create_agent_router(_agent_generation, _authorize_ai_persona))
+app.include_router(agent_questions_router())
+app.include_router(generation_settings_router())
+app.include_router(create_draft_router(_draft_generation, _authorize_ai_persona))
+app.include_router(create_internal_draft_router(_draft_generation, _authorize_ai_persona))
+
+from easel.publish_task_router import create_router as task_router
+from easel.channels import DEFINITIONS as CHANNEL_DEFINITIONS
+
+from easel.native_handoff_router import create_router as native_handoff_router
+
+app.include_router(native_handoff_router(
+    lambda: OUTPUTS_DIR,
+    lambda: {**read_settings(ENV_FILE), **os.environ},
+    lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona),
+    _require_side_effect_access,
+))
+
+
+def _control_scheduled_run(platform: str, action: str, payload: dict) -> None:
+    ledger = _publish_ledger()
+    run = next((run for run in ledger.list_runs(persona=payload['persona'], platform=platform)
+                if run.idempotency_key == payload['idempotency_key']), None)
+    if run is None:
+        return
+    if run.state in {RunState.PREPARED, RunState.APPROVED, RunState.QUEUED}:
+        try:
+            ledger.cancel_unsent(run.run_id, persona=payload['persona'])
+        except (InvalidTransition, LeaseRequired) as error:
+            raise ValueError('任务已开始执行，请刷新状态') from error
+        return
+    if run.state not in {RunState.FAILED, RunState.CANCELLED}:
+        raise ValueError('平台结果尚待核验')
+
+
+def _validate_publish_flow(flow) -> None:
+    from easel._channel_publish_approval import validate_approval
+    from easel._channel_publish_models import ChannelPublishRequest
+    from easel.channels import ChannelAdapter, ChannelError
+    from pydantic import ValidationError
+    settings = {**read_settings(ENV_FILE), **os.environ}
+    for item in flow.items:
+        intent = {**flow.content, **item.overrides, 'persona': flow.persona,
+                  'context': flow.context, 'scheduled_for': flow.publish_at.isoformat(), 'reviewed': flow.reviewed}
+        try:
+            if item.platform in CHANNEL_DEFINITIONS:
+                request = ChannelPublishRequest.model_validate({**intent, 'account_uid': item.account_uid,
+                    'reviewed': flow.reviewed, 'approval_digest': item.approval_digest,
+                    'approval_expires_at': item.approval_expires_at, 'idempotency_key': 'flow-precheck'})
+                from easel.channels import CredentialStore
+                validate_approval(OUTPUTS_DIR, settings, ChannelAdapter(item.platform, settings=settings,
+                    store=CredentialStore(OUTPUTS_DIR / '_channels')), request)
+            else:
+                checked = api_publish_precheck(item.platform, PublishRequest.model_validate(intent))
+                if not flow.reviewed or not hmac.compare_digest(item.approval_digest.encode(), checked['approvalDigest'].encode()):
+                    raise HTTPException(409, '发布计划中的内容需要重新审核')
+        except ChannelError as error:
+            raise HTTPException(error.status, {'platform': error.platform, 'code': error.code}) from error
+        except ContentError as error:
+            raise HTTPException(error.status, error.code) from error
+        except ValidationError as error:
+            raise HTTPException(422, '发布计划参数无效') from error
+
+
+def _prepare_scheduled_publish(platform: str, payload: dict) -> dict:
+    if platform not in CHANNEL_DEFINITIONS:
+        return {'state': 'queued'}
+    from easel.channel_publishing import ChannelPublishing
+    from easel._channel_publish_models import ChannelPublishRequest
+    request = ChannelPublishRequest.model_validate({key: value for key, value in payload.items() if key != 'run_id'})
+    return ChannelPublishing(OUTPUTS_DIR, lambda: {**read_settings(ENV_FILE), **os.environ}).prepare_task(platform, request).model_dump(mode='json')
+
+from easel.publish_update_router import create_router as publish_update_router
+
+app.include_router(publish_update_router(
+    lambda: OUTPUTS_DIR,
+    lambda: {**read_settings(ENV_FILE), **os.environ},
+    lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona),
+    _require_side_effect_access,
+))
+
+app.include_router(task_router(
+    lambda: OUTPUTS_DIR,
+    lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona),
+    lambda platform: bool(CHANNEL_DEFINITIONS[platform].publish_modes) if platform in CHANNEL_DEFINITIONS else platform in LOGIN_RUNNERS,
+    _require_side_effect_access, _control_scheduled_run, _validate_publish_flow, _prepare_scheduled_publish,
+))
+
+
+async def _submit_scheduled_publish(platform: str, payload: dict) -> tuple[int, dict]:
+    import httpx
+    prefix = '/api/channel-publish' if platform in CHANNEL_DEFINITIONS else '/api/publish'
+    suffix = '/publish' if platform in CHANNEL_DEFINITIONS else ''
+    if platform in CHANNEL_DEFINITIONS:
+        payload = {key: value for key, value in payload.items() if key != 'run_id'}
+    transport = httpx.ASGITransport(app=app, client=('127.0.0.1', 0))
+    async with httpx.AsyncClient(transport=transport, base_url='http://localhost:7860') as client:
+        response = await client.post(f'{prefix}/{platform}{suffix}', json=payload, timeout=960)
+        return response.status_code, response.json()
+
+
+async def _finalize_scheduled_publish(platform: str, run_id: str, scope: dict) -> tuple[int, dict]:
+    run = _publish_ledger().get_run(run_id)
+    if run is not None and run.payload.get('handoff_template'):
+        from easel.native_handoff import NativeHandoff
+        from easel.channels import ChannelError
+        from easel.publish_models import LedgerError
+        if run.persona != scope.get('persona') or run.platform != platform or run.account_id != scope.get('account_uid'):
+            return 404, {'code': 'run_not_found'}
+        try:
+            value = await asyncio.to_thread(NativeHandoff(OUTPUTS_DIR,
+                lambda: {**read_settings(ENV_FILE), **os.environ}).poll_owned, run.persona, run.run_id)
+            return 200, value
+        except ChannelError as error:
+            return error.status, {'code': error.code}
+        except LedgerError as error:
+            return 409, {'code': type(error).__name__}
+    import httpx
+    transport = httpx.ASGITransport(app=app, client=('127.0.0.1', 0))
+    async with httpx.AsyncClient(transport=transport, base_url='http://localhost:7860') as client:
+        response = await client.post(f'/api/channel-publish/{platform}/{run_id}/finalize', json=scope, timeout=960)
+        return response.status_code, response.json()
+
+
+async def _reconcile_channel_notification(platform: str, run_id: str, scope: dict) -> tuple[int, dict]:
+    import httpx
+    transport = httpx.ASGITransport(app=app, client=('127.0.0.1', 0))
+    async with httpx.AsyncClient(transport=transport, base_url='http://localhost:7860') as client:
+        response = await client.post(f'/api/channel-publish/{platform}/{run_id}/reconcile', json=scope, timeout=180)
+        return response.status_code, response.json()
+
+
+async def _readback_publish_record(platform: str, payload: dict) -> dict:
+    import httpx
+    run_id = payload['run_id']
+    if platform in CHANNEL_DEFINITIONS:
+        path = f'/api/channel-publish/{platform}/{run_id}/reconcile'
+        body = {key: value for key, value in payload.items() if key != 'run_id'}
+    else:
+        path = f'/api/publish/{platform}/reconcile'
+        body = {**payload, 'outcome': 'unverified'}
+    transport = httpx.ASGITransport(app=app, client=('127.0.0.1', 0))
+    async with httpx.AsyncClient(transport=transport, base_url='http://localhost:7860') as client:
+        response = await client.post(path, json=body, timeout=180)
+    if response.status_code >= 400:
+        raise HTTPException(response.status_code, '平台作品回读暂不可用')
+    return response.json()
+
+
+from easel.publish_records_router import create_router as records_router
+
+app.include_router(records_router(
+    lambda: _publish_ledger(),
+    lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona),
+    _require_side_effect_access, _readback_publish_record,
+))
 
 
 @app.middleware('http')
@@ -492,7 +904,19 @@ async def local_write_guard(request: Request, call_next):
     这一类跨站攻击，不是「网络可达即视为可信」的边界——不要把本服务暴露在
     不受信任的网络（公共 WiFi、无防火墙的公网主机）上。
     """
+    try:
+        delegated = await validate_caller_key(request, OUTPUTS_DIR)
+    except HTTPException as error:
+        return JSONResponse({'detail': error.detail}, status_code=error.status_code)
     origin = request.headers.get('origin')
+    if re.fullmatch(r'/api/asset-uploads/public/[a-f0-9]{32}/(content|confirm|callback)', request.url.path):
+        return await call_next(request)
+    if request.method == 'POST' and re.fullmatch(r'/api/channels/(youtube|tiktok|instagram|facebook|linkedin|bilibili-open|douyin-open|wechat-official-open)/webhook', request.url.path):
+        return await call_next(request)
+    if request.method == 'POST' and re.fullmatch(r'/api/channels/(' + '|'.join(re.escape(key) for key in CHANNEL_DEFINITIONS) + r')/auth/(callback|miniapp-callback)', request.url.path):
+        return await call_next(request)
+    if request.method == 'POST' and re.fullmatch(r'/api/native-handoff/templates/[a-f0-9]{32}/start', request.url.path):
+        return await call_next(request)
     if request.url.path == '/api/clipper' and origin and re.fullmatch(r'chrome-extension://[a-p]{32}', origin):
         headers = {
             'Access-Control-Allow-Origin': origin,
@@ -507,8 +931,14 @@ async def local_write_guard(request: Request, call_next):
         return response
     if request.method not in ('GET', 'HEAD', 'OPTIONS'):
         allowed = origin in _LOCAL_ORIGINS if origin else _loopback_peer(request)
+        if not origin and (request.headers.get('x-easel-write-token') or delegated):
+            allowed = True
         if not allowed:
             return JSONResponse({'detail': '仅允许从本机工作台操作。'}, status_code=403)
+        try:
+            _require_side_effect_access(request)
+        except HTTPException as error:
+            return JSONResponse({'detail': error.detail}, status_code=error.status_code)
     return await call_next(request)
 
 
@@ -639,6 +1069,7 @@ def _publish_env() -> dict[str, str]:
     脚本时不经过这里，flag 未设 → 脚本自动记录（见 calendar_ops.record_publish）。"""
     env = _proxy_env()
     env['EASEL_CALENDAR_AUTORECORD'] = '0'
+    env['EASEL_PUBLISH_POLICY_FILE'] = str(ENV_FILE)
     return env
 
 
@@ -863,33 +1294,8 @@ def _write_env(updates: dict[str, str]) -> None:
     _guard_env_values(updates)
     if not updates:
         return
-    lines = ENV_FILE.read_text(encoding='utf-8').splitlines() if ENV_FILE.is_file() else []
-    seen = set()
-    out = []
-    for line in lines:
-        s = line.strip()
-        matched = None
-        if s and not s.startswith('#') and '=' in s:
-            k = s.split('=', 1)[0].strip()
-            if k in updates:
-                matched = k
-        if matched is not None:
-            seen.add(matched)
-            val = updates[matched]
-            if val.strip() == '':
-                continue
-            out.append(f'{matched}={val}')
-            continue
-        out.append(line)
-    appended = [f'{k}={v}' for k, v in updates.items() if k not in seen and v.strip() != '']
-    if appended:
-        if out and out[-1].strip() != '':
-            out.append('')
-        out.append('# ---- Easel API keys (added via Web) ----')
-        out.extend(appended)
-    tmp = ENV_FILE.with_suffix('.env.tmp')
-    tmp.write_text('\n'.join(out) + '\n', encoding='utf-8')
-    tmp.replace(ENV_FILE)
+    from easel.env_store import update_environment
+    update_environment(ENV_FILE, updates)
 
 
 def _api_spec_status(skill: str, env: dict[str, str]) -> dict:
@@ -1904,30 +2310,8 @@ def _write_env_direct(updates: dict[str, str]) -> None:
     if not updates:
         return
     _guard_env_values(updates)
-    lines = ENV_FILE.read_text(encoding='utf-8').splitlines() if ENV_FILE.is_file() else []
-    seen = set()
-    out = []
-    for line in lines:
-        s = line.strip()
-        matched = None
-        if s and not s.startswith('#') and '=' in s:
-            k = s.split('=', 1)[0].strip()
-            if k in updates:
-                matched = k
-        if matched is not None:
-            seen.add(matched)
-            out.append(f'{matched}={updates[matched]}')
-            continue
-        out.append(line)
-    appended = [f'{k}={v}' for k, v in updates.items() if k not in seen]
-    if appended:
-        if out and out[-1].strip() != '':
-            out.append('')
-        out.append('# ---- Easel 模型配置（Web 设置面板写入）----')
-        out.extend(appended)
-    tmp = ENV_FILE.with_suffix('.env.tmp')
-    tmp.write_text('\n'.join(out) + '\n', encoding='utf-8')
-    tmp.replace(ENV_FILE)
+    from easel.env_store import update_environment
+    update_environment(ENV_FILE, updates)
 
 
 RESERVED_PROVIDER_KEYS = {"openai", "anthropic", "relay"}
@@ -2425,17 +2809,21 @@ class ChatRequest(BaseModel):
     persona: str | None = None
     sessionId: str | None = None
     turnId: str | None = None
+    model: str = Field(default='', max_length=240, pattern=r'^[^\x00-\x1f]*$')
     attachments: list[AttachmentRef] = Field(default_factory=list)
     quote: str | None = None   # 用户引用到输入框作为上下文的片段（来自某条消息/所选文本）
     references: list[ReferenceRef] = Field(default_factory=list)  # 结构化引用：右侧元素（视频/镜头/音轨等）
 
 
-def _attachment_scope(session_id: str) -> str:
-    """Map a browser session to a filesystem-safe, non-reversible inbox scope."""
+def _attachment_scope(session_id: str, persona: str = "") -> str:
+    """Map a (persona, session) pair to a filesystem-safe inbox scope."""
     value = session_id.strip()
     if not value or len(value) > 256:
         raise HTTPException(400, "无效的会话标识")
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:20]
+    owner = persona.strip()
+    if owner and (not valid_persona_name(owner) or not profile_exists(owner)):
+        raise HTTPException(400, "无效的画像")
+    return hashlib.sha256(f"{owner}\0{value}".encode("utf-8")).hexdigest()[:20]
 
 
 def _attachment_id(scope: str, path: str) -> str:
@@ -2449,17 +2837,21 @@ def _attachment_context(req: ChatRequest) -> str:
     if not req.sessionId:
         raise HTTPException(400, "附件必须绑定到会话")
 
-    scope = _attachment_scope(req.sessionId)
+    scope = _attachment_scope(req.sessionId, req.persona or "")
+    legacy_scope = _attachment_scope(req.sessionId)
     rows: list[str] = []
     seen: set[str] = set()
     for attachment in req.attachments:
         rel = Path(attachment.path)
         if rel.is_absolute() or ".." in rel.parts or len(rel.parts) != 4:
             raise HTTPException(400, "附件路径无效")
-        if rel.parts[0] != "_inbox" or rel.parts[1] != scope:
+        expected_scope = scope
+        if rel.parts[0] == "_inbox" and rel.parts[1] == legacy_scope and legacy_scope != scope:
+            expected_scope = legacy_scope
+        if rel.parts[0] != "_inbox" or rel.parts[1] != expected_scope:
             raise HTTPException(403, "附件不属于当前会话")
         normalized = rel.as_posix()
-        if attachment.id != _attachment_id(scope, normalized):
+        if attachment.id != _attachment_id(expected_scope, normalized):
             raise HTTPException(403, "附件标识校验失败")
         full = _safe_output_target(normalized)
         if not full.is_file():
@@ -2774,7 +3166,7 @@ async def _run_harness_chat(req: ChatRequest, sk: str, message: str, runtime: st
                "EASEL_SESSION_KEY": sk, "EASEL_PERSONA": req.persona or ""}
         # 模型未显式配置时，按该底座的原生模型目录解析，避免落到引擎自带、
         # 本机不可达的默认模型（如 pi 默认的 claude/api.anthropic.com）。
-        model = config["models"].get(runtime, "")
+        model = req.model or config["models"].get(runtime, "")
         if not model and runtime in ("pi", "codex", "opencode"):
             try:
                 model = await asyncio.wait_for(
@@ -2843,6 +3235,8 @@ async def _run_direct_chat(req: ChatRequest, sk: str, content, system: str, emit
     claimed = False
     locked = False
     settings = read_settings(ENV_FILE)
+    if req.model:
+        settings = {**settings, 'EASEL_DIRECT_API_MODEL': req.model}
     task = asyncio.current_task()
     _DIRECT_CHAT_TASKS.add(task)
     if lock.locked():
@@ -3000,6 +3394,10 @@ async def api_chat_stream(req: ChatRequest):
     client_q: asyncio.Queue = asyncio.Queue()
     CLIENT_DONE = object()
 
+    from web.generation_chat_observer import observe_chat, complete_chat
+    req = req.model_copy(update={'turnId': req.turnId or uuid.uuid4().hex})
+    observed_run = observe_chat(req, runtime)
+
     async def supervisor():
         pk = f"web:{sk}"                 # 落盘 key（与 /api/chat/last 一致）
         turn_id = req.turnId or uuid.uuid4().hex
@@ -3036,7 +3434,10 @@ async def api_chat_stream(req: ChatRequest):
                     req.model_copy(update={"turnId": turn_id}), sk, content, system, to_client)
             finally:
                 to_client("done", sessionKey=sk)
-                client_q.put_nowait(CLIENT_DONE)
+                try:
+                    await complete_chat(observed_run)
+                finally:
+                    client_q.put_nowait(CLIENT_DONE)
             return
 
         try:
@@ -3044,11 +3445,14 @@ async def api_chat_stream(req: ChatRequest):
                                     sk, message, runtime, config, to_client)
         finally:
             to_client("done", sessionKey=sk)
-            client_q.put_nowait(CLIENT_DONE)
+            try:
+                await complete_chat(observed_run)
+            finally:
+                client_q.put_nowait(CLIENT_DONE)
         return
 
     # 把 run 跑在独立后台任务里（持强引用防 GC）——客户端断开不取消它。
-    task = asyncio.create_task(supervisor())
+    task = asyncio.create_task(supervisor(), name='chat:' + req.turnId if req.turnId else 'chat')
     _BG_TASKS.add(task)
 
     def _bg_done(t):
@@ -4078,6 +4482,64 @@ UPLOAD_EXTS = IMAGE_EXTS | VIDEO_EXTS | {
     ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".mp3", ".wav", ".m4a"}
 MAX_UPLOAD_MB = 50
 
+from easel.content_library_router import create_router as content_router
+from easel.local_user_router import create_router as local_user_router
+from easel.upload_sessions_router import create_router as upload_sessions_router, UploadPolicy
+from easel.upload_sessions_models import CompletedUpload, UploadReceipt
+
+
+def _accept_completed_upload(completed: CompletedUpload) -> UploadReceipt:
+    session = completed.session
+    scope = _attachment_scope(session.session_id, session.persona)
+    relative = f'_inbox/{scope}/{session.id}/{session.filename}'
+    if session.target == 'media':
+        relative = f'upload-{session.id}/{session.filename}'
+    target = OUTPUTS_DIR / relative
+    if target.is_symlink() or not target.resolve().is_relative_to(OUTPUTS_DIR.resolve()):
+        raise HTTPException(403, '上传目标越界')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if session.target == 'media':
+        from skills.shared.scripts.project_scope import record_profile, in_persona_scope
+        metadata = target.parent / '.easel.json'
+        if metadata.is_symlink() or target.parent.is_symlink():
+            raise HTTPException(403, '上传项目元数据不能是符号链接')
+        if metadata.exists() and not in_persona_scope(target.parent, session.persona):
+            raise HTTPException(403, '上传项目不属于当前画像')
+        record_profile(target.parent, session.persona)
+        if not in_persona_scope(target.parent, session.persona):
+            raise HTTPException(403, '上传项目不属于当前画像')
+    if target.exists():
+        with target.open('rb') as stream:
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                digest.update(chunk)
+        if digest.hexdigest() != session.sha256:
+            raise HTTPException(409, '上传完成记录与已有文件冲突')
+    else:
+        import tempfile
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as destination:
+                temporary = Path(destination.name)
+                with completed.path.open('rb') as source:
+                    shutil.copyfileobj(source, destination, length=1024 * 1024)
+                destination.flush()
+                os.fsync(destination.fileno())
+            os.replace(temporary, target)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+    return UploadReceipt(id=_attachment_id(scope, relative), name=session.filename, path=relative)
+
+
+_profile_valid = lambda persona: bool(persona) and valid_persona_name(persona) and profile_exists(persona)
+app.include_router(content_router(lambda: OUTPUTS_DIR, _profile_valid, _require_side_effect_access))
+app.include_router(local_user_router(lambda: OUTPUTS_DIR, _profile_valid, _require_side_effect_access))
+app.include_router(upload_sessions_router(
+    lambda: OUTPUTS_DIR, _profile_valid, _require_side_effect_access,
+    policy=UploadPolicy(MAX_UPLOAD_MB * 1024 * 1024, frozenset(UPLOAD_EXTS), _accept_completed_upload),
+))
+
 
 def _unique_upload_path(dest: Path, filename: str) -> Path:
     """同一上传批次内保留所有同名文件，不让后一个静默覆盖前一个。"""
@@ -4145,9 +4607,11 @@ async def api_output_delete(path: str):
 async def api_upload(
     files: list[UploadFile] = File(...),
     sessionId: str = Form(...),
+    persona: str = Form(default=""),
 ):
     """Store chat attachments in a session-scoped inbox and return opaque refs."""
-    scope = _attachment_scope(sessionId)
+    persona_value = persona if isinstance(persona, str) else ""
+    scope = _attachment_scope(sessionId, persona_value)
     batch = time.strftime('%Y%m%d-') + uuid.uuid4().hex[:6]
     dest = OUTPUTS_DIR / "_inbox" / scope / batch
     dest.mkdir(parents=True, exist_ok=True)
@@ -4195,10 +4659,12 @@ async def api_upload_limits():
 async def api_upload_local(
     files: list[UploadFile] = File(...),
     sessionId: str = Form(...),
+    persona: str = Form(default=""),
 ):
     """超过上传上限的文件复制通道：1MB 分块流式落盘（不整读进内存）、无大小上限；
     产出与 /api/upload 同构的附件引用（id/name/path），附件校验与清单链路零改动。"""
-    scope = _attachment_scope(sessionId)
+    persona_value = persona if isinstance(persona, str) else ""
+    scope = _attachment_scope(sessionId, persona_value)
     batch = time.strftime('%Y%m%d-') + uuid.uuid4().hex[:6]
     dest = OUTPUTS_DIR / "_inbox" / scope / batch
     dest.mkdir(parents=True, exist_ok=True)
@@ -4275,7 +4741,7 @@ def _account_logged_in(platform: str, cfg: dict, persona: str = '') -> bool:
                 return True
         except Exception:
             pass
-        return _wechat_has_credentials()
+        return _wechat_has_credentials(persona) if persona else _wechat_has_credentials()
     st = _login_dir(persona) / f'{platform}.json'
     if not st.is_file():
         return False
@@ -4359,7 +4825,7 @@ async def _start_login(platform: str, persona: str = '', restart: bool = False):
         raise HTTPException(400, f"{cfg['name']} 暂不可用：{cfg.get('note', '')}")
     if backend == 'wechat-oa':
         # 公众号不走扫码：前端应改用凭证表单提交到 /api/accounts/{platform}/credentials。
-        return {'mode': 'credentials', 'configured': _wechat_has_credentials(),
+        return {'mode': 'credentials', 'configured': _wechat_has_credentials(persona) if persona else _wechat_has_credentials(),
                 'message': '微信公众号请填写 AppID / AppSecret'}
     key = _pk(persona, platform)
     existing = LOGIN_PROCESSES.get(key)
@@ -4442,6 +4908,7 @@ async def api_login_status(platform: str, persona: str = ''):
 
 class SmsCodeRequest(BaseModel):
     code: str
+    run_id: str = ""
 
 
 @app.post("/api/login/{platform}/sms")
@@ -4470,12 +4937,12 @@ class WechatCredentials(BaseModel):
 
 
 @app.get("/api/accounts/{platform}/credentials")
-async def api_get_credentials(platform: str):
+async def api_get_credentials(platform: str, persona: str = ''):
     """读取凭证式平台（目前仅公众号）的已配置状态（AppID 脱敏，AppSecret 不回传）。"""
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg or cfg.get('backend') != 'wechat-oa':
         raise HTTPException(404, '该平台不使用凭证登录')
-    acc = _wechat_web_account()
+    acc = _wechat_web_account(persona)
     app_id = acc.get('app_id', '') or ''
     return {
         'configured': bool(app_id and acc.get('app_secret')),
@@ -4486,22 +4953,25 @@ async def api_get_credentials(platform: str):
 
 
 @app.post("/api/accounts/{platform}/credentials")
-async def api_save_credentials(platform: str, req: WechatCredentials):
+async def api_save_credentials(platform: str, req: WechatCredentials, request: Request, persona: str = ''):
     """保存凭证式平台（公众号）的 AppID/AppSecret，写入 skill 配置并调官方接口验证。"""
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg or cfg.get('backend') != 'wechat-oa':
         raise HTTPException(404, '该平台不使用凭证登录')
+    _require_side_effect_access(request)
+    if not persona or not valid_persona_name(persona) or not profile_exists(persona):
+        raise HTTPException(400, '公众号凭证必须绑定到已存在画像')
     app_id = (req.appId or '').strip()
     app_secret = (req.appSecret or '').strip()
     if not app_id or not app_secret:
         raise HTTPException(400, 'AppID 和 AppSecret 都不能为空')
-    _wechat_save_credentials(app_id, app_secret, name=req.name.strip(), author=req.author.strip())
+    _wechat_save_credentials(app_id, app_secret, name=req.name.strip(), author=req.author.strip(), persona=persona)
     # 验证要真连微信接口（最长 30s）：丢线程池，避免卡住整个事件循环
-    ok, msg = await asyncio.to_thread(_wechat_verify_token)
+    ok, msg = await asyncio.to_thread(_wechat_verify_token, persona)
     with _WHOAMI_LOCK:
-        _WHOAMI_CACHE.pop(platform, None)
+        _WHOAMI_CACHE.pop(_pk(persona, platform), None)
     if ok:
-        _write_login_marker(platform, 'success', req.name.strip() or '微信公众号')
+        _write_login_marker(platform, 'success', req.name.strip() or '微信公众号', persona)
         return {'ok': True, 'message': '公众号凭证已保存并验证通过'}
     # 校验失败：凭证已存（下次改正后可直接重试），但明确告知失败原因（常见 40164 IP 白名单 / 40125 密钥错误）
     return {'ok': False, 'message': f'凭证已保存但验证未通过：{msg}。若是 40164 请把服务器出口 IP 加入公众号 IP 白名单。'}
@@ -4627,7 +5097,7 @@ async def _check_account_whoami(platform: str, persona: str = '', force: bool = 
     mkfile = 'wechat-oa-mp' if backend == 'wechat-oa' else platform
     if backend == 'wechat-oa':
         if _mp_login_status(persona)['state'] != 'success':
-            acc = _wechat_web_account()
+            acc = _wechat_web_account(persona) if persona else _wechat_web_account()
             return {'loggedIn': _account_logged_in(platform, cfg, persona),
                     'name': acc.get('name', '') or '微信公众号', 'avatar': ''}
     proc_key = pk_mp if backend == 'wechat-oa' else key
@@ -4692,6 +5162,8 @@ async def _check_account_whoami(platform: str, persona: str = '', force: bool = 
             try:
                 dd = json.loads(line)
                 data = {'loggedIn': bool(dd.get('loggedIn')), 'name': dd.get('name') or '', 'avatar': dd.get('avatar') or ''}
+                if isinstance(dd.get('accountUid'), str) and dd['accountUid']:
+                    data['accountUid'] = dd['accountUid']
                 # 有 error 字段 = 校验本身失败（浏览器起不来/网络抖动/崩溃），不是可信的「未登录」结论
                 confident = proc.returncode == 0 and isinstance(dd.get('loggedIn'), bool) and not dd.get('error')
                 break
@@ -4704,8 +5176,11 @@ async def _check_account_whoami(platform: str, persona: str = '', force: bool = 
     if not confident:
         raise HTTPException(502, '未能确认当前账号身份，请稍后重试校验；原登录状态和账号资料保持不变')
     verified_logged_in = data['loggedIn']
-    if backend == 'wechat-oa' and not verified_logged_in and _wechat_has_credentials():
-        account = _wechat_web_account()
+    has_credentials = False
+    if backend == 'wechat-oa':
+        has_credentials = (_wechat_has_credentials(persona) if persona else _wechat_has_credentials())
+    if backend == 'wechat-oa' and not verified_logged_in and has_credentials:
+        account = _wechat_web_account(persona) if persona else _wechat_web_account()
         data = {'loggedIn': True, 'name': account.get('name', '') or '微信公众号', 'avatar': ''}
     with _WHOAMI_LOCK:
         _WHOAMI_CACHE[key] = (time.time(), data)
@@ -4732,7 +5207,7 @@ async def api_logout(platform: str, persona: str = ''):
     d = _login_dir(persona)
     if cfg['backend'] == 'wechat-oa':
         # 1) 清 AppID 凭证（旧配置兜底）
-        _wechat_clear_credentials()
+        _wechat_clear_credentials(persona) if persona else _wechat_clear_credentials()
         deleted.append('wechat-publisher.yaml:accounts.web')
         # 2) 停掉可能仍在跑的后台登录进程（避免它又写回 success 标记）
         proc = LOGIN_PROCESSES.pop(_pk(persona, 'wechat-oa-mp'), None)
@@ -4866,6 +5341,16 @@ def _platform_profile_url(platform: str, persona: str) -> str | None:
     return None
 
 
+@app.get('/api/analytics/{platform}/snapshots')
+def api_analytics_snapshots(platform: str, persona: str = '', account_uid: str = ''):
+    profile = _write_profile(persona, [])
+    if platform not in ANALYTICS_PLATFORMS:
+        raise HTTPException(404, '该平台暂不支持分析')
+    snapshots = load_snapshots(OUTPUTS_DIR, profile, platform)
+    return {'schema_version': 2, 'snapshots': [item.to_dict() for item in snapshots
+            if not account_uid or item.account_uid == account_uid]}
+
+
 @app.get("/api/analytics/{platform}")
 async def api_analytics(platform: str, persona: str = ''):
     """抓取某平台（当前画像）已登录账号的创作数据，同(画像,平台)并发刷新共享一次有时限的任务。"""
@@ -4888,6 +5373,7 @@ def _finish_analytics(key: str, task: asyncio.Task) -> None:
 
 
 async def _fetch_analytics(platform: str, persona: str = ''):
+    _write_profile(persona, [])
     # B站用 cookie 调 API（无浏览器 profile）、公众号走 mp 后台会话（Playwright 拦截数据 XHR，见下），单独分支；其余走 account_stats（Playwright）。按画像隔离 cookie/profile。
     profile_base = str(_persona_profile_base(persona))
     if platform == "bilibili":
@@ -4904,6 +5390,8 @@ async def _fetch_analytics(platform: str, persona: str = ''):
         # 代理策略由 account_stats.py 按平台自定（xhs 直连、其它走 env），后端照常传 _proxy_env
         cmd = [sys.executable, str(SHARED_SCRIPTS / "account_stats.py"), "fetch",
                "--platform", platform, "--profile-base", profile_base]
+        if persona:
+            cmd += ['--persona', persona]
         # 掘金/CSDN：用画像 platforms.md 里配好的本人主页直连，绕过会误抓推荐作者的自动解析
         purl = _platform_profile_url(platform, persona)
         if purl:
@@ -4933,21 +5421,42 @@ async def _fetch_analytics(platform: str, persona: str = ''):
                     and not result.get("metrics") and not result.get("notes")
                     and not result.get("warning")):
                 raise HTTPException(502, "账号已登录，但平台未返回可用数据；请检查网络或平台维护状态后重试")
+            if not persona or (valid_persona_name(persona) and profile_exists(persona)):
+                try:
+                    append_snapshot(OUTPUTS_DIR, normalize_snapshot(persona or '_general', platform, result))
+                except (OSError, ValueError):
+                    # Analytics collection remains available if the local history store is unavailable.
+                    pass
             return result
     detail = (proc.stderr or "").strip().splitlines()[-1:] or ["未取到数据"]
     raise HTTPException(502, f"未取到数据（可能未登录或平台改版）：{detail[0][:120]}")
 
 
-MEDIA_REQUIRED = {"xiaohongshu", "douyin", "kuaishou", "weixin-channels", "bilibili"}
+MEDIA_REQUIRED = {"xiaohongshu", "douyin", "kuaishou", "weixin-channels", "bilibili", "wechat-oa"}
 VIDEO_ONLY_PUBLISH = {"douyin", "weixin-channels", "bilibili"}   # 只能发视频的平台
+
+
+from easel.publish_context import PublishContext, validate_context
+from easel.content_library_models import ContentError
+
+
+def _validate_browser_publish_context(profile: str, context: PublishContext) -> None:
+    try:
+        validate_context(OUTPUTS_DIR, profile, context)
+    except ContentError as error:
+        raise HTTPException(error.status, error.code) from error
 
 
 class PublishRequest(BaseModel):
     title: str = ''
     body: str = ''
-    media: list[str] = []
+    media: list[str] = Field(default_factory=list, max_length=32)
     tags: str = ''
+    context: PublishContext = Field(default_factory=PublishContext)
     persona: str = ''
+    run_id: str = ''
+    reviewed: StrictBool = False
+    approval_digest: str = ''
 
 
 class ManualPublishRequest(BaseModel):
@@ -4956,6 +5465,21 @@ class ManualPublishRequest(BaseModel):
     tags: str = Field(default='', max_length=2000)
     media: list[str] = Field(default_factory=list, max_length=32)
     reviewed: StrictBool = False
+    persona: str = ''
+    run_id: str = ''
+
+
+class PublishPrecheckRequest(PublishRequest):
+    reviewed: StrictBool = False
+
+
+class PublishReconcileRequest(BaseModel):
+    run_id: str
+    persona: str = ""
+    outcome: str
+    account_uid: str = ""
+    platform_work_id: str = ""
+    permalink: str = ""
 
 
 @app.get("/api/publishing-policy")
@@ -4964,21 +5488,244 @@ def api_publishing_policy():
     return {"mode": mode, "automaticSubmission": mode == "automated"}
 
 
-def _require_automated_publishing() -> None:
-    if publishing_mode(read_settings(ENV_FILE)) != "automated":
+@app.post("/api/publish/{platform}/precheck")
+def api_publish_precheck(platform: str, req: PublishPrecheckRequest):
+    """Validate a publish intent without starting a browser or external side effect."""
+    cfg = LOGIN_RUNNERS.get(platform)
+    if not cfg:
+        raise HTTPException(404, "未知平台")
+    profile = _write_profile(req.persona, req.media)
+    manifest = _media_manifest_for_request(profile, req.media)
+    if not req.title.strip() and not req.body.strip():
+        raise HTTPException(400, "标题/正文不能为空")
+    capabilities = project_capabilities(LOGIN_RUNNERS, ANALYTICS_PLATFORMS)
+    capability = capabilities.get(platform)
+    if capability is None or capability.publish_mode == "none":
+        raise HTTPException(400, f"{cfg['name']} 暂不支持一键发布")
+    constraints = capability.media_constraints
+    if constraints.requires_media and not manifest:
+        raise HTTPException(400, f"{cfg['name']} 需附带图片或视频")
+    if constraints.video_only and manifest and not any(Path(item["path"]).suffix.lower() in VIDEO_EXTS for item in manifest):
+        raise HTTPException(400, f"{cfg['name']} 只能发视频，请附带一个视频文件")
+    account_uid = _publish_account_uid(platform, profile)
+    if not account_uid:
+        raise HTTPException(409, '请先在账号页校验账号或刷新账号数据，取得稳定账号身份后再预检')
+    _validate_browser_publish_context(profile, req.context)
+    approval = _approval_digest(platform, profile, req.title.strip() or req.body.strip()[:20], req.body, req.tags, manifest, req.reviewed, req.context.model_dump(mode='json'))
+    return {
+        "ok": True,
+        "platform": platform,
+        "persona": profile,
+        "accountUid": account_uid,
+        "mode": publishing_mode(read_settings(ENV_FILE)),
+        "capability": {
+            "publishMode": capability.publish_mode,
+            "authMode": capability.auth_mode,
+            "mediaConstraints": {
+                "requiresMedia": constraints.requires_media,
+                "videoOnly": constraints.video_only,
+            },
+        },
+        "mediaManifest": list(manifest),
+        "mediaManifestHash": digest_mapping({"media": manifest}),
+        "approvalDigest": approval,
+        "runId": req.run_id.strip(),
+    }
+
+
+def _require_automated_publishing(platform: str = '') -> None:
+    from easel.publish_policy import publishing_allowed
+    if not publishing_allowed(platform, read_settings(ENV_FILE)):
         raise HTTPException(403, '当前为人工发布模式，请审核后复制或导出，在平台官方发布页亲自提交')
 
 
+def _publish_ledger() -> PublishLedger:
+    return PublishLedger(OUTPUTS_DIR / "_publish" / "ledger.sqlite3")
+
+
+def _write_profile(req_persona: str, media: list[str], *, allow_legacy_media: bool = False) -> str:
+    profile = (req_persona or "").strip()
+    if profile:
+        if not valid_persona_name(profile) or not profile_exists(profile):
+            raise HTTPException(400, "选择的画像不存在或名称非法")
+        return profile
+    if media and not allow_legacy_media:
+        raise HTTPException(400, "带媒体的发布或导出必须指定画像，以验证项目所有权")
+    return "_general"
+
+
+def _legacy_export_allowed() -> bool:
+    return os.environ.get("EASEL_ALLOW_LEGACY_UNSCOPED_EXPORT", "0").strip().lower() in {"1", "true", "yes"}
+
+
+def _media_manifest_for_request(profile: str, media: list[str], *, allow_legacy_media: bool = False) -> tuple[dict[str, object], ...]:
+    if profile == "_general" and media and not allow_legacy_media:
+        raise HTTPException(400, "通用模式不能提交媒体；请指定画像")
+    if not media:
+        return ()
+    if profile == "_general" and allow_legacy_media:
+        entries: list[dict[str, object]] = []
+        for relative in dict.fromkeys(media):
+            full = _safe_output_path(relative)
+            entries.append({"path": full.relative_to(OUTPUTS_DIR.resolve()).as_posix(),
+                            "sha256": hashlib.sha256(full.read_bytes()).hexdigest(),
+                            "size": full.stat().st_size, "ownerProof": "legacy_unscoped"})
+        return tuple(entries)
+    try:
+        entries = build_media_manifest(OUTPUTS_DIR, profile, media)
+    except OwnershipError as error:
+        raise HTTPException(403, str(error)) from error
+    return tuple({"path": item.relative_path, "sha256": item.sha256, "size": item.size} for item in entries)
+
+
+def _approval_digest(platform: str, profile: str, title: str, body: str, tags: str,
+                     manifest: tuple[dict[str, object], ...], reviewed: bool, context: dict | None = None) -> str:
+    return digest_mapping({
+        "platform": platform, "persona": profile, "title": title.strip() or body.strip()[:20], "body": body,
+        "tags": tags, "media": manifest, "reviewed": reviewed,
+        "policy": publishing_mode(read_settings(ENV_FILE)),
+        'account_revision': _publish_account_revision(platform, profile),
+        'context': context or {},
+    })
+
+
+def _publish_account_revision(platform: str, profile: str) -> str:
+    marker = _login_dir('' if profile == '_general' else profile) / f'{platform}.json'
+    if platform == 'wechat-oa':
+        marker = marker.with_name('wechat-oa-mp.json')
+    try:
+        status = json.loads(marker.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        status = {}
+    return digest_mapping({'login_state': status.get('state', ''),
+                           'account_uid': _publish_account_uid(platform, profile)})
+
+
+async def _verify_publish_actor(platform: str, profile: str, expected_uid: str) -> None:
+    persona = '' if profile == '_general' else profile
+    identity = await _check_account_whoami(platform, persona, force=True)
+    observed_uid = identity.get('accountUid', '')
+    if identity.get('loggedIn') is True and observed_uid:
+        if observed_uid == expected_uid:
+            return
+        raise HTTPException(409, '当前平台账号已改变，请重新预检审核')
+    raise HTTPException(409, '无法确认当前平台账号与审核账号一致，请重新校验账号')
+
+
+def _publish_account_uid(platform: str, profile: str) -> str:
+    cached = _WHOAMI_CACHE.get(_pk('' if profile == '_general' else profile, platform))
+    if cached and cached[1].get('loggedIn') and cached[1].get('accountUid'):
+        return str(cached[1]['accountUid'])
+    snapshots = load_snapshots(OUTPUTS_DIR, profile, platform)
+    return str(snapshots[-1].account_uid or '') if snapshots and snapshots[-1].logged_in else ''
+
+
+def _idempotency_key(platform: str, profile: str, title: str, body: str, tags: str,
+                     manifest: tuple[dict[str, object], ...], run_id: str) -> str:
+    return run_id.strip() or digest_mapping({
+        "platform": platform, "persona": profile, "title": title, "body": body,
+        "tags": tags, "media": manifest,
+    })[:32]
+
+
+def _cancel_publish_run(run_id: str, reason: str) -> None:
+    try:
+        ledger = _publish_ledger()
+        current = ledger.get_run(run_id)
+        if current is not None and current.state in {RunState.PREPARED, RunState.APPROVED, RunState.QUEUED}:
+            ledger.transition(run_id, expected=current.state, target=RunState.CANCELLED,
+                              actor="api", payload={"error": reason})
+    except (InvalidTransition, OSError, ValueError):
+        pass
+
+
+def _begin_publish_run(run_id: str) -> PublishLease:
+    ledger = _publish_ledger()
+    run = ledger.get_run(run_id)
+    if run is None:
+        raise HTTPException(404, '发布任务不存在')
+    _require_automated_publishing(run.platform)
+    try:
+        lease = ledger.acquire_lease(run_id, worker_owner(), ttl_seconds=930)
+    except LeaseBusy as error:
+        raise HTTPException(409, '该发布正在由其他 worker 处理') from error
+    try:
+        ledger.transition(run_id, expected=RunState.QUEUED, target=RunState.RUNNING,
+                          actor='publisher', fencing_token=lease.fencing_token)
+    except (InvalidTransition, LeaseRequired) as error:
+        ledger.release_lease(run_id, lease.owner, lease.fencing_token)
+        raise HTTPException(409, '发布状态已改变，请刷新任务') from error
+    return lease
+
+
+@app.get("/api/platform-capabilities")
+def api_platform_capabilities():
+    """Read-only projection of existing adapters; no credentials or side effects."""
+    from easel.platform_capabilities import official_capabilities
+    capabilities = {**project_capabilities(LOGIN_RUNNERS, ANALYTICS_PLATFORMS), **official_capabilities()}
+    return {
+        key: {
+            "platformId": value.platform_id,
+            "authMode": value.auth_mode,
+            "publishMode": value.publish_mode,
+            "analyticsScope": value.analytics_scope,
+            "engagementScope": value.engagement_scope,
+            "mediaConstraints": {
+                "requiresMedia": value.media_constraints.requires_media,
+                "videoOnly": value.media_constraints.video_only,
+                "maxItems": value.media_constraints.max_items,
+            },
+            "dataSource": value.data_source,
+            "contractVersion": value.contract_version,
+            "sideEffectClass": value.side_effect_class,
+        }
+        for key, value in capabilities.items()
+    }
+
+
 @app.post("/api/manual-publish/{platform}/export")
-def api_manual_publish_export(platform: str, req: ManualPublishRequest):
+def api_manual_publish_export(platform: str, req: ManualPublishRequest, request: Request):
     """Build a local handoff package; never contact a platform or mark it published."""
+    _require_side_effect_access(request)
+    if req.reviewed is not True:
+        raise HTTPException(400, '请先人工审核当前版本')
+    if not req.title.strip() and not req.body.strip():
+        raise HTTPException(400, '标题或正文不能为空')
+    allow_legacy = _legacy_export_allowed()
+    profile = _write_profile(req.persona, req.media, allow_legacy_media=allow_legacy)
+    manifest = _media_manifest_for_request(profile, req.media, allow_legacy_media=allow_legacy)
+    run = None
+    if platform in LOGIN_RUNNERS:
+        try:
+            run = _publish_ledger().create_run(
+                platform=platform, persona=profile,
+                idempotency_key=_idempotency_key(platform, profile, req.title, req.body, req.tags, manifest, req.run_id),
+                approval_digest=_approval_digest(platform, profile, req.title, req.body, req.tags, manifest, req.reviewed),
+                media_manifest_hash=digest_mapping({"media": manifest}),
+                payload={"title": req.title, "tags": req.tags, "manual": True},
+                initial_state=RunState.READY_FOR_MANUAL_SUBMISSION,
+            )
+        except IdempotencyConflict as error:
+            raise HTTPException(409, str(error)) from error
     try:
         package = build_package(OUTPUTS_DIR, platform, req.title, req.body,
-                                req.tags, req.media, req.reviewed)
+                                req.tags, req.media, req.reviewed, persona=profile,
+                                run_id=run.run_id if run else req.run_id,
+                                media_manifest=list(manifest))
     except ValueError as error:
+        if run is not None:
+            try:
+                _publish_ledger().transition(run.run_id,
+                                             expected=RunState.READY_FOR_MANUAL_SUBMISSION,
+                                             target=RunState.CANCELLED, actor="api",
+                                             payload={"error": str(error)})
+            except InvalidTransition:
+                pass
         raise HTTPException(400, str(error)) from error
     return {"path": package.relative_to(OUTPUTS_DIR.resolve()).as_posix(),
-            "filename": package.name, "published": False}
+            "filename": package.name, "published": False,
+            "persona": profile, "run_id": run.run_id if run else "",
+            "state": RunState.READY_FOR_MANUAL_SUBMISSION.value if run else "ready_for_manual_submission"}
 
 
 def _write_publish_status(status_file: Path, state: str, message: str = '') -> None:
@@ -4993,56 +5740,92 @@ def _write_publish_status(status_file: Path, state: str, message: str = '') -> N
         pass
 
 
-def _publish_status_file(platform: str, persona: str = '') -> Path:
+def _publish_status_file(platform: str, persona: str = '', run_id: str = '') -> Path:
     """异步发布状态文件：命名画像按画像隔离，通用/空画像沿用全局（向后兼容）。"""
-    d = PUBLISH_DIR / persona if _valid_login_persona(persona) else PUBLISH_DIR
+    _require_login_scope(persona)
+    d = OUTPUTS_DIR / '_publish' / (persona or '_general')
+    safe_run_id = _publish_run_segment(run_id)
+    if safe_run_id:
+        d = d / safe_run_id
+    if not d.resolve().is_relative_to(OUTPUTS_DIR.resolve()) or d.is_symlink():
+        raise HTTPException(403, '发布状态目录越界')
     d.mkdir(parents=True, exist_ok=True)
     return d / f'{platform}.json'
 
 
-def _publish_code_file(platform: str, persona: str = '') -> Path:
+def _publish_code_file(platform: str, persona: str = '', run_id: str = '') -> Path:
     """异步发布短信验证码回填文件：按画像隔离。"""
-    d = PUBLISH_DIR / persona if _valid_login_persona(persona) else PUBLISH_DIR
+    _require_login_scope(persona)
+    d = OUTPUTS_DIR / '_publish' / (persona or '_general')
+    safe_run_id = _publish_run_segment(run_id)
+    if safe_run_id:
+        d = d / safe_run_id
+    if not d.resolve().is_relative_to(OUTPUTS_DIR.resolve()) or d.is_symlink():
+        raise HTTPException(403, '发布验证码目录越界')
     d.mkdir(parents=True, exist_ok=True)
     return d / f'{platform}.code'
 
 
-def _read_publish_status(platform: str, persona: str = '') -> dict:
-    st = _publish_status_file(platform, persona)
+def _publish_run_segment(run_id: str) -> str:
+    value = run_id.strip()
+    if value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", value):
+        raise HTTPException(400, "无效的 run_id")
+    return value
+
+
+def _redact_publish_message(message: str) -> str:
+    value = re.sub(r'(?i)(cookie|token|secret|password|appsecret)\s*[:=]\s*[^\s,;]+', r'\1=[redacted]', message)
+    value = re.sub(r'(?<!\w)/(?:Users|private|tmp|var|home)/\S+', '[path]', value)
+    return value[:240]
+
+
+def _read_publish_status(platform: str, persona: str = '', run_id: str = '') -> dict:
+    st = _publish_status_file(platform, persona, run_id)
     if st.is_file():
         try:
             d = json.loads(st.read_text(encoding='utf-8'))
-            return {'state': d.get('state', 'unknown'), 'message': d.get('message', '')}
+            return {'state': d.get('state', 'unknown'),
+                    'message': _redact_publish_message(str(d.get('message', '')))}
         except Exception:
             pass
     return {'state': 'unknown', 'message': ''}
 
 
 def _record_successful_publish(title: str, body: str, cfg: dict, profile: str = '',
-                               tags: str = '', ptype: str = '') -> None:
+                               tags: str = '', ptype: str = '', run_id: str = '') -> None:
+    if not run_id:
+        return
+    ledger = _publish_ledger()
+    effect = queue_publish_projection(ledger, run_id, PublishedProjection(cfg['name'], title, tags, ptype))
     try:
-        scripts_dir = str(SHARED_SCRIPTS)
-        if scripts_dir not in sys.path:
-            sys.path.insert(0, scripts_dir)
-        import calendar_ops
-        with _schedule_lock():
-            calendar_ops.record_publish(cfg['name'], title, note=body[:200],
-                                        tags=tags, ptype=ptype,
-                                        source='publish-page', profile=profile,
-                                        data_path=SCHEDULE_FILE, forward_log=True)
-    except Exception:
+        deliver_publish_projection(ledger, OUTPUTS_DIR, effect)
+    except (OSError, ValueError, KeyError, TypeError):
+        # The durable pending effect is retried on startup and the next status query.
         pass
+
+
+def _publish_log_entry(platform: str, ok: bool, command: list[str], detail: str = '') -> str:
+    """Return a metadata-only publish log line; never persist content or credentials."""
+    command_hash = hashlib.sha256("\x00".join(command).encode("utf-8", "replace")).hexdigest()[:16]
+    detail_hash = hashlib.sha256(detail.encode("utf-8", "replace")).hexdigest()[:16] if detail else ""
+    return (f"{time.strftime('%Y-%m-%d %H:%M:%S')} platform={platform} ok={ok} "
+            f"command_hash={command_hash} detail_hash={detail_hash}\n")
 
 
 def _run_publish_bg(platform: str, cmd: list, title: str, body: str, cfg: dict,
                     status_file: Path, code_file: Path, profile: str = '',
-                    tags: str = '', ptype: str = '') -> None:
+                    tags: str = '', ptype: str = '', run_id: str = '', lease: PublishLease | None = None) -> None:
     """后台线程跑发布脚本（脚本自身把 starting/sms_required/verifying/success/error 写进 status_file）。
     结束后兜底补写终态 + 记 _publish.log + 成功则回流排期。"""
     ok = False
     out = err = ''
     try:
-        proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=_publish_env(),
+        run = _publish_ledger().get_run(run_id) if run_id else None
+        if run_id and (run is None or run.persona != profile or run.platform != platform):
+            raise ValueError('发布任务身份无效')
+        publish_env = {**_publish_env(), 'EASEL_PUBLISH_ACCOUNT_UID': run.account_id if run else '',
+                       'EASEL_PUBLISH_PLATFORM': platform}
+        proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), env=publish_env,
                               capture_output=True, text=True, timeout=900)
         ok = proc.returncode == 0
         out, err = proc.stdout or '', proc.stderr or ''
@@ -5052,25 +5835,54 @@ def _run_publish_bg(platform: str, cmd: list, title: str, body: str, cfg: dict,
         err = f'发布进程异常：{e}'
     try:
         with (OUTPUTS_DIR / '_publish.log').open('a', encoding='utf-8') as lf:
-            lf.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} {platform}(async) ok={ok} =====\n")
-            lf.write('CMD: ' + ' '.join(cmd) + '\nSTDOUT:\n' + out[-2000:] + '\nSTDERR:\n' + err[-2000:] + '\n')
+            lf.write(_publish_log_entry(platform, ok, cmd, err or out))
     except Exception:
         pass
     # 脚本正常会写终态；异常/超时没写到时兜底补一个
-    if _read_publish_status(platform, profile)['state'] not in ('success', 'error'):
-        _write_publish_status(status_file, 'success' if ok else 'error',
-                              '发布成功' if ok else ('\n'.join((err or out).strip().splitlines()[-4:]) or '发布失败'))
+    if _read_publish_status(platform, profile, run_id)['state'] not in ('success', 'error', 'unknown'):
+        fallback_state = 'success' if ok else ('unknown' if '超时' in err else 'error')
+        _write_publish_status(status_file, fallback_state,
+                              '发布成功' if ok else ('外部结果未知，请人工核验后再处理' if fallback_state == 'unknown'
+                              else _redact_publish_message('发布失败')))
+    try:
+        ledger = _publish_ledger()
+        current = ledger.get_run(run_id) if run_id else None
+        if current is not None and current.state == RunState.RUNNING:
+            if lease is None:
+                raise LeaseRequired('发布 worker 缺少租约')
+            completed = _complete_browser_run(current, lease, ok, out)
+            ok = completed.state == RunState.PUBLISHED
+    except (InvalidTransition, LeaseRequired, OSError, ValueError):
+        ok = False
+    finally:
+        if lease is not None:
+            _publish_ledger().release_lease(run_id, lease.owner, lease.fencing_token)
     try:
         code_file.unlink()
     except OSError:
         pass
     if ok:
-        _record_successful_publish(title, body, cfg, profile, tags, ptype)
+        _record_successful_publish(title, body, cfg, profile, tags, ptype, run_id)
+
+
+def _complete_browser_run(run, lease: PublishLease, succeeded: bool, stdout: str):
+    from easel.publish_receipts import runner_readback
+    result = runner_readback(run, stdout)
+    verified = succeeded and result.outcome == ReadbackOutcome.VERIFIED
+    target = RunState.PUBLISHED if verified else RunState.SUBMITTED if succeeded else RunState.UNKNOWN
+    payload = {'readback_outcome': result.outcome.value}
+    if result.published_at:
+        payload['published_at'] = result.published_at
+    return _publish_ledger().checkpoint_run(
+        run.run_id, expected=RunState.RUNNING, target=target,
+        fencing_token=lease.fencing_token, payload=payload,
+        platform_work_id=result.platform_work_id if verified else '',
+        permalink=result.permalink if verified else '', actor='browser-publisher')
 
 
 def _start_async_publish(platform: str, cmd: list, title: str, body: str, cfg: dict,
                          status_file: Path, code_file: Path, profile: str = '',
-                         tags: str = '', ptype: str = '') -> dict:
+                         tags: str = '', ptype: str = '', run_id: str = '', lease: PublishLease | None = None) -> dict:
     """启动异步发布：清旧码/状态 → 起后台线程 → 立即返回。前端轮询 /api/publish/{p}/status，
     遇 sms_required 弹输入框、提交到 /api/publish/{p}/sms。"""
     try:
@@ -5079,53 +5891,136 @@ def _start_async_publish(platform: str, cmd: list, title: str, body: str, cfg: d
         pass
     _write_publish_status(status_file, 'starting', '发布中…（若触发风控会要求短信验证）')
     threading.Thread(target=_run_publish_bg,
-                     args=(platform, cmd, title, body, cfg, status_file, code_file, profile, tags, ptype),
+                     args=(platform, cmd, title, body, cfg, status_file, code_file, profile, tags, ptype, run_id, lease),
                      daemon=True).start()
     # 关键：**不返回 ok:true**——这只是「已启动」的应答，真正结果要靠轮询 /status。
     # 若这里给 ok:true，旧前端会把它当「已发布」立刻显示成功（假成功 bug，真机踩过）。
-    return {'async': True, 'pending': True, 'message': '发布已启动，请稍候…'}
+    return {'async': True, 'pending': True, 'run_id': run_id, 'message': '发布已启动，请稍候…'}
+
+
+def _scoped_publish_run(platform: str, persona: str, run_id: str = ''):
+    profile = _write_profile(persona, [])
+    ledger = _publish_ledger()
+    safe_run_id = _publish_run_segment(run_id)
+    run = ledger.get_run(safe_run_id) if safe_run_id else ledger.latest_run(persona=profile, platform=platform)
+    if run is None:
+        raise HTTPException(404, '发布任务不存在')
+    if (run.persona, run.platform) != (profile, platform):
+        raise HTTPException(403, '发布任务不属于当前画像或平台')
+    return run
 
 
 @app.get("/api/publish/{platform}/status")
-async def api_publish_status(platform: str, persona: str = ''):
-    """轮询异步发布状态：starting/sms_required/verifying/success/error。"""
+async def api_publish_status(platform: str, persona: str = '', run_id: str = ''):
     if platform not in LOGIN_RUNNERS:
         raise HTTPException(404, '未知平台')
-    return {'mode': 'publish', **_read_publish_status(platform, persona)}
+    run = _scoped_publish_run(platform, persona, run_id)
+    if run.state == RunState.PUBLISHED:
+        drain_publish_projections(_publish_ledger(), OUTPUTS_DIR)
+    states = {RunState.PUBLISHED: 'success', RunState.FAILED: 'error',
+              RunState.CANCELLED: 'error', RunState.RUNNING: 'starting',
+              RunState.QUEUED: 'starting', RunState.PREPARED: 'starting',
+              RunState.APPROVED: 'starting'}
+    state = states.get(run.state, run.state.value)
+    status = {'state': state, 'message': _redact_publish_message(run.last_error)}
+    if run.state == RunState.RUNNING:
+        live = _read_publish_status(platform, persona, run.run_id)
+        if live['state'] in {'starting', 'sms_required', 'verifying'}:
+            status = live
+    return {'mode': 'publish', 'run_id': run.run_id, 'ledger_state': run.state.value, **status}
+
+
+@app.post("/api/publish/{platform}/reconcile")
+async def api_publish_reconcile(platform: str, req: PublishReconcileRequest, request: Request):
+    """Verify a candidate against server-collected authenticated work evidence."""
+    _require_side_effect_access(request)
+    if platform not in LOGIN_RUNNERS:
+        raise HTTPException(404, '未知平台')
+    run = _scoped_publish_run(platform, req.persona, req.run_id)
+    if req.account_uid and req.account_uid != run.account_id:
+        raise HTTPException(403, '账号作用域不匹配')
+    try:
+        evidence = await _fetch_analytics(platform, req.persona)
+    except HTTPException as error:
+        return {'ok': False, 'run_id': run.run_id, 'state': run.state.value,
+                'outcome': 'error', 'message': '平台回读暂不可用'}
+    result = verify_readback(run, evidence, ReadbackQuery(req.platform_work_id, req.permalink))
+    if result.outcome == ReadbackOutcome.ERROR:
+        return {'ok': False, 'run_id': run.run_id, 'state': run.state.value, 'outcome': 'error'}
+    try:
+        updated = _publish_ledger().reconcile(
+            run.run_id, account_id=run.account_id, outcome=result.outcome.value,
+            platform_work_id=result.platform_work_id, permalink=result.permalink,
+            published_at=result.published_at,
+        )
+    except (KeyError, ValueError, InvalidTransition, LeaseRequired) as error:
+        raise HTTPException(409, str(error)) from error
+    if updated.state == RunState.PUBLISHED:
+        drain_publish_projections(_publish_ledger(), OUTPUTS_DIR)
+    return {'ok': updated.state == RunState.PUBLISHED, 'run_id': updated.run_id,
+            'state': updated.state.value, 'outcome': result.outcome.value,
+            'platform_work_id': updated.platform_work_id, 'permalink': updated.permalink,
+            'message': result.reason}
+
+
+@app.get('/api/publish-runs')
+def api_publish_runs(persona: str = '', platform: str = ''):
+    profile = _write_profile(persona, [])
+    return [{'run_id': run.run_id, 'persona': run.persona, 'platform': run.platform,
+             'state': run.state.value, 'attempts': run.attempts, 'created_at': run.created_at,
+             'updated_at': run.updated_at, 'platform_work_id': run.platform_work_id,
+             'permalink': run.permalink, 'last_error': run.last_error}
+            for run in _publish_ledger().list_runs(persona=profile, platform=platform)]
+
+
+@app.get('/api/publish-runs/{run_id}/events')
+def api_publish_run_events(run_id: str, platform: str, persona: str = ''):
+    run = _scoped_publish_run(platform, persona, run_id)
+    return [{'sequence': event.sequence, 'event_type': event.event_type,
+             'from_state': event.from_state, 'to_state': event.to_state,
+             'actor': event.actor, 'created_at': event.created_at}
+            for event in _publish_ledger().list_events(run.run_id)]
 
 
 @app.post("/api/publish/{platform}/sms")
-async def api_publish_sms(platform: str, req: SmsCodeRequest, persona: str = ''):
+async def api_publish_sms(platform: str, req: SmsCodeRequest, request: Request, persona: str = ''):
     """发布触发短信墙时回填验证码（写发布 runner 轮询的一次性验证码文件）。"""
     _require_automated_publishing()
+    _require_side_effect_access(request)
     if platform not in LOGIN_RUNNERS:
         raise HTTPException(404, '未知平台')
     code = ''.join(ch for ch in (req.code or '') if ch.isdigit())
     if not (4 <= len(code) <= 8):
         raise HTTPException(400, '验证码应为 4-8 位数字')
-    _publish_code_file(platform, persona).write_text(code, encoding='utf-8')
-    return {'ok': True}
+    run = _scoped_publish_run(platform, persona, req.run_id)
+    status = _read_publish_status(platform, persona, run.run_id)
+    if run.state != RunState.RUNNING or status['state'] != 'sms_required':
+        raise HTTPException(409, '该任务当前未等待短信验证')
+    _publish_code_file(platform, persona, run.run_id).write_text(code, encoding='utf-8')
+    return {'ok': True, 'run_id': run.run_id}
 
 
 @app.post("/api/publish/{platform}")
-async def api_publish(platform: str, req: PublishRequest):
+async def api_publish(platform: str, req: PublishRequest, request: Request):
     """一键发布：分发到对应 publisher 脚本真发（--exec）。二次确认在前端。"""
-    _require_automated_publishing()
+    _require_automated_publishing(platform)
+    _require_side_effect_access(request)
     cfg = LOGIN_RUNNERS.get(platform)
     if not cfg:
         raise HTTPException(404, '未知平台')
     backend = cfg['backend']
     if backend == 'unsupported':
         raise HTTPException(400, f"{cfg['name']} 暂不支持一键发布")
-    profile = (req.persona or '').strip()
-    if profile and (not valid_persona_name(profile) or not profile_exists(profile)):
-        raise HTTPException(400, '选择的画像不存在或名称非法')
+    profile = _write_profile(req.persona, req.media)
+    manifest = _media_manifest_for_request(profile, req.media)
+    if not _publish_account_uid(platform, profile):
+        raise HTTPException(409, '缺少已校验的稳定账号身份，请先校验账号')
     pbase = str(_persona_profile_base(profile))
     if not req.title.strip() and not req.body.strip():
         raise HTTPException(400, '标题/正文不能为空')
     imgs, vids = [], []
-    for rel in req.media or []:
-        full = _safe_output_path(rel)
+    for item in manifest:
+        full = _safe_output_path(str(item["path"]))
         ext = full.suffix.lower()
         if ext in VIDEO_EXTS:
             vids.append(str(full))
@@ -5140,6 +6035,53 @@ async def api_publish(platform: str, req: PublishRequest):
     title = req.title.strip() or req.body.strip()[:20]
     tags = req.tags or ''
     publish_type = '视频' if vids else ('文章' if platform == 'wechat-oa' else '图文')
+    publish_context = req.context
+    _validate_browser_publish_context(profile, publish_context)
+    expected_approval = _approval_digest(platform, profile, title, req.body, tags, manifest, True, publish_context.model_dump(mode='json'))
+    if req.reviewed is not True or not hmac.compare_digest(req.approval_digest.encode(), expected_approval.encode()):
+        raise HTTPException(409, '当前内容需要重新预检并确认审核')
+    await _verify_publish_actor(platform, profile, _publish_account_uid(platform, profile))
+    ledger = _publish_ledger()
+    try:
+        run = ledger.create_run(
+            platform=platform, persona=profile,
+            idempotency_key=_idempotency_key(platform, profile, title, req.body, tags, manifest, req.run_id),
+            approval_digest=expected_approval,
+            media_manifest_hash=digest_mapping({"media": manifest}),
+            account_id=_publish_account_uid(platform, profile),
+            payload={"title": title, "body": req.body, "tags": tags, "publish_type": publish_type,
+                     "platform_name": cfg["name"], "account_uid": _publish_account_uid(platform, profile),
+                     'context': publish_context.model_dump(mode='json'),
+                     'media': req.media, 'request': req.model_dump()},
+        )
+    except IdempotencyConflict as error:
+        raise HTTPException(409, str(error)) from error
+    if run.state in {RunState.PUBLISHED, RunState.FAILED, RunState.UNKNOWN,
+                     RunState.RUNNING, RunState.QUEUED, RunState.SUBMITTED, RunState.CANCELLED}:
+        if run.state == RunState.UNKNOWN:
+            raise HTTPException(409, "该发布结果未知，请先完成平台作品回读")
+        return {
+            "ok": run.state == RunState.PUBLISHED,
+            "run_id": run.run_id,
+            "state": run.state.value,
+            "pending": run.state in {RunState.RUNNING, RunState.QUEUED},
+            "message": "已存在相同发布请求，未重复提交",
+        }
+    if run.state == RunState.PREPARED:
+        run = ledger.transition(run.run_id, expected=RunState.PREPARED,
+                                target=RunState.APPROVED, actor="api")
+        run = ledger.transition(run.run_id, expected=RunState.APPROVED,
+                                target=RunState.QUEUED, actor="api")
+    if manifest:
+        approved_media = tuple(MediaManifestEntry(str(item['path']), str(item['sha256']), int(item['size']))
+                               for item in manifest)
+        try:
+            staged = freeze_media(OUTPUTS_DIR, profile, run.run_id, approved_media)
+        except (OwnershipError, OSError) as error:
+            _cancel_publish_run(run.run_id, 'media_changed')
+            raise HTTPException(409, '媒体已改变或无法冻结，请重新预检') from error
+        imgs = [str(path) for path in staged if path.suffix.lower() in IMAGE_EXTS]
+        vids = [str(path) for path in staged if path.suffix.lower() in VIDEO_EXTS]
     py = sys.executable
     if platform == 'xiaohongshu':
         base = [py, str(SHARED_SCRIPTS / 'xhs_publish.py')]
@@ -5158,19 +6100,28 @@ async def api_publish(platform: str, req: PublishRequest):
         cmd = base + ['publish-video', '--no-proxy', '--video', vids[0]] if vids else base + ['publish', '--no-proxy', '--images', ','.join(imgs)]
         cmd += ['--title', title, '--content', req.body, '--tags', tags, '--profile-base', pbase, '--exec']
         # 抖音发布可能触发风控短信墙——异步跑 + 状态/验证码文件，前端轮询到 sms_required 时弹输入框
-        status_file = _publish_status_file('douyin', profile)
-        code_file = _publish_code_file('douyin', profile)
+        status_file = _publish_status_file('douyin', profile, run.run_id)
+        code_file = _publish_code_file('douyin', profile, run.run_id)
         cmd += ['--status-file', str(status_file), '--sms-code-file', str(code_file)]
+        try:
+            await _verify_publish_actor(platform, profile, run.account_id)
+        except HTTPException:
+            _cancel_publish_run(run.run_id, 'account_changed_before_launch')
+            raise
+        lease = _begin_publish_run(run.run_id)
         return _start_async_publish(platform, cmd, title, req.body, cfg, status_file, code_file,
-                                    profile, tags, publish_type)
+                                    profile, tags, publish_type, run.run_id, lease)
     elif platform == 'wechat-oa':
         # 微信公众号：走「后台会话」发布（免 AppID/AppSecret、免 IP 白名单）。
         # 正文 MD → 公众号 HTML（skill 排版器）→ 会话建草稿（weixin_mp_stats.py publish，内嵌图传 mp CDN）。
         if _mp_login_status(profile).get('state') != 'success':
+            _cancel_publish_run(run.run_id, "wechat_session_missing")
             raise HTTPException(400, '公众号后台未登录：请先在账号页点「登录公众号后台」扫码')
         if not imgs:
+            _cancel_publish_run(run.run_id, "wechat_cover_missing")
             raise HTTPException(400, '公众号文章需要一张封面图，请附带至少一张图片')
         if vids:
+            _cancel_publish_run(run.run_id, "wechat_video_not_supported")
             raise HTTPException(400, '公众号发图文文章，请附带封面/正文图片而非视频')
         cover = imgs[0]
         PUBLISH_DIR.mkdir(parents=True, exist_ok=True)
@@ -5188,7 +6139,8 @@ async def api_publish(platform: str, req: PublishRequest):
             cwd=str(PROJECT_ROOT), env=_proxy_env(),
             capture_output=True, text=True, timeout=60)
         if conv.returncode != 0 or not html_path.is_file():
-            raise HTTPException(500, f"排版失败：{(conv.stderr or conv.stdout or '')[-200:]}")
+            _cancel_publish_run(run.run_id, "wechat_html_conversion_failed")
+            raise HTTPException(500, "排版失败，请检查脱敏日志")
         wx_proxy = os.environ.get('EASEL_PROXY') or os.environ.get('https_proxy') or ''
         cmd = [py, str(SHARED_SCRIPTS / 'weixin_mp_stats.py'), 'publish', '--proxy', wx_proxy,
                '--profile-base', pbase,
@@ -5204,25 +6156,54 @@ async def api_publish(platform: str, req: PublishRequest):
             cmd += ['--media', media]
     # 公众号走后台会话（Playwright，脚本自带 --proxy，默认直连）；其余平台走 _publish_env
     pub_env = _proxy_env() if platform == 'wechat-oa' else _publish_env()
+    pub_env['EASEL_PUBLISH_ACCOUNT_UID'] = run.account_id
+    pub_env['EASEL_PUBLISH_PLATFORM'] = platform
+    try:
+        await _verify_publish_actor(platform, profile, run.account_id)
+    except HTTPException:
+        _cancel_publish_run(run.run_id, 'account_changed_before_launch')
+        raise
+    lease = _begin_publish_run(run.run_id)
     try:
         proc = await asyncio.to_thread(subprocess.run, cmd, cwd=str(PROJECT_ROOT), env=pub_env,
                                        capture_output=True, text=True, timeout=600)
     except subprocess.TimeoutExpired:
-        raise HTTPException(504, '发布超时（媒体处理慢或流程卡住）')
+        try:
+            ledger.transition(run.run_id, expected=RunState.RUNNING, target=RunState.UNKNOWN,
+                              actor="publisher", fencing_token=lease.fencing_token, payload={"error": "timeout"})
+        except InvalidTransition:
+            pass
+        ledger.release_lease(run.run_id, lease.owner, lease.fencing_token)
+        raise HTTPException(504, '发布超时，结果未知，请核验平台作品后处理')
+    except OSError as error:
+        try:
+            ledger.transition(run.run_id, expected=RunState.RUNNING, target=RunState.FAILED,
+                              actor="publisher", fencing_token=lease.fencing_token, payload={"error": "process_start_failed"})
+        except InvalidTransition:
+            pass
+        ledger.release_lease(run.run_id, lease.owner, lease.fencing_token)
+        raise HTTPException(502, '发布程序启动失败') from error
     ok = proc.returncode == 0
     tail = (proc.stderr or proc.stdout or '').strip().splitlines()
     detail = '\n'.join(tail[-8:])
+    public_detail = '' if ok else '平台未确认发布结果；请查看脱敏日志并按平台页面核验'
     try:
         with (OUTPUTS_DIR / '_publish.log').open('a', encoding='utf-8') as lf:
-            lf.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} {platform} rc={proc.returncode} ok={ok} =====\n")
-            lf.write('CMD: ' + ' '.join(cmd) + '\n')
-            lf.write('STDOUT:\n' + (proc.stdout or '')[-2000:] + '\n')
-            lf.write('STDERR:\n' + (proc.stderr or '')[-2000:] + '\n')
+            lf.write(_publish_log_entry(platform, ok, cmd, proc.stderr or proc.stdout or ''))
     except Exception:
         pass
-    if ok:
-        _record_successful_publish(title, req.body, cfg, profile, tags, publish_type)
-    return {'ok': ok, 'message': '发布成功' if ok else '发布失败（见 detail）', 'detail': detail}
+    try:
+        completed = _complete_browser_run(run, lease, ok, proc.stdout or '')
+    except (InvalidTransition, LeaseRequired) as error:
+        raise HTTPException(409, '发布状态已由恢复流程接管，请查看任务状态') from error
+    finally:
+        ledger.release_lease(run.run_id, lease.owner, lease.fencing_token)
+    completion_state = completed.state
+    if completion_state == RunState.PUBLISHED:
+        _record_successful_publish(title, req.body, cfg, profile, tags, publish_type, run.run_id)
+    return {'ok': ok, 'run_id': run.run_id,
+            'state': completion_state.value,
+            'message': ('已创建公众号草稿' if platform == 'wechat-oa' else '已提交，等待作品回读') if completion_state == RunState.SUBMITTED else '发布成功' if completion_state == RunState.PUBLISHED else '发布结果未知', 'detail': public_detail}
 
 
 class ProfileBuildRequest(BaseModel):
@@ -5314,7 +6295,7 @@ def _form_to_instruction(name: str, form: dict) -> str:
 def _write_baseline_profile(name: str, form: dict) -> None:
     """从表单确定性生成六维基线文件。链接派生字段标 [待 AI 分析]。"""
     pd = PROFILES_DIR / name
-    pd.mkdir(parents=True, exist_ok=True)
+    (pd / "assets").mkdir(parents=True, exist_ok=True)
 
     def g(k: str, default: str = '') -> str:
         v = form.get(k)
@@ -5503,21 +6484,34 @@ def _schedule_lock() -> threading.Lock:
     return _SCHEDULE_LOCK
 
 
-def _read_schedule() -> list[dict]:
-    if not SCHEDULE_FILE.is_file():
+def _schedule_path(persona: str = "") -> Path:
+    """Resolve schedule storage; named personas use isolated files, empty scope is legacy."""
+    value = persona.strip()
+    if not value:
+        return OUTPUTS_DIR / '_schedule.json'
+    if not valid_persona_name(value) or not profile_exists(value):
+        raise HTTPException(400, "选择的画像不存在或名称非法")
+    return OUTPUTS_DIR / "_schedule" / f"{value}.json"
+
+
+def _read_schedule(path: Path | None = None) -> list[dict]:
+    target = path or _schedule_path()
+    if not target.is_file():
         return []
     try:
-        d = json.loads(SCHEDULE_FILE.read_text(encoding="utf-8"))
+        d = json.loads(target.read_text(encoding="utf-8"))
         return d if isinstance(d, list) else []
     except Exception:
         return []
 
 
-def _write_schedule(items: list[dict]) -> None:
+def _write_schedule(items: list[dict], path: Path | None = None) -> None:
+    target = path or _schedule_path()
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = SCHEDULE_FILE.with_suffix(".json.tmp")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(SCHEDULE_FILE)
+    tmp.replace(target)
 
 
 class ScheduleItem(BaseModel):
@@ -5535,14 +6529,16 @@ class ScheduleItem(BaseModel):
 
 
 @app.get("/api/schedule")
-async def api_schedule_list():
-    return _read_schedule()
+async def api_schedule_list(persona: str = ""):
+    return _read_schedule(_schedule_path(persona)) if persona else _read_schedule()
 
 
 @app.post("/api/schedule")
-async def api_schedule_create(req: ScheduleItem):
-    with _schedule_lock():
-        items = _read_schedule()
+async def api_schedule_create(req: ScheduleItem, persona: str = ""):
+    path = _schedule_path(persona)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _schedule_lock(), _storage_lock(path.with_suffix('.lock')):
+        items = _read_schedule(path) if persona else _read_schedule()
         kind = req.kind if req.kind in SCHEDULE_KINDS else "content"
         st = req.status if req.status in SCHEDULE_STATUSES else "idea"
         item = {
@@ -5560,14 +6556,19 @@ async def api_schedule_create(req: ScheduleItem):
             "end_date": req.end_date,
         }
         items.append(item)
-        _write_schedule(items)
+        if persona:
+            _write_schedule(items, path)
+        else:
+            _write_schedule(items)
     return item
 
 
 @app.put("/api/schedule/{sid}")
-async def api_schedule_update(sid: str, req: ScheduleItem):
-    with _schedule_lock():
-        items = _read_schedule()
+async def api_schedule_update(sid: str, req: ScheduleItem, persona: str = ""):
+    path = _schedule_path(persona)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _schedule_lock(), _storage_lock(path.with_suffix('.lock')):
+        items = _read_schedule(path) if persona else _read_schedule()
         for it in items:
             if it.get("id") == sid:
                 kind = req.kind if req.kind in SCHEDULE_KINDS else it.get("kind", "content")
@@ -5583,28 +6584,37 @@ async def api_schedule_update(sid: str, req: ScheduleItem):
                     "event_type": req.event_type,
                     "end_date": req.end_date,
                 })
-                _write_schedule(items)
+                if persona:
+                    _write_schedule(items, path)
+                else:
+                    _write_schedule(items)
                 return it
     raise HTTPException(404, "排期不存在")
 
 
 @app.delete("/api/schedule/{sid}")
-async def api_schedule_delete(sid: str):
-    with _schedule_lock():
-        items = _read_schedule()
+async def api_schedule_delete(sid: str, persona: str = ""):
+    path = _schedule_path(persona)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _schedule_lock(), _storage_lock(path.with_suffix('.lock')):
+        items = _read_schedule(path) if persona else _read_schedule()
         new = [it for it in items if it.get("id") != sid]
         if len(new) == len(items):
             raise HTTPException(404, "排期不存在")
-        _write_schedule(new)
+        if persona:
+            _write_schedule(new, path)
+        else:
+            _write_schedule(new)
     return {"ok": True, "deleted": sid}
 
 
 @app.get("/api/schedule/context")
-async def api_schedule_context(days: int = 14):
+async def api_schedule_context(days: int = 14, persona: str = ""):
     """规划摘要（发布节奏/断更缺口 + 待发排期 + 临近节点 + 建议）——薄封装 calendar_ops，
     前端页头「近期节点/建议」与 Agent 读回共用同一逻辑。失败返回空摘要不抛错。"""
+    data_path = _schedule_path(persona)
     cmd = [sys.executable, str(SHARED_SCRIPTS / "calendar_ops.py"),
-           "--data", str(SCHEDULE_FILE), "context", "--days", str(max(1, min(days, 90)))]
+           "--data", str(data_path), "context", "--days", str(max(1, min(days, 90)))]
     try:
         # 冷启动要起一个 Python 子进程（最长 20s）：丢线程池，避免卡住事件循环
         proc = await asyncio.to_thread(

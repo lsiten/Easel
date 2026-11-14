@@ -39,8 +39,17 @@ function Avatar({ url, name }: { url?: string; name: string }) {
   return <div className="account-avatar account-avatar-fallback">{initial}</div>;
 }
 
-export default function AccountsPage({ persona }: { persona?: string }) {
+interface AccountsPageProps {
+  readonly persona?: string;
+  readonly platform?: string;
+  readonly embedded?: boolean;
+  readonly onAccountChange?: (account: AccountItem | null) => void;
+}
+
+export default function AccountsPage({ persona, platform: onlyPlatform, embedded = false, onAccountChange }: AccountsPageProps) {
   const pa = persona || undefined;   // 空=通用模式（沿用全局登录态/缓存）
+  const activePersona = useRef(pa);
+  activePersona.current = pa;
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [err, setErr] = useState('');
   const [qr, setQr] = useState<QRState | null>(null);
@@ -66,6 +75,21 @@ export default function AccountsPage({ persona }: { persona?: string }) {
   const qrRequest = useRef(0);
 
   useEffect(() => {
+    qrRequest.current += 1;
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
+    setAccounts([]);
+    setQr(null);
+    setCred(null);
+    setCredBusy(false);
+    setCredForm({ appId: '', appSecret: '', author: '' });
+    setBusy('');
+    setLogoutBusy('');
+    setTerminalMsg('');
+    setSmsCode('');
+  }, [pa]);
+
+  useEffect(() => {
     aliveRef.current = true;
     return () => { aliveRef.current = false; qrRequest.current += 1; };
   }, []);
@@ -77,7 +101,7 @@ export default function AccountsPage({ persona }: { persona?: string }) {
     setWhoami((w) => ({ ...w, [platform]: 'loading' }));
     accountWhoami(platform, true, pa)
       .then((r) => {
-        if (aliveRef.current && whoamiRequests.current[platform] === sequence) {
+        if (aliveRef.current && activePersona.current === pa && whoamiRequests.current[platform] === sequence) {
           setWhoami((w) => ({ ...w, [platform]: r }));
           setWhoamiCache(platform, r, pa);
           setAccounts((list) => list.map((account) =>
@@ -85,7 +109,7 @@ export default function AccountsPage({ persona }: { persona?: string }) {
         }
       })
       .catch(() => {
-        if (aliveRef.current && whoamiRequests.current[platform] === sequence) {
+        if (aliveRef.current && activePersona.current === pa && whoamiRequests.current[platform] === sequence) {
           setWhoami((previous) => {
             const updated = { ...previous };
             const cached = getWhoamiCache(pa)[platform];
@@ -104,8 +128,9 @@ export default function AccountsPage({ persona }: { persona?: string }) {
     // 切画像时先把显示重置为该画像自己的缓存（通用/空=全局），再真校验自愈
     setWhoami(getWhoamiCache(pa));
     fetchAccounts(pa)
-      .then((list) => {
-        if (!aliveRef.current) return;
+      .then((items) => {
+        if (!aliveRef.current || activePersona.current !== pa) return;
+        const list = onlyPlatform ? items.filter((item) => item.platform === onlyPlatform) : items;
         setAccounts(list);
         const targets = list
           .filter((a) => a.supported && a.backend !== 'biliup')
@@ -123,7 +148,7 @@ export default function AccountsPage({ persona }: { persona?: string }) {
         }
         verifyStale(targets, {
           persona: pa,
-          alive: () => aliveRef.current,
+          alive: () => aliveRef.current && activePersona.current === pa,
           onUpdate: (platform, r) => {
             setWhoami((w) => ({ ...w, [platform]: r }));
             setAccounts((current) => current.map((account) =>
@@ -131,10 +156,17 @@ export default function AccountsPage({ persona }: { persona?: string }) {
           },
         });
       })
-      .catch(() => setErr('加载账号状态失败'));
-  }, [pa]);
+      .catch(() => { if (activePersona.current === pa) setErr('加载账号状态失败'); });
+  }, [pa, onlyPlatform]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!onlyPlatform || !onAccountChange) return;
+    const account = accounts.find((item) => item.platform === onlyPlatform);
+    const identity = whoami[onlyPlatform];
+    onAccountChange(account ? { ...account, loggedIn: identity && identity !== 'loading' ? identity.loggedIn : account.loggedIn } : null);
+  }, [accounts, whoami, onlyPlatform, onAccountChange]);
 
   // 切回本标签页 / 窗口重新获得焦点时自动重拉账号态——登录/退出后即使漏了一次刷新，切回来也是最新的，
   // 用户无需手动刷新页面。（登录中弹着二维码时不打扰，避免打断轮询。）
@@ -185,10 +217,10 @@ export default function AccountsPage({ persona }: { persona?: string }) {
     setCred({ platform: a.platform, name: a.name });
     setCredForm({ appId: '', appSecret: '', author: '' });
     setCredMsg(''); setCredErr('');
-    getCredentials(a.platform)
-      .then((c) => { if (aliveRef.current && c.configured) setCredMsg(`已配置：AppID ${c.appIdMasked}`); })
+    getCredentials(a.platform, pa)
+      .then((c) => { if (aliveRef.current && activePersona.current === pa && c.configured) setCredMsg(`已配置：AppID ${c.appIdMasked}`); })
       .catch(() => { /* 未配置，忽略 */ });
-  }, []);
+  }, [pa]);
 
   const closeCred = useCallback(() => { setCred(null); setCredBusy(false); load(); }, [load]);
 
@@ -199,7 +231,8 @@ export default function AccountsPage({ persona }: { persona?: string }) {
     if (!appId || !appSecret) { setCredErr('AppID 和 AppSecret 都要填'); return; }
     setCredBusy(true); setCredErr(''); setCredMsg('');
     try {
-      const r = await saveCredentials(cred.platform, { appId, appSecret, name: cred.name, author: credForm.author.trim() });
+      const r = await saveCredentials(cred.platform, { appId, appSecret, name: cred.name, author: credForm.author.trim() }, pa);
+      if (!aliveRef.current || activePersona.current !== pa) return;
       if (r.ok) {
         runWhoami(cred.platform);
         closeCred();
@@ -207,11 +240,11 @@ export default function AccountsPage({ persona }: { persona?: string }) {
         setCredErr(r.message || '验证未通过');
       }
     } catch (e) {
-      setCredErr(e instanceof Error ? e.message : '保存失败');
+      if (aliveRef.current && activePersona.current === pa) setCredErr(e instanceof Error ? e.message : '保存失败');
     } finally {
-      setCredBusy(false);
+      if (aliveRef.current && activePersona.current === pa) setCredBusy(false);
     }
-  }, [cred, credForm, runWhoami, closeCred]);
+  }, [cred, credForm, runWhoami, closeCred, pa]);
 
   const handleLogin = useCallback(async (a: AccountItem) => {
     if (!a.supported) return;
@@ -366,15 +399,16 @@ export default function AccountsPage({ persona }: { persona?: string }) {
     setLogoutBusy(a.platform);
     try {
       await logoutAccount(a.platform, pa);
+      if (activePersona.current !== pa) return;
       // 内存态立即翻未登录（同登录路径），不等 load() 回来
       setAccounts((list) => list.map((x) => x.platform === a.platform ? { ...x, loggedIn: false } : x));
       setWhoami((w) => { const n = { ...w }; delete n[a.platform]; return n; });
       setWhoamiCache(a.platform, null, pa);
       load();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : '退出登录失败');
+      if (activePersona.current === pa) setErr(e instanceof Error ? e.message : '退出登录失败');
     } finally {
-      setLogoutBusy('');
+      if (activePersona.current === pa) setLogoutBusy('');
     }
   }, [load, pa]);
 
@@ -393,14 +427,14 @@ export default function AccountsPage({ persona }: { persona?: string }) {
   };
 
   return (
-    <div className="accounts-page">
+    <div className={embedded ? 'browser-connection' : 'accounts-page'}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <div>
-          <h1 className="page-title">账号登录 Accounts</h1>
-          <p className="page-subtitle">
+          {embedded ? <h2 className="panel-title">浏览器账号</h2> : <h1 className="page-title">账号登录 Accounts</h1>}
+          {!embedded && <p className="page-subtitle">
             用手机 App 扫码登录，登录态本地持久化，之后发布免登。<br />
             ⚠️ 平台可能对机房/代理 IP 判风险导致二维码弹不出，需干净/家宽 IP，或在正常网络登录后拷贝登录态目录。
-          </p>
+          </p>}
         </div>
         <button className="btn btn-sm" onClick={load}>⟳ 刷新</button>
       </div>

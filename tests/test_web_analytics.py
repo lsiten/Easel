@@ -180,6 +180,7 @@ def test_platform_profile_url_from_persona_is_passed_to_fetch(monkeypatch):
     # 主修复：csdn/juejin 应把画像 platforms.md 里配好的「本人主页」透传给 account_stats（--profile-url），
     # 直连本人主页、绕过会误抓推荐作者的自动解析。
     captured = {}
+    monkeypatch.setattr(web, "profile_exists", lambda name: name == "test-profile")
     monkeypatch.setattr(web, "load_profile_text", lambda name: (
         "## CSDN\n主页：<https://blog.csdn.net/test-author>\n" if name == "test-profile" else ""
     ))

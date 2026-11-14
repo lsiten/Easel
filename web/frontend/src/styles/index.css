@@ -34,6 +34,8 @@
   --layer-general: #64748b;
 
   /* ---- Shape & motion ---- */
+  --space-3: 12px;
+  --space-4: 16px;
   --sidebar-width: 264px;
   --radius-sm: 6px;
   --radius: 9px;
@@ -228,7 +230,18 @@ body {
 }
 .status-dot.offline { background: var(--red); box-shadow: 0 0 8px var(--red); }
 
-.main-content { flex: 1; height: 100%; overflow: hidden; display: flex; flex-direction: column; }
+.main-content { flex: 1; min-width: 0; height: 100%; overflow: hidden; display: flex; flex-direction: column; }
+
+.sidebar-backdrop { position: fixed; inset: 0; z-index: 39; border: 0; background: color-mix(in srgb, var(--text) 25%, transparent); }
+@media (max-width: 700px) {
+  .sidebar.mobile-open { position: fixed; inset: 0 auto 0 0; z-index: 40; width: min(var(--sidebar-width), calc(100vw - 48px)); min-width: 0; }
+  .accounts-page.platform-workbench { padding: 18px 16px 40px; }
+  .platform-workbench .panel { min-width: 0; padding: 16px; }
+  .platform-workbench .btn { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .platform-workbench .subnav-tabs { flex-wrap: wrap; }
+  .platform-workbench .field { min-width: 0; }
+  .platform-workbench pre { max-width: 100%; }
+}
 
 /* Keep every workbench page on the landing page's warm paper backdrop. */
 .main-content,
@@ -1184,6 +1197,33 @@ textarea.field { resize: vertical; min-height: 90px; }
 .publishing-mode-bar .subnav-tab:disabled { opacity: .45; cursor: not-allowed; }
 .publishing-mode-content { flex: 1; min-height: 0; overflow: hidden; }
 .publish-page { display: flex; height: 100%; overflow: hidden; }
+.platform-workbench .browser-publish { height: auto; overflow: visible; flex-wrap: wrap; }
+.platform-workbench .browser-publish .publish-editor,
+.platform-workbench .browser-publish .publish-previews { flex: 1 1 320px; min-width: 0; width: auto; max-width: 100%; padding: var(--space-4, 16px); overflow: visible; }
+.platform-workbench .browser-connection .accounts-grid { grid-template-columns: minmax(0, 1fr); }
+.platform-workbench,
+.app-layout:has(.platform-workbench) .sidebar {
+  --text-secondary: color-mix(in srgb, var(--text) 78%, var(--bg));
+  --text-tertiary: color-mix(in srgb, var(--text) 72%, var(--bg));
+}
+.platform-workbench .pv-hint,
+.platform-workbench .publish-saved-note { font-size: 14px; }
+.platform-workbench .pv-badge { font-size: 12px; }
+.platform-workbench .badge,
+.platform-workbench .pv-badge-ok { color: var(--text); }
+.platform-workbench .account-avatar-fallback { color: var(--text); background: var(--accent-soft); }
+.platform-workbench .browser-publish .pv-title:not(.over) { color: var(--text); }
+.platform-workbench .field::placeholder { color: var(--text-tertiary); opacity: 1; }
+.platform-workbench :is(button, input, textarea, select, summary):focus-visible { outline: 2px solid var(--accent-end); outline-offset: 2px; }
+@media (max-width: 640px) {
+  .platform-workbench { font-size: 17px; }
+  .platform-workbench :is(button, select, input:not([type="checkbox"]):not([type="radio"]), summary) { min-height: 44px; }
+  .platform-workbench :is(.btn, .subnav-tab, .chip, .pv-copy, .pv-hint, .field-label, .publish-saved-note) { font-size: 15px; }
+  .platform-workbench .field { font-size: 16px; }
+  .platform-workbench .pv-text { font-size: 17px; }
+  .platform-workbench .pv-foot { flex-wrap: wrap; }
+  .platform-workbench .pv-foot > div { flex-wrap: wrap; max-width: 100%; }
+}
 .publish-editor { width: 46%; min-width: 400px; max-width: 620px; overflow-y: auto; padding: 28px 28px 60px; border-right: 1px solid var(--border); }
 .publish-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
 .publish-previews { flex: 1; overflow-y: auto; padding: 28px 28px 60px; display: flex; flex-direction: column; gap: 14px; background: var(--surface-2); }

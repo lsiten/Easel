@@ -1,0 +1,44 @@
+{
+  "aideo": {
+    "taskId": "6471595cb5974c3c95f06158ee278157"
+  },
+  "style": {
+    "taskId": "60a7054457e440cd934fc67d9d0f534b",
+    "model": "video-style-transfer",
+    "state": "running",
+    "status": "Processing",
+    "dramaScriptTaskId": null,
+    "outputVid": null,
+    "outputUrl": null,
+    "errorMessage": null,
+    "createdAt": 1794659543.9327161,
+    "updatedAt": 1794659543.93743,
+    "assets": []
+  },
+  "recap": {
+    "taskId": "d1f15e0fe1f6489ea88ec63b841b8f20",
+    "model": "drama-recap",
+    "state": "running",
+    "status": "Processing",
+    "dramaScriptTaskId": "script-123",
+    "outputVid": null,
+    "outputUrl": null,
+    "errorMessage": null,
+    "createdAt": 1794659543.941343,
+    "updatedAt": 1794659543.9462368,
+    "assets": []
+  },
+  "direct-edit": {
+    "taskId": "ea26b0241ab7447fbba860d1d7883d16",
+    "model": "video-edit",
+    "state": "running",
+    "status": "Processing",
+    "outputUrl": null,
+    "outputVid": null,
+    "errorMessage": null,
+    "message": null,
+    "createdAt": 1794659544.479856,
+    "updatedAt": 1794659544.489269,
+    "assets": []
+  }
+}

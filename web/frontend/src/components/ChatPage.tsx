@@ -71,7 +71,7 @@ export default function ChatPage({ apiDirect, session, stream, onSend, onStop, o
       // 超限：不走上传通道，复制进收件箱后作为普通附件（界面零新增元素）
       setUploading(true);
       try {
-        const saved = await adoptOversize(big, session.id);
+        const saved = await adoptOversize(big, session.id, persona);
         setAttachments((a) => [...a, ...saved]);
       } catch (err) {
         alert((err as Error).message || '超限文件处理失败');
@@ -82,7 +82,7 @@ export default function ChatPage({ apiDirect, session, stream, onSend, onStop, o
     if (!small.length) return;
     setUploading(true);
     try {
-      const saved = await uploadFiles(small, session.id);
+      const saved = await uploadFiles(small, session.id, persona);
       setAttachments((a) => [...a, ...saved]);
     } catch (err) {
       alert((err as Error).message || '上传失败');

@@ -12,16 +12,20 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import os
 import re
 import sys
 import time
 from pathlib import Path
-from easel.browser import launch_persistent_context, select_browser
 from urllib.parse import urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from easel.browser import launch_persistent_context, select_browser
+
 ANALYTICS_DIR = PROJECT_ROOT / "outputs" / "_analytics"
 # 分层保留：近 KEEP_FULL_DAYS 天全部变化一条不丢；90~DAILY_DAYS 天每天≤1条；更老每周≤1条。
 # 既留住 日/周/月/年 对比所需的老基线，又让总量恒定在几百条(几十KB)、用多年不膨胀。
@@ -588,6 +592,7 @@ def _scrape_xhs(context, page, result: dict) -> dict:
         result["logged_in"] = False
         return result
     result["nickname"] = _account_identity(account)["name"]
+    result['account_uid'] = account.get('userId')
     own_stats = _xhs_creator_stats(context) if creator_logged_in else {}
     if not any(key in own_stats for key in ("followers", "likes", "following")):
         own_stats = _xhs_own_stats(context, account)
@@ -684,6 +689,9 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None, pr
                 ctx = launch_persistent_context(p, str(profile), kwargs)
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             try:
+                if platform == 'weixin-channels':
+                    from web_publisher import _observe_channels_account
+                    _observe_channels_account(ctx, {'profile': 'ChannelsProfile'})
                 if platform == "xiaohongshu":
                     return _scrape_xhs(ctx, page, r)
                 if platform == "juejin":
@@ -733,6 +741,13 @@ def _scrape(platform: str, headed: bool, base: str | None, proxy: str | None, pr
                     r["logged_in"] = _platform_logged_in(page, cfg)
                 if not r["logged_in"]:
                     return r
+                if platform == 'weixin-channels':
+                    from web_publisher import _authenticated_account
+                    account = _authenticated_account(ctx, {'profile': 'ChannelsProfile'})
+                    r['account_uid'] = str(account.get('id') or '') if account else ''
+                else:
+                    from browser_identity import authenticated_uid
+                    r['account_uid'] = authenticated_uid(platform, page)
                 r["followers"] = num_by_label(lines, ov["followers"], d)
                 r["likes"] = num_by_label(lines, ov["likes"], d)
                 r["following"] = num_by_label(lines, ov.get("following", []), d)
@@ -838,18 +853,6 @@ def _juejin_profile_url(page) -> str | None:
                 href = ""
             if "/user/" in href:
                 return href if href.startswith("http") else "https://juejin.cn" + href
-    # 兜底：用户名卡片里的 /user/ 链接
-    try:
-        el = page.query_selector('.user-card a[href*="/user/"], .user-info a[href*="/user/"]')
-    except Exception:
-        el = None
-    if el is not None:
-        try:
-            href = el.get_attribute("href") or ""
-        except Exception:
-            href = ""
-        if "/user/" in href:
-            return href if href.startswith("http") else "https://juejin.cn" + href
     return None
 
 
@@ -974,10 +977,16 @@ def _scrape_juejin(ctx, page, result: dict, profile_url: str | None = None) -> d
     if not logged:
         r["logged_in"] = False
         return r
-    # 按登录态归因：点击头像取本人「我的主页」；配置主页仅作菜单取不到时的最后兜底
+    # 本人主页只取已登录头像菜单，避免将配置主页的作者当作当前账号。
     auto = _juejin_profile_url(page)
-    if not auto and profile_url:
-        auto = profile_url
+    from urllib.parse import urlsplit
+    parsed = urlsplit(auto or '')
+    identity = re.fullmatch(r'/user/(\d+)/?', parsed.path) if parsed.hostname == 'juejin.cn' else None
+    if identity is None:
+        r['logged_in'] = False
+        r['warning'] = '未能确认登录账号的本人主页，已跳过账号归因'
+        return r
+    r['account_uid'] = identity.group(1)
     if auto:
         try:
             page.goto(auto, wait_until="commit", timeout=12000)
@@ -1036,7 +1045,7 @@ def _scrape_csdn(ctx, page, result: dict, profile_url: str | None = None) -> dic
     cfg = PLATFORMS["csdn"]
     r = result
     try:
-        page.goto(profile_url or cfg["url"], wait_until="commit", timeout=12000)
+        page.goto(cfg["url"], wait_until="commit", timeout=12000)
     except Exception:
         if not _has_body(page):
             raise
@@ -1048,6 +1057,17 @@ def _scrape_csdn(ctx, page, result: dict, profile_url: str | None = None) -> dic
         return r
     r["logged_in"] = _platform_logged_in(page, cfg)
     if not r["logged_in"]:
+        return r
+    from browser_identity import authenticated_uid
+    r['account_uid'] = authenticated_uid('csdn', page)
+    if not r['account_uid']:
+        r['logged_in'] = False
+        r['warning'] = '未能确认登录账号身份，已跳过公开主页归因'
+        return r
+    profile_url = 'https://blog.csdn.net/' + r['account_uid']
+    page.goto(profile_url, wait_until='commit', timeout=12000)
+    if _login_wall(page) or _looks_blocked(page):
+        r['logged_in'] = False
         return r
     # 稳定性轮询：粉丝数连续两次一致才走（避开占位 0→真实值异步坑）
     def _sig(L):
@@ -1402,6 +1422,22 @@ def cmd_check(_a) -> int:
 
 
 def cmd_fetch(a) -> int:
+    global ANALYTICS_DIR
+    persona = getattr(a, 'persona', '') or os.environ.get('EASEL_PERSONA', '')
+    if persona:
+        from easel.persona import valid_persona_name
+        if not valid_persona_name(persona):
+            _die('画像名称非法')
+        ANALYTICS_DIR = PROJECT_ROOT / 'outputs' / '_analytics' / 'history' / persona
+        snapshot_owner = persona
+    elif a.profile_base:
+        import hashlib
+        scope = hashlib.sha256(str(Path(a.profile_base).expanduser().resolve()).encode()).hexdigest()[:24]
+        ANALYTICS_DIR = PROJECT_ROOT / 'outputs' / '_analytics' / 'history' / scope
+        snapshot_owner = '_general' if Path(a.profile_base).expanduser().resolve() == (Path.home() / '.easel-browser-profiles').resolve() else scope
+    else:
+        ANALYTICS_DIR = PROJECT_ROOT / 'outputs' / '_analytics' / 'history' / '_general'
+        snapshot_owner = '_general'
     if a.platform not in PLATFORMS:
         _die(f"未知平台：{a.platform}（支持：{', '.join(PLATFORMS)}）")
     try:
@@ -1415,15 +1451,24 @@ def cmd_fetch(a) -> int:
         _die(str(error))
 
     now = int(time.time())
+    account_uid = s.get('account_uid')
+    if account_uid:
+        import hashlib
+        ANALYTICS_DIR = ANALYTICS_DIR / hashlib.sha256(str(account_uid).encode()).hexdigest()[:24]
     snap = {"ts": now, "followers": s["followers"], "likes": s["likes"], "posts": s["posts"]}
-    history = load_history(a.platform)
+    from easel.analytics_snapshots import append_snapshot as append_normalized, load_snapshots as load_normalized, normalize_snapshot
+    snapshots = load_normalized(PROJECT_ROOT / 'outputs', snapshot_owner, a.platform)
+    history = [{'ts': int(datetime.fromisoformat(item.observed_at).timestamp()), **dict(item.account_metrics)}
+               for item in snapshots if item.account_uid == account_uid]
+    if not history:
+        history = load_history(a.platform)
+    history.sort(key=lambda row: row.get('ts', 0))
     growth = growth_windows(history, snap)
-    if s["logged_in"] and any(snap[k] is not None for k in ("followers", "likes", "posts")):
-        record_snapshot(a.platform, snap)
 
     out = {
         "platform": a.platform, "name": PLATFORMS[a.platform]["name"],
         "nickname": s["nickname"], "loggedIn": s["logged_in"],
+        "account_uid": account_uid,
         "followers": s["followers"], "likes": s["likes"],
         "following": s["following"], "posts": s["posts"],
         "metrics": s["metrics"], "notes": s["notes"],
@@ -1436,6 +1481,8 @@ def cmd_fetch(a) -> int:
         "growth": growth, "fetched_at": now,
         "warning": s.get("warning", ""),
     }
+    if s['logged_in']:
+        append_normalized(PROJECT_ROOT / 'outputs', normalize_snapshot(snapshot_owner, a.platform, out))
     print(json.dumps(out, ensure_ascii=False))
     return 0
 
@@ -1544,6 +1591,7 @@ def main() -> int:
     pf = sub.add_parser("fetch", help="抓某平台账号数据 → JSON")
     pf.add_argument("--platform", required=True, help=f"平台：{', '.join(PLATFORMS)}")
     pf.add_argument("--profile-base", help="登录态根目录（默认 ~/.easel-browser-profiles）")
+    pf.add_argument("--persona", default='', help="画像作用域，用于隔离分析历史")
     pf.add_argument("--profile-url", help="画像配置的个人主页 URL（掘金/CSDN 直连本人主页，绕过会误抓推荐作者的自动解析）")
     pf.add_argument("--proxy", help="外网代理（默认按平台：xhs 直连、其它走 env）")
     pf.add_argument("--no-proxy", action="store_true", help="强制直连")

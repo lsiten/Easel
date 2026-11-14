@@ -54,6 +54,7 @@ test('manual account verification updates the card and identity from the same re
   let identity = {};
   const verify = runInNewContext(compiled, {
     pa: undefined,
+    activePersona: { current: undefined },
     useCallback: callback => callback,
     whoamiRequests: { current: {} },
     aliveRef: { current: true },
@@ -84,6 +85,7 @@ test('failed account verification preserves the last verified nickname and avata
   let identity = { 'weixin-channels': cached };
   const verify = runInNewContext(compiled, {
     pa: undefined,
+    activePersona: { current: undefined },
     useCallback: callback => callback,
     whoamiRequests: { current: {} },
     aliveRef: { current: true },

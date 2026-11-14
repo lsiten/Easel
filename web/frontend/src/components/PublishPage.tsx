@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   createSchedule, executeSkill, runAgent, streamChat,
-  fetchAccounts, publishNow, publishStatus, submitPublishSms, fetchOutputs, mediaUrl,
+  fetchAccounts, publishNow, precheckPublish, publishStatus, submitPublishSms, fetchOutputs, mediaUrl,
 } from '../lib/api';
 import type { AccountItem, OutputFile } from '../lib/api';
 import { loadPublishDraft, savePublishDraft } from '../lib/store';
@@ -10,6 +10,8 @@ import { IconPublish, IconCopy, IconCheck, IconCalendar, IconSkills, IconEdit, I
 
 interface PublishPageProps {
   persona: string;
+  platform?: string;
+  embedded?: boolean;
 }
 
 // 平台列表须与后端 LOGIN_RUNNERS 对齐（有登录/发布链路的才列）
@@ -43,11 +45,12 @@ function parseSections(text: string): Record<string, string> {
 
 type PubState = { status: 'publishing' | 'ok' | 'fail'; msg: string };
 
-export default function PublishPage({ persona }: PublishPageProps) {
-  const draft0 = loadPublishDraft();
+export default function PublishPage({ persona, platform, embedded = false }: PublishPageProps) {
+  const draftScope = embedded ? JSON.stringify([persona, platform]) : undefined;
+  const draft0 = loadPublishDraft(draftScope);
   const [title, setTitle] = useState(draft0.title);
   const [body, setBody] = useState(draft0.body);
-  const [platforms, setPlatforms] = useState<string[]>(draft0.platforms);
+  const [platforms, setPlatforms] = useState<string[]>(platform ? [platform] : draft0.platforms);
   const [overrides, setOverrides] = useState<Record<string, string>>(draft0.overrides);
   const [tags, setTags] = useState(draft0.tags || '');
   const [editing, setEditing] = useState<string | null>(null);
@@ -69,14 +72,14 @@ export default function PublishPage({ persona }: PublishPageProps) {
   const [pub, setPub] = useState<Record<string, PubState>>({});
   const [publishing, setPublishing] = useState(false);
   // 发布时的短信验证窗口（抖音风控条件触发；没触发就不弹）
-  const [pubSms, setPubSms] = useState<{ platform: string; name: string; state: string; message: string } | null>(null);
+  const [pubSms, setPubSms] = useState<{ platform: string; name: string; state: string; message: string; runId: string } | null>(null);
   const [pubSmsCode, setPubSmsCode] = useState('');
   const [pubSmsBusy, setPubSmsBusy] = useState(false);
 
   // 草稿持久化：任何改动即写 localStorage，切页/刷新回来都在
   useEffect(() => {
-    savePublishDraft({ title, body, platforms, overrides, tags });
-  }, [title, body, platforms, overrides, tags]);
+    savePublishDraft({ title, body, platforms, overrides, tags }, draftScope);
+  }, [title, body, platforms, overrides, tags, draftScope]);
 
   const cleanupPublishActivity = useCallback(() => {
     // 卸载：中止流 + 停掉所有发布状态轮询（否则在后台空转最长 15 分钟）
@@ -93,8 +96,13 @@ export default function PublishPage({ persona }: PublishPageProps) {
 
   // 登录态 + 可选媒体列表
   useEffect(() => {
-    fetchAccounts(persona).then(setAccounts).catch(() => { /* 忽略 */ });
+    let current = true;
+    setSelectedMedia([]);
+    setMediaFiles([]);
+    setAccounts([]);
+    fetchAccounts(persona).then((items) => { if (current) setAccounts(items); }).catch(() => { /* 忽略 */ });
     fetchOutputs(persona).then((roots) => {
+      if (!current) return;
       const files: OutputFile[] = [];
       const walk = (n: OutputFile) => {
         if (n.type === 'file') { if (n.kind === 'image' || n.kind === 'video') files.push(n); return; }
@@ -104,7 +112,8 @@ export default function PublishPage({ persona }: PublishPageProps) {
       files.sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
       setMediaFiles(files);
     }).catch(() => { /* 忽略 */ });
-  }, []);
+    return () => { current = false; };
+  }, [persona]);
 
   const loginOf = (key: string) => accounts.find((a) => a.platform === key)?.loggedIn ?? false;
 
@@ -227,15 +236,17 @@ export default function PublishPage({ persona }: PublishPageProps) {
       }
       setPub((r) => ({ ...r, [t.key]: { status: 'publishing', msg: '发布中…可能需 1-2 分钟' } }));
       try {
-        const res = await publishNow(t.key, { title, body: effective(t.key), media: selectedMedia, tags, persona });
+        const intent = { title, body: effective(t.key), media: selectedMedia, tags, persona, reviewed: true };
+        const approval = await precheckPublish(t.key, intent);
+        const res = await publishNow(t.key, { ...intent, approval_digest: approval.approvalDigest });
         if (res.async) {
           // 抖音：异步发布，轮询状态；风控触发短信墙时弹输入框（条件触发，没触发就直接跑完）
-          await pollAsyncPublish(t.key, t.label);
+          await pollAsyncPublish(t.key, t.label, res.run_id || '');
         } else {
           setPub((r) => ({
             ...r,
             [t.key]: res.ok
-              ? { status: 'ok', msg: '已发布 ✅' }
+              ? { status: 'ok', msg: res.state === 'submitted' ? res.message || '已提交，等待作品回读' : '已发布 ✅' }
               : { status: 'fail', msg: res.detail || res.message || '发布失败' },
           }));
         }
@@ -248,7 +259,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
   };
 
   // 异步发布轮询（抖音）：直到 success/error；遇 sms_required/verifying 弹短信窗口
-  const pollAsyncPublish = (key: string, label: string) => new Promise<void>((resolve) => {
+  const pollAsyncPublish = (key: string, label: string, runId: string) => new Promise<void>((resolve) => {
     const started = Date.now();
     const iv = setInterval(async () => {
       if (!aliveRef.current) { clearInterval(iv); pollTimers.current.delete(iv); resolve(); return; }
@@ -258,15 +269,15 @@ export default function PublishPage({ persona }: PublishPageProps) {
         resolve(); return;
       }
       let s;
-      try { s = await publishStatus(key, persona); } catch { return; }  // 单次失败忽略
+      try { s = await publishStatus(key, persona, runId); } catch { return; }  // 单次失败忽略
       if (s.state === 'sms_required' || s.state === 'verifying') {
-        setPubSms({ platform: key, name: label, state: s.state, message: s.message });
+        setPubSms({ platform: key, name: label, state: s.state, message: s.message, runId });
         setPub((r) => ({ ...r, [key]: { status: 'publishing', msg: s.message || '需短信验证' } }));
       } else if (s.state === 'success') {
         clearInterval(iv); pollTimers.current.delete(iv); setPubSms(null);
         setPub((r) => ({ ...r, [key]: { status: 'ok', msg: '已发布 ✅' } }));
         resolve();
-      } else if (s.state === 'error') {
+      } else if (['error', 'unknown', 'submitted', 'ready_for_manual_submission'].includes(s.state)) {
         clearInterval(iv); pollTimers.current.delete(iv); setPubSms(null);
         setPub((r) => ({ ...r, [key]: { status: 'fail', msg: s.message || '发布失败' } }));
         resolve();
@@ -283,7 +294,7 @@ export default function PublishPage({ persona }: PublishPageProps) {
     if (code.length < 4) { showToast('验证码应为 4-6 位数字'); return; }
     setPubSmsBusy(true);
     try {
-      await submitPublishSms(pubSms.platform, code, persona);
+      await submitPublishSms(pubSms.platform, code, persona, pubSms.runId);
       setPubSmsCode('');
       setPubSms((p) => p && ({ ...p, state: 'verifying', message: '正在验证验证码…' }));
     } catch (e) {
@@ -306,17 +317,17 @@ export default function PublishPage({ persona }: PublishPageProps) {
     await createSchedule({
       title: title.trim() || effective(key).slice(0, 20), date,
       platform: PLATFORMS.find((p) => p.key === key)?.label || '', time: '', status: 'draft', note: effective(key),
-    });
+    }, persona);
     showToast('已存为草稿并加入今天的日历');
   };
 
   const canPublish = platforms.some((k) => PUBLISHABLE.has(k));
 
   return (
-    <div className="publish-page">
+    <div className={embedded ? 'publish-page browser-publish' : 'publish-page'}>
       <div className="publish-editor">
-        <h1 className="page-title"><IconPublish size={21} /> 发布中心</h1>
-        <p className="page-subtitle">一次编辑 → AI 一键改写成各平台版本 → 预检 → 附媒体 → 一键真发布。</p>
+        {embedded ? <h2 className="panel-title">浏览器发布</h2> : <h1 className="page-title"><IconPublish size={21} /> 发布中心</h1>}
+        {!embedded && <p className="page-subtitle">一次编辑 → AI 一键改写成各平台版本 → 预检 → 附媒体 → 一键真发布。</p>}
 
         <label className="field-label">标题</label>
         <input className="field" value={title} placeholder="标题（部分平台需要）"
@@ -332,9 +343,9 @@ export default function PublishPage({ persona }: PublishPageProps) {
 
         <label className="field-label">发布平台</label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {PLATFORMS.map((p) => (
+          {PLATFORMS.filter((item) => !platform || item.key === platform).map((p) => (
             <button key={p.key} className={`chip ${platforms.includes(p.key) ? 'active' : ''}`}
-              onClick={() => toggle(p.key)}>{p.label}</button>
+              onClick={() => { if (!platform) toggle(p.key); }}>{p.label}</button>
           ))}
         </div>
 

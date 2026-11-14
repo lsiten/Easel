@@ -141,9 +141,13 @@ def import_artifacts(*, source_root: Path | str, destination_root: Path | str, s
             destinations.add(dst)
             if dst.exists(): raise ArtifactBoundaryError("refusing to overwrite existing artifact")
             dst.parent.mkdir(parents=True, exist_ok=True)
-            tmp = Path(tempfile.mkstemp(prefix=".artifact-", dir=dst.parent)[1])
-            shutil.copy2(src, tmp)
+            descriptor, temporary_name = tempfile.mkstemp(prefix=".artifact-", dir=dst.parent)
+            os.close(descriptor)
+            tmp = Path(temporary_name)
             staged.append((tmp, dst))
+            shutil.copy2(src, tmp)
+            if _checksum(tmp) != actual:
+                raise ArtifactBoundaryError('artifact changed during import')
             records.append(ArtifactRecord(kind, out_rel.as_posix(), actual, source_engine, target_profile, str(entry["attribution"])))
         for tmp, dst in staged: os.replace(tmp, dst)
         return records
@@ -176,9 +180,13 @@ def export_artifacts(*, source_root: Path | str, destination_root: Path | str, s
             destinations.add(dst)
             if dst.exists(): raise ArtifactBoundaryError("refusing to overwrite existing artifact")
             dst.parent.mkdir(parents=True, exist_ok=True)
-            tmp = Path(tempfile.mkstemp(prefix=".artifact-export-", dir=dst.parent)[1])
-            shutil.copy2(src, tmp)
+            descriptor, temporary_name = tempfile.mkstemp(prefix=".artifact-export-", dir=dst.parent)
+            os.close(descriptor)
+            tmp = Path(temporary_name)
             staged.append((tmp, dst))
+            shutil.copy2(src, tmp)
+            if _checksum(tmp) != record.checksum:
+                raise ArtifactBoundaryError('artifact changed during export')
             result.append(record)
         for tmp, dst in staged: os.replace(tmp, dst)
         return result

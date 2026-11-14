@@ -427,7 +427,8 @@ def test_write_baseline_profile(tmp_path, monkeypatch):
     pd = tmp_path / "测试画像"
     names = {f.name for f in pd.iterdir()}
     assert names == {"identity.md", "style.md", "audience.md",
-                     "platforms.md", "preferences.md", "memory.md"}
+                     "platforms.md", "preferences.md", "memory.md", "assets"}
+    assert (pd / "assets").is_dir()
     assert "平价护肤测评" in (pd / "identity.md").read_text(encoding="utf-8")
     assert "不接医疗功效" in (pd / "preferences.md").read_text(encoding="utf-8")
     assert "小红书" in (pd / "platforms.md").read_text(encoding="utf-8")

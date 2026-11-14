@@ -29,7 +29,7 @@ GENERIC_PROJECT_NAMES = {
 }
 SYSTEM_DIRS = {
     "_analytics", "_debug", "_inbox", "_login", "_probe", "_profile_build",
-    "_publish", "_scratch", "_sessions",
+    "_publish", "_scratch", "_sessions", "_generation",
 }
 SYSTEM_FILES = {"_ideas.json", "_publish.log", "_schedule.json"}
 

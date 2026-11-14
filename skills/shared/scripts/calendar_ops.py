@@ -47,6 +47,8 @@ def _find_root() -> Path:
 
 
 PROJECT_ROOT = _find_root()
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 DEFAULT_DATA = PROJECT_ROOT / "outputs" / "_schedule.json"
 CST = timezone(timedelta(hours=8))
 
@@ -79,6 +81,8 @@ def atomic_write(path: Path, items: list[dict]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
@@ -116,7 +120,7 @@ def _parse_date(s: str):
 # publish-log 转发（保持归因指标底座同步，best-effort）
 # --------------------------------------------------------------------------- #
 def _forward_publish_log(platform: str, title: str, url: str, ptype: str,
-                         tags: str, source: str, profile: str = "") -> None:
+                         tags: str, source: str, profile: str = "", run_id: str = "") -> bool:
     # 兼容两种布局：项目根 skills/builtin/... 与 Easel 运行时 workspace 拍平后的 skills/...
     candidates = [
         PROJECT_ROOT / "skills" / "builtin" / "skill-publish-log" / "scripts" / "log.py",
@@ -124,9 +128,11 @@ def _forward_publish_log(platform: str, title: str, url: str, ptype: str,
     ]
     log_py = next((c for c in candidates if c.is_file()), None)
     if log_py is None:
-        return  # 找不到 → 跳过（仅日历库落记录，best-effort）
+        return False
     cmd = [sys.executable, str(log_py), "record", "--platform", platform,
            "--title", title, "--skill-source", source or "calendar-auto"]
+    if run_id:
+        cmd += ["--run-id", run_id]
     if url:
         cmd += ["--url", url]
     if ptype:
@@ -136,10 +142,11 @@ def _forward_publish_log(platform: str, title: str, url: str, ptype: str,
     if profile:
         cmd += ["--profile", profile]
     try:
-        subprocess.run(cmd, capture_output=True, timeout=15,
-                       env={**os.environ, "EASEL_CALENDAR_AUTORECORD": "0"})
-    except Exception:
-        pass  # 转发失败绝不影响主流程
+        result = subprocess.run(cmd, capture_output=True, timeout=15,
+                                env={**os.environ, "EASEL_CALENDAR_AUTORECORD": "0"})
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
 
 
 # --------------------------------------------------------------------------- #
@@ -148,17 +155,21 @@ def _forward_publish_log(platform: str, title: str, url: str, ptype: str,
 def record_publish(platform: str, title: str, url: str = "", ptype: str = "",
                    tags: str = "", note: str = "", source: str = "chat",
                    profile: str = "", data_path: Path | None = None,
-                   forward_log: bool = True) -> bool:
+                   forward_log: bool = True, run_id: str = "") -> bool:
     """追加一条已发布记录到日历底座。返回是否写入。全程异常安全。
     env EASEL_CALENDAR_AUTORECORD=0 时直接跳过（发布页由 web 记录，防重复）。"""
     if os.environ.get("EASEL_CALENDAR_AUTORECORD") == "0":
         return False
     try:
-        path = data_path or DEFAULT_DATA
         profile = (profile or os.environ.get("EASEL_ACTIVE_PROFILE") or "").strip()
+        from easel.persona import valid_persona_name
+        if profile and not valid_persona_name(profile):
+            return False
+        path = data_path or (PROJECT_ROOT / 'outputs' / '_schedule' / f'{profile}.json' if profile else DEFAULT_DATA)
         now = _today()
         item = {
-            "id": _new_id(),
+            "id": run_id or _new_id(),
+            "run_id": run_id,
             "title": (title or "").strip() or "未命名",
             "date": now.strftime("%Y-%m-%d"),
             "platform": _norm_platform(platform),
@@ -170,14 +181,18 @@ def record_publish(platform: str, title: str, url: str = "", ptype: str = "",
             "source": source if source in SOURCES else "chat",
             "profile": profile,
         }
-        items = load(path)
-        items.append(item)
-        atomic_write(path, items)
+        from asset_storage import _storage_lock
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _storage_lock(path.with_suffix('.lock')):
+            items = load(path)
+            if not run_id or not any(entry.get('run_id') == run_id for entry in items):
+                items.append(item)
+                atomic_write(path, items)
     except Exception:
         return False  # 记录失败绝不影响发布
     if forward_log:
-        _forward_publish_log(_norm_platform(platform), item["title"], url, ptype,
-                             tags, "calendar-auto", profile)
+        return _forward_publish_log(_norm_platform(platform), item["title"], url, ptype,
+                                    tags, "calendar-auto", profile, run_id)
     return True
 
 
@@ -189,7 +204,7 @@ def cmd_record_publish(args) -> None:
                         ptype=args.type or "", tags=args.tags or "",
                         note=args.note or "", source=args.source or "chat",
                         profile=args.profile or "", data_path=Path(args.data),
-                        forward_log=not args.no_log)
+                        forward_log=not args.no_log, run_id=getattr(args, 'run_id', ''))
     print(json.dumps({"ok": ok, "skipped": not ok and
                       os.environ.get("EASEL_CALENDAR_AUTORECORD") == "0"},
                      ensure_ascii=False))
@@ -543,6 +558,7 @@ def build_parser():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("record-publish", help="记录一条已发布内容")
+    r.add_argument('--run-id', default='')
     r.add_argument("--platform", required=True, help="平台码或中文名")
     r.add_argument("--title", required=True)
     r.add_argument("--url")

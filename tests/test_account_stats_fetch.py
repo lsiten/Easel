@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +11,41 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/shared/scripts"))
 import account_stats
 import xhs_publish
+
+
+@pytest.mark.parametrize('platform', tuple(account_stats.PLATFORMS))
+def test_fetch_from_script_directory_persists_snapshot(tmp_path: Path, platform: str):
+    script = Path(account_stats.__file__).resolve()
+    code = """
+import runpy
+import sys
+from pathlib import Path
+
+namespace = runpy.run_path(sys.argv[1])
+state = namespace['main'].__globals__
+state['PROJECT_ROOT'] = Path(sys.argv[2])
+state['_scrape'] = lambda *args: {
+    'nickname': 'My account', 'followers': 7, 'likes': 3, 'following': 1,
+    'posts': 2, 'metrics': [], 'notes': [], 'logged_in': True,
+    'account_uid': 'my-account',
+}
+sys.argv = [sys.argv[1], 'fetch', '--platform', sys.argv[3], '--persona', 'alice']
+raise SystemExit(namespace['main']())
+"""
+    environment = dict(os.environ)
+    environment.pop('PYTHONPATH', None)
+    process = subprocess.run(
+        [sys.executable, '-I', '-c', code, str(script), str(tmp_path), platform],
+        cwd=script.parent, env=environment, capture_output=True, text=True, timeout=15,
+    )
+    assert process.returncode == 0, process.stderr
+    payload = json.loads(process.stdout)
+    assert payload['followers'] == 7
+    from easel.analytics_snapshots import load_snapshots
+    assert payload['platform'] == platform
+    snapshots = load_snapshots(tmp_path / 'outputs', 'alice', platform)
+    assert len(snapshots) == 1
+    assert dict(snapshots[0].account_metrics)['followers'] == 7
 
 
 def response(status=200, payload=None, state=None, url=xhs_publish.EXPLORE_URL):
@@ -271,7 +308,7 @@ def test_other_platform_login_wall_returns_before_waiting_for_metrics(platform, 
     from playwright import sync_api
 
     context = SimpleNamespace(
-        pages=[SimpleNamespace(url="https://platform.test/login", goto=Mock())], close=Mock())
+        pages=[SimpleNamespace(url="https://platform.test/login", goto=Mock())], close=Mock(), on=Mock())
     playwright = SimpleNamespace(chromium=SimpleNamespace(
         launch_persistent_context=lambda *args, **kwargs: context))
     class Manager:
@@ -296,7 +333,9 @@ def test_douyin_does_not_reject_session_before_spa_login_anchor_renders(tmp_path
     from playwright import sync_api
 
     page = SimpleNamespace(url=account_stats.PLATFORMS["douyin"]["url"], goto=Mock(),
-                           query_selector_all=lambda selector: [])
+                           query_selector_all=lambda selector: [],
+                           evaluate=lambda script, argument: {'httpStatus': 200, 'body': {
+                               'status_code': 0, 'user_info': {'uid': 'current-actor', 'nickname': '本人'}}})
     context = SimpleNamespace(pages=[page], close=Mock())
     playwright = SimpleNamespace(chromium=SimpleNamespace(
         launch_persistent_context=lambda *args, **kwargs: context))
@@ -401,6 +440,29 @@ def test_logged_out_result_never_records_snapshot(monkeypatch, capsys):
     assert account_stats.cmd_fetch(args) == 0
     assert json.loads(capsys.readouterr().out)["loggedIn"] is False
     record.assert_not_called()
+
+
+def test_fetch_growth_reads_only_current_persona_and_account(tmp_path, monkeypatch, capsys):
+    from easel.analytics_snapshots import load_snapshots
+    monkeypatch.setattr(account_stats, 'PROJECT_ROOT', tmp_path)
+    scraped = {**result(), 'account_uid': 'alice-account', 'followers': 12}
+    monkeypatch.setattr(account_stats, '_scrape', lambda *_args: dict(scraped))
+    args = SimpleNamespace(platform='xiaohongshu', headed=False, profile_base=None,
+                           persona='alice', no_proxy=True, proxy=None)
+    assert account_stats.cmd_fetch(args) == 0
+    capsys.readouterr()
+    args.persona = 'bob'
+    scraped.update(account_uid='bob-account', followers=99)
+    assert account_stats.cmd_fetch(args) == 0
+    capsys.readouterr()
+    args.persona = 'alice'
+    scraped.update(account_uid='alice-account', followers=14)
+    assert account_stats.cmd_fetch(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['growth']['last']['followers'] == 2
+    assert len(load_snapshots(tmp_path / 'outputs', 'alice', 'xiaohongshu')) == 2
+    assert len(load_snapshots(tmp_path / 'outputs', 'bob', 'xiaohongshu')) == 1
+    assert not (tmp_path / 'outputs' / '_analytics' / 'xiaohongshu.jsonl').exists()
 
 
 # --------------------------------------------------------------------------- #
@@ -583,18 +645,18 @@ def test_scrape_juejin_logged_in_uses_myhome_from_avatar(monkeypatch):
     monkeypatch.setattr(account_stats, "_looks_blocked", lambda p: False)
     # 自动解析取到本人主页 → 走登录态本人主页，不走配置主页
     monkeypatch.setattr(account_stats, "_juejin_profile_url",
-                        lambda p: "https://juejin.cn/user/LOGGEDIN")
+                        lambda p: "https://juejin.cn/user/123456")
     out = account_stats._scrape_juejin(object(), page, _empty_result(),
                                        "https://juejin.cn/user/CONFIGURED")
-    assert "https://juejin.cn/user/LOGGEDIN" in calls          # 按登录态归因
+    assert "https://juejin.cn/user/123456" in calls
+    assert out['account_uid'] == '123456'
     assert "https://juejin.cn/user/CONFIGURED" not in calls    # 不直连配置主页
     assert out["followers"] == 3 and out["likes"] == 30 and out["following"] == 23
     assert out["posts"] == 30
     assert out["nickname"] == "水獭比特"
 
 
-def test_scrape_juejin_falls_back_to_configured_profile_url(monkeypatch):
-    # 登录态已确认但菜单取不到「我的主页」→ 最后兜底才用配置主页
+def test_scrape_juejin_configured_profile_is_not_authenticated_identity(monkeypatch):
     page = _juejin_page({"pairs": {"关注者": 3, "赞": 30, "关注了": 23},
                          "more": {"文章": 30}, "notes": [], "nickname": "水獭比特"})
     calls = []
@@ -606,7 +668,7 @@ def test_scrape_juejin_falls_back_to_configured_profile_url(monkeypatch):
     monkeypatch.setattr(account_stats, "_juejin_profile_url", lambda p: None)  # 菜单取不到
     out = account_stats._scrape_juejin(object(), page, _empty_result(),
                                        "https://juejin.cn/user/CONFIGURED")
-    assert "https://juejin.cn/user/CONFIGURED" in calls      # 兜底走配置主页
-    assert out["followers"] == 3 and out["likes"] == 30
-    assert out["posts"] == 30
-    assert out["nickname"] == "水獭比特"
+    assert "https://juejin.cn/user/CONFIGURED" not in calls
+    assert out['logged_in'] is False
+    assert out["followers"] is None and out["likes"] is None
+    assert out["nickname"] == ''

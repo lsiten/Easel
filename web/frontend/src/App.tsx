@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
 import Sidebar from './components/Sidebar';
 import type { Page } from './components/Sidebar';
+import { AiWorkspace } from './components/ai/AiWorkspace';
 import ChatPage from './components/ChatPage';
 import SkillPage from './components/SkillPage';
 import OutputsPage from './components/OutputsPage';
@@ -9,6 +10,7 @@ import AssetsPage from './components/AssetsPage';
 import VideoPage from './components/VideoPage';
 import VideoStudioPanel from './components/VideoStudioPanel';
 import AccountsPage from './components/AccountsPage';
+import ChannelsPage from './components/ChannelsPage';
 import ProfilePage from './components/ProfilePage';
 import DashboardPage from './components/DashboardPage';
 import TrendsPage from './components/TrendsPage';
@@ -34,6 +36,7 @@ import {
   saveActiveId,
 } from './lib/store';
 import type { ChatSession, ChatMessage, StreamState } from './lib/store';
+import { CHANNEL_NAMES, channelDocument, channelText, channelWrite } from './lib/channelsApi';
 
 const ONBOARDING_SEEN_KEY = 'easel_onboarding_seen';
 
@@ -592,6 +595,20 @@ export default function App() {
     setCurrentPage('chat');
     sendUserAndStream(ns.id, prompt);
   }, [selectedPersona, sendUserAndStream]);
+
+  const configureChannelApplication = useCallback(async (platform: string, signal: AbortSignal) => {
+    const session = createSession(selectedPersona || undefined);
+    const result = channelDocument(await channelWrite(`/api/channel-applications/${encodeURIComponent(platform)}/setup`, {
+      persona: selectedPersona, session_id: session.id,
+    }, 'POST', signal));
+    if (signal.aborted) return;
+    const prompt = channelText(result.prompt);
+    if (!prompt) throw new Error('应用配置任务未返回执行指令');
+    setSessions((previous) => { const updated = [session, ...previous]; saveSessions(updated); return updated; });
+    setActiveSessionId(session.id);
+    setCurrentPage('chat');
+    sendUserAndStream(session.id, `配置「${CHANNEL_NAMES[platform] || platform}」的应用授权。请通过 Ego 自动操作，需要登录时由我完成。`, [], prompt);
+  }, [selectedPersona, sendUserAndStream]);
   const handleMakeVideo = useCallback(() => {
     const prompt = "用 AI 做一支视频：结合我的账号画像，从素材库取合适的图片/视频/文本素材，规划分镜与脚本，用 OpenFilm 制作，并在 Studio 里可视化预览与编辑。";
     const ns = createSession(selectedPersona || undefined);
@@ -756,6 +773,8 @@ export default function App() {
   // 流式生命周期在 App，页面切换随意——ChatPage 可自由卸载/重挂，回来从 props 读流式态即可。
   const renderPage = () => {
     switch (currentPage) {
+      case 'ai':
+        return <AiWorkspace key={selectedPersona} persona={selectedPersona} />;
       case 'dashboard':
         return (
           <DashboardPage
@@ -807,7 +826,7 @@ export default function App() {
       case 'ideas':
         return <IdeasPage onUseTopic={handleUseTopic} />;
       case 'calendar':
-        return <CalendarPage />;
+        return <CalendarPage persona={selectedPersona} />;
       case 'publish':
         return <PublishPage persona={selectedPersona} />;
       case 'breakdown':
@@ -822,6 +841,8 @@ export default function App() {
         return <VideoPage session={activeSession?.id} persona={selectedPersona} onMakeVideo={handleMakeVideo} />;
       case 'accounts':
         return <AccountsPage persona={selectedPersona} />;
+      case 'channels':
+        return <ChannelsPage key={selectedPersona} persona={selectedPersona} onConfigureApplication={configureChannelApplication} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onUsePersona={handlePersonaChange} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
       default:

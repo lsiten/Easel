@@ -285,12 +285,14 @@ class HypitLifecycle:
         workspace = Path(os.environ.get("EASEL_HYPIT_WORKSPACE_ROOT", str(self.root.parents[2]))).expanduser().resolve()
         project = resolve_project_root(workspace, profile_id, session_id, run_id)
         asset_root = workspace / "profiles" / profile_id / "assets"
+        asset_root.mkdir(parents=True, exist_ok=True)
         output_root = project / "outputs"
         report_root = project / "reports"
         executable = os.environ.get("EASEL_HYPIT_EXECUTABLE")
         return adapter.HypitConfig(project, asset_root, output_root, report_root=report_root,
                                    executable=Path(executable).expanduser().resolve() if executable else None,
-                                   timeout=self.timeout_seconds)
+                                   timeout=self.timeout_seconds,
+                                   runtime_root=workspace / "outputs" / "_hypit" / "runtime")
 
     def _default_runner(self, rec: LifecycleRecord, checkpoint: Mapping[str, Any], cancel: threading.Event) -> Mapping[str, Any]:
         adapter = self._adapter_module()

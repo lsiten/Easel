@@ -1,0 +1,40 @@
+import { useCallback, useState } from 'react';
+import AccountsPage from '../AccountsPage';
+import PublishPage from '../PublishPage';
+import { ChannelSettings } from '../ChannelSettings';
+import type { AccountItem } from '../../lib/api';
+import { BrowserChannelData } from './BrowserChannelData';
+import { ChannelContent } from './ChannelContent';
+import { ChannelTasks } from './ChannelTasks';
+
+const TABS = [['publish', '发布'], ['data', '作品数据'], ['content', '内容'], ['tasks', '任务记录'], ['settings', '设置']] as const;
+type BrowserTab = typeof TABS[number][0];
+
+export function BrowserChannelWorkspace({ persona, account, onConnectionChange }: {
+  readonly persona: string; readonly account: AccountItem; readonly onConnectionChange: (connected: boolean) => void;
+}) {
+  const [connected, setConnected] = useState(account.loggedIn);
+  const [tab, setTab] = useState<BrowserTab>('publish');
+  const changed = useCallback((value: AccountItem | null) => {
+    const ready = value?.loggedIn === true;
+    setConnected(ready); onConnectionChange(ready);
+  }, [onConnectionChange]);
+  function workspace() {
+    if (!connected && (tab === 'publish' || tab === 'data')) return <p className="panel">扫码登录当前平台后即可使用浏览器接入。</p>;
+    switch (tab) {
+      case 'publish': return <PublishPage persona={persona} platform={account.platform} embedded />;
+      case 'data': return <BrowserChannelData persona={persona} platform={account.platform} />;
+      case 'content': return <ChannelContent persona={persona} />;
+      case 'tasks': return <ChannelTasks platform={account.platform} scope={{ persona, account_uid: '' }} />;
+      case 'settings': return <ChannelSettings persona={persona} />;
+    }
+  }
+  return <>
+    <AccountsPage persona={persona} platform={account.platform} embedded onAccountChange={changed} />
+    <div className="subnav-tabs" role="group" aria-label="浏览器平台工作区" style={{ flexWrap: 'wrap', marginBlock: 'var(--space-4, 16px)' }}>
+      {TABS.map(([id, label]) => <button key={id} className={`subnav-tab ${tab === id ? 'active' : ''}`} aria-pressed={tab === id}
+        onClick={() => setTab(id)}>{label}</button>)}
+    </div>
+    {workspace()}
+  </>;
+}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ChatSession } from '../lib/store';
 import type { PersonaItem } from '../lib/api';
 import type { ComponentType } from 'react';
@@ -10,7 +10,7 @@ import {
 import { IconGear } from './settingsIcons';
 import ThemeToggle from './ThemeToggle';
 
-export type Page = 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'assets' | 'video' | 'accounts' | 'profile';
+export type Page = 'ai' | 'dashboard' | 'chat' | 'trends' | 'ideas' | 'calendar' | 'publish' | 'breakdown' | 'skills' | 'outputs' | 'assets' | 'video' | 'accounts' | 'channels' | 'profile';
 
 interface SidebarProps {
   currentPage: Page;
@@ -36,11 +36,13 @@ interface SidebarProps {
 const NAV: { page: Page; Icon: ComponentType<{ size?: number }>; label: string }[] = [
   { page: 'dashboard', Icon: IconDashboard, label: '工作台' },
   { page: 'chat', Icon: IconChat, label: '对话' },
+  { page: 'ai', Icon: IconLayers, label: 'AI 工作区' },
   { page: 'skills', Icon: IconSkills, label: '技能库' },
   { page: 'outputs', Icon: IconOutputs, label: '内容库' },
   { page: 'assets', Icon: IconLayers, label: '素材库' },
   { page: 'video', Icon: IconVideo, label: '视频制作' },
   { page: 'accounts', Icon: IconAccounts, label: '账号' },
+  { page: 'channels', Icon: IconAccounts, label: '平台工作台' },
   { page: 'profile', Icon: IconProfile, label: '画像' },
 ];
 
@@ -67,11 +69,27 @@ export default function Sidebar({
   const [renameValue, setRenameValue] = useState('');
   const [showArchived, setShowArchived] = useState(false);
 
-  const [collapsed, setCollapsed] = useState(() => {
+  const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 700px)').matches);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [desktopCollapsed, setDesktopCollapsed] = useState(() => {
     try { return localStorage.getItem('easel_sidebar_collapsed') === '1'; } catch { return false; }
   });
+  const collapsed = mobile ? !mobileOpen : desktopCollapsed;
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 700px)');
+    const resized = () => { setMobile(query.matches); setMobileOpen(false); };
+    query.addEventListener('change', resized);
+    return () => query.removeEventListener('change', resized);
+  }, []);
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setMobileOpen(false); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [mobileOpen]);
   const toggleCollapse = () => {
-    setCollapsed((v) => {
+    if (mobile) { setMobileOpen((value) => !value); return; }
+    setDesktopCollapsed((v) => {
       const n = !v;
       try { localStorage.setItem('easel_sidebar_collapsed', n ? '1' : '0'); } catch { /* ignore */ }
       return n;
@@ -113,7 +131,7 @@ export default function Sidebar({
       <div
         key={s.id}
         className={`session-item ${s.id === activeSessionId ? 'active' : ''}`}
-        onClick={() => onSessionSelect(s.id)}
+        onClick={() => { setMobileOpen(false); onSessionSelect(s.id); }}
       >
         <span className="session-item-title">{s.title}</span>
         <div className="session-actions">
@@ -130,14 +148,17 @@ export default function Sidebar({
     );
   };
 
-  return (
-    <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+  return <>
+    {mobile && mobileOpen && <button className="sidebar-backdrop" aria-label="收起导航" onClick={() => setMobileOpen(false)} />}
+    <div className={`sidebar ${collapsed ? 'collapsed' : ''} ${mobile && mobileOpen ? 'mobile-open' : ''}`}
+      onBlurCapture={(event) => { if (mobileOpen && event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setMobileOpen(false); }}>
       <div className="sidebar-header">
         <div className="sidebar-logo">
           <img className="sidebar-logo-icon" src="./static/easel-icon-transparent.png" alt="" />
           <h1>Easel</h1>
           <ThemeToggle />
           <button className="collapse-toggle" onClick={toggleCollapse}
+            aria-label={collapsed ? '展开侧栏' : '收起侧栏'} aria-expanded={!collapsed}
             title={collapsed ? '展开侧栏' : '收起侧栏'}
             style={{ transform: collapsed ? 'none' : 'rotate(180deg)' }}>
             <IconChevron size={16} />
@@ -147,6 +168,7 @@ export default function Sidebar({
           className="persona-select"
           value={selectedPersona}
           onChange={(e) => {
+            setMobileOpen(false);
             if (e.target.value === '__new__') { onNewProfile(); return; }
             onPersonaChange(e.target.value);
           }}
@@ -165,7 +187,7 @@ export default function Sidebar({
           <button
             key={page}
             className={`nav-item ${currentPage === page ? 'active' : ''}`}
-            onClick={() => onPageChange(page)}
+            onClick={() => { setMobileOpen(false); onPageChange(page); }}
             title={label}
           >
             <span className="nav-icon"><Icon size={18} /></span>
@@ -201,10 +223,10 @@ export default function Sidebar({
           : gatewayStatus === 'disconnected'
             ? (apiDirect ? 'API 配置不完整' : `${agentRuntime} CLI 未配置`)
             : '连接中…'}</span>
-        <button className="settings-gear" onClick={onOpenSettings} title="设置（模型 · 环境 · 更多）">
+        <button className="settings-gear" onClick={() => { setMobileOpen(false); onOpenSettings(); }} title="设置（模型 · 环境 · 更多）">
           <IconGear size={13} /> 设置
         </button>
       </div>
     </div>
-  );
+  </>;
 }

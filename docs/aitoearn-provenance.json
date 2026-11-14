@@ -1,0 +1,2126 @@
+{
+  "source": {
+    "url": "https://github.com/yikart/AiToEarn",
+    "commit": "4b59b10ff960a269ce8ad4b77075c0522b11e5a6",
+    "checkout": "not vendored",
+    "archive_sha256": "c0cd2e85090fe300f6b63869002946df6fc1560464e4443c276d6606ce72a2a4"
+  },
+  "disposition": "behavioral_reimplementation_only",
+  "copied_files": [],
+  "excluded_packages": [
+    {
+      "pattern": "skills/codex-plugin-aitoearn/**",
+      "license": "Proprietary",
+      "action": "exclude"
+    },
+    {
+      "pattern": "skills/claude-plugin-aitoearn/**",
+      "license": "Proprietary",
+      "action": "exclude"
+    },
+    {
+      "pattern": "skills/dsh-plugin-aitoearn/**",
+      "license": "Proprietary",
+      "action": "exclude"
+    },
+    {
+      "pattern": "skills/qwen-*-aitoearn/**",
+      "license": "Proprietary",
+      "action": "exclude"
+    },
+    {
+      "pattern": "skills/trae-skill-aitoearn/**",
+      "license": "UNLICENSED",
+      "action": "exclude"
+    },
+    {
+      "pattern": "skills/kimi-plugin-aitoearn/**",
+      "license": "UNLICENSED",
+      "action": "exclude"
+    }
+  ],
+  "reimplemented_capabilities": [
+    "platform capabilities and source-registered native protocols",
+    "OAuth and miniapp authorization with encrypted scoped credentials",
+    "account groups and profile selection",
+    "media uploads and bounded public downloads",
+    "content libraries and source usage attribution",
+    "local user profile and AI preferences",
+    "caller API keys and short links",
+    "durable publish ledger, leases and fencing",
+    "scheduled multi-platform flows, frozen review, task controls and published updates",
+    "verified completion polling, signed callback inbox and recovery",
+    "scoped publish records, projections and analytics history",
+    "native handoff templates, public guest sharing and SDK signing"
+  ],
+  "evidence": [
+    ".omo/evidence/aitoearn-easel-review/risk_sequence_evidence.txt",
+    ".omo/evidence/aitoearn-easel-review/risk_sequence_review.md",
+    "docs/aitoearn-migration-coverage.md",
+    "docs/channel-adapter-migration.md",
+    ".omo/evidence/aitoearn-domain-recovery-review.md",
+    ".omo/evidence/aitoearn-workbench-validation.md"
+  ],
+  "source_inventory": {
+    "api-key": [
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/api-key/api-key.controller.ts",
+        "sha256": "3560919ebc77fb58e3b4d647c3208455bdbb3cdc0698fb77463c407641a93bb7"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/api-key/api-key.dto.ts",
+        "sha256": "14d8cb243d9a180e7bc88f925b1f66db8d1152cb639ee00852e54cbc56d83ff1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/api-key/api-key.module.ts",
+        "sha256": "bd5fb2817852031665c2cdd0fb864e1f687d91a12436c0fea5e3ea93af963feb"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/api-key/api-key.service.ts",
+        "sha256": "b4eb87c820d047b16daa49a6b4c6b39bf751efb6e61ad134f721078587b2b206"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/api-key/api-key.vo.ts",
+        "sha256": "d2aa596967dc4a0b2a0c2c4ae22132bc282511f59094f9979bc11162efdde2ef"
+      }
+    ],
+    "assets": [
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/assets/assets.module.ts",
+        "sha256": "269f800552904ad0de9f5dd49dd5bbdb6e8faff64e40ca7b9452b64bb7d5df89"
+      }
+    ],
+    "channels": [
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/accounts/account-group.dto.ts",
+        "sha256": "ed4edded4bbbe4ea4fbd97ec7935d4427d1ce871132ca2a2a5edd7191b6d84b9"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/accounts/account-group.service.ts",
+        "sha256": "88c41fff6d6ee1fa9b5a792422487d6d2672f6471a90c9f626421eb6e9686d23"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/accounts/account-group.vo.ts",
+        "sha256": "56a51a0f71794d5dd3d6cf5dd7c101da015bc689fd16e38ac302e793ba2999ce"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/accounts/account-groups.controller.ts",
+        "sha256": "ab4a7b96a63ef7a9a90ae8b2a084c043146a93cfcd9faa0e573263f17c3c3201"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/accounts/account.dto.ts",
+        "sha256": "08d9046e58ef10d5b6c7bfae946864c020c7f46d51b560544053d600c4d8aa51"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/accounts/account.service.ts",
+        "sha256": "7ab5bfe494a6db7944196eaf2a641b1d3f3a6affa615bef32e410495aee32e5c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/accounts/account.vo.ts",
+        "sha256": "fe8b9df029fa1eeea352aef5e3bf90e81f595a63fda2ea1ab30b21131c55bb35"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/accounts/accounts.controller.ts",
+        "sha256": "e2fe9eed20a2cd639b654c794821588530c51e842a570b1cebbd58bc3d5b1d96"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/accounts/credential-health.scheduler.ts",
+        "sha256": "2b6612070a2a63119b0577f1c1cf6abbbc471372dc7095acc45d7a4e76f1eea4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/accounts/credential.service.ts",
+        "sha256": "028510db1a1081eb7037a5dc70f2ae5e0b251553048f15f368b364bd1f99a270"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/analytics/analytics.service.ts",
+        "sha256": "fa8f19ba3703625d42952f74fe65007284ba44432382416be4a0b6ca8c9f27ec"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/analytics/analytics.vo.ts",
+        "sha256": "2076bf08d7f183e70052a5b9143e8189c2ae43d8eb4950141fcaae68cee3f74c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/auth/auth.controller.ts",
+        "sha256": "424b1bd4618609f23305e58bd29e015c42a63bbe21f7e77e483f8e47fa6da081"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/auth/auth.dto.ts",
+        "sha256": "e7b70731cf7a86f81f7646514cb9f02a546ebe19e1ca7970fefef1367827328d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/auth/auth.interface.ts",
+        "sha256": "897ce2177647f7c5c388cde188722e8bbdee1f06b16afd689ee27a55d830b594"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/auth/auth.service.ts",
+        "sha256": "604ce03d91662c20cccafda40f5a846104c0f97c7b35dc6d1485d8c3317322f6"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/auth/auth.vo.ts",
+        "sha256": "68bd9a4eeef093369565db8cf7f71b3ff3467c83ee40a34990e84fd336ff8828"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/auth/linkedin-auth-callback.controller.ts",
+        "sha256": "b46177d13618fc79308d709390523adc00d6f9f3b29caa19ae855712a17caab0"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/channels.module.ts",
+        "sha256": "ad8d6bcf149e2ba100570db36441d07e5459c0e3e1a4030c4644b182921b474e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/engagement/engagement.controller.ts",
+        "sha256": "8c2db5e8c0bd0ebafa8e4fa92dfc45fdafa79448681c5bd2aa878aeab28b1b3e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/engagement/engagement.dto.ts",
+        "sha256": "b5eb3009c4e5a1f4afb12b8125bd7c6b88bcd6c1957e03bdb78271337b6df6b1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/engagement/engagement.service.ts",
+        "sha256": "e6952cbb24f471d5871f0ac9295593bd97cd0a5b8699ada0236d0106eab1a5c5"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/engagement/engagement.vo.ts",
+        "sha256": "84965d1c702a49f8479a1ddb4ba27007e9234af3cefbe838c3f902b4031dd28c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/mcp/channels-mcp.schema.ts",
+        "sha256": "e054a9b698d285fc6634ef30be3af25905e73606fa99e0c3b565f7f21d41f915"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/mcp/channels.mcp.controller.ts",
+        "sha256": "94fd61b7fc6a95aefe84ec907e96d3bec74e2c483f007ee1a113587ecccbfde4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/mcp/channels.mcp.module.ts",
+        "sha256": "644f23bb247fe557db0178da71b439e08c1ad751a4e5d702b032d8a0681215ed"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/mcp/channels.mcp.service.ts",
+        "sha256": "497f9fe62b5543c923f007249923ffcfb72042d25c19c8661c88691cbdba8019"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/media/media.module.ts",
+        "sha256": "33e507eed431f34e3492dc2ed6d3a0974948f6a8e68139be0cd052683bdbd871"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/media/media.service.ts",
+        "sha256": "561977738a9fcc11e9ba7de100a455fefce2ce60b6bd4ac64b963f2f775bcf35"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili-analytics.provider.ts",
+        "sha256": "47494b89e66d6d1c3c29d49233477490c348eabaca266befc60982102a4e18bd"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili-auth.provider.ts",
+        "sha256": "4f304cfc27c7d0a4b0369f56a6400591aa3715c1936e8b2fed27d1bd8228f9db"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili-publish-options.provider.ts",
+        "sha256": "f0bd105a433b91637995164ceca43e76b2c65032078ea93388b5c727a53a0395"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili-publish.provider.ts",
+        "sha256": "80ec210e333adad67cd7b44b7800a8a6960e07db40b1e2ac35a33d82c6339db2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili-webhook.provider.ts",
+        "sha256": "144972829ca1a685acc17cc9460eaf3025b173756cb7918c23df9f24f88700ff"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili-work.provider.ts",
+        "sha256": "f19f912b77daae2109a10f420c4457ad65b25256bef4d5f59b0b22df3deaaf30"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili.config.ts",
+        "sha256": "bd338f7ac0a66b5976294898e26d9dd8657370698e8cf9c7e90e0169afd0dca3"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili.constants.ts",
+        "sha256": "deaa054f26b270449b14937e4d0105a3f449b4068b3e1c1d9c663f7781308653"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili.exception.ts",
+        "sha256": "95f16a27d013d4b0cc988e388abc56e6b8c137e1519f822699013caa7bb41892"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili.interface.ts",
+        "sha256": "16110f1978dfddd11f28946fd27f8b0cff13cbb4a7a600080025d319874e5927"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili.module.ts",
+        "sha256": "e66252d265b96212c2dd49d94d1cb0093371b2419b2dbef55b2a054e80808c68"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili.schema.ts",
+        "sha256": "5ab37c9cab817e9e11dbef5cfca71b3be1af6aa09a93e1eadd1abe00e67248af"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/bilibili.service.ts",
+        "sha256": "0e3333f94240fdddec2604942be3167f2e1b5cb9a809accc6312b321ff4fd6ad"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/bilibili/index.ts",
+        "sha256": "96d7413a0085a9c19aa4161ac84c07c7fecceafe43d5873cc769ec9756c7ca0f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin-auth.provider.ts",
+        "sha256": "be6d411e4b974c271cb8935263ba86feced21bc5d5089a5cbe9a4bfe7a0e06aa"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin-miniapp.interface.ts",
+        "sha256": "9c0ef1bd91c4e21abab3ea3fda9bd2abe807d812865b8d1568167192fff8cf2f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin-miniapp.service.ts",
+        "sha256": "66c5d07969ceae560d908c911332971354849966936bd56390a480b0431aaa64"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin-publish.provider.ts",
+        "sha256": "ba97d6953dd71d9a1fb66936779a27d702af4760f44d7b78aac0c6853d0b4e66"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin-webhook.provider.ts",
+        "sha256": "515eadaa4cfa2170a66e2ecabcccc239409295aa6dc5322635fb3f1dd9181884"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin-work.provider.ts",
+        "sha256": "e3be8217a92a89eeaa9ae050173b05782f30ca77a5461c51d84cf8c37d6bfef2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin.config.ts",
+        "sha256": "d1e72f367c4a2bef5af72408bda208f6cf0565de1faa00ee5ad1b7c40e510019"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin.constants.ts",
+        "sha256": "a40e7d8d151f34f116def0fc402b9dc24b944a68f3aa8dd3245df4c61f9d3b67"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin.exception.ts",
+        "sha256": "0586f94c01af88590bfe9caa3d7697f36cf959b734b9596de059815ac80a7a92"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin.interface.ts",
+        "sha256": "599eb8010e66023fb181286de3f24e1abeb54f656e396a494d4128cf28a1f06a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin.module.ts",
+        "sha256": "7b36bf13afb5fa4f815d555f216cba1522315eb4dc5155bc4603074c998f1221"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin.schema.ts",
+        "sha256": "17430c0072a502f99399dfcfe8c546652dad72328c428986506c1d0e8b33b496"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/douyin.service.ts",
+        "sha256": "74dd23a7fe632f8b8f5794995cfec48b12ea4d2802032d198c66bd0e89fce5e4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/index.ts",
+        "sha256": "bb018be611fa4884ed7eca902eeae6ce41caf0f904c97fcd9c74f06b8e7fe5c6"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/offline-qr/douyin-offline-qr.controller.ts",
+        "sha256": "f427bc4ef0afbd18a1947e18a8f1af5332e3ca134b0248f0d141652bb2103d1d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/offline-qr/douyin-offline-qr.dto.ts",
+        "sha256": "87d4dd88b14f28bd6ced10f0ee41252605518c5ec0571ac481e136dc839bebde"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/offline-qr/douyin-offline-qr.service.ts",
+        "sha256": "aee836b8b83aafacc6ca502b7bf37e3eb2a99c7ffbec683be35b6a3d75b143f1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/douyin/offline-qr/douyin-offline-qr.vo.ts",
+        "sha256": "d011b73f8495c7be0e2dae71b96971f558cc801f9aae234cc4017b38acae248e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook-analytics.provider.ts",
+        "sha256": "4a7d4d3ebceec0a5b345656a8182a408de30d95cdd7c89448d39f6c5639377d5"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook-auth.provider.ts",
+        "sha256": "065e3a088a6540113382549672f7cc6d56529b4d1fd12b98fdef5a4d1e525636"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook-engagement.provider.ts",
+        "sha256": "0cae46248ff9ffc38ea71a2cc06d296536e496f02e3b52872770681220994267"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook-publish.provider.ts",
+        "sha256": "efc0752aaad2b08bdcf050bca44ff1568fac8476c82fc45489b47cef7f7b2542"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook-webhook.provider.ts",
+        "sha256": "06ea8bd287ebf171eedd6127113c429fd1e70ba76eb44d3a3b3d15bfdffa3173"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook-work.provider.ts",
+        "sha256": "4e058b0598a7a8a1083cdc0af9aded9e50fb8a1ae5b190cf118415ac1965d475"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook.config.ts",
+        "sha256": "4590f08bcb6e5182b533cd4dab355082306797b31ef828ba5e3d4c4bcceea838"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook.constants.ts",
+        "sha256": "169c14ecd62d08a10dee677f27a68303efd94d43fdec685d7f348a1770ac046d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook.enum.ts",
+        "sha256": "1e23c3634be48b077915857509154ee9be3f9d1fe6d6ed21dace1e6115ac9e6d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook.exception.ts",
+        "sha256": "3a6722cfeab8cb8546abb97d17da9f7a87d718f4be604f43303fdfa12c9a3eef"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook.interface.ts",
+        "sha256": "8a01f16b857dad157a1a3f835737a8423b22cfc3792c439a6b2c48699e44c72b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook.module.ts",
+        "sha256": "7a548bfa6392464887baee7dd9d079be16ff5a146207d641d5fe9ffbd5745f95"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook.schema.ts",
+        "sha256": "b35cb52d8b547a23f81013be7f6957144784867b63765753bb35dce581efc2e5"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/facebook.service.ts",
+        "sha256": "9d53ec50aa8d962120bef1c6082b0a12d921e243265f6c2a117bcff702838da9"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/facebook/index.ts",
+        "sha256": "42bb3018d40a4e4751688aed81b5ed31a70208691534866fc918ab296fee7498"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/google-business/google-business-auth.provider.ts",
+        "sha256": "68ee4ea14a7cd8116ecc36a674e007f651532804dcb4681a0a3aa1e47b34bdfa"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/google-business/google-business.config.ts",
+        "sha256": "926a00fc9025166960107d55a04f7d3262f20536ca5970c05cfedd3c2e7eee2c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/google-business/google-business.constants.ts",
+        "sha256": "a90364c43a797887e6cb4a38c91d25b333f0944e488c5cf7ab7237fc53baf753"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/google-business/google-business.exception.ts",
+        "sha256": "7c997eef9269541c860c1353897b267024f171aa9ad2a2a7b62fab4f58ac1be1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/google-business/google-business.interface.ts",
+        "sha256": "4dc28a1a1b0c489267ab0db8dea1f31ffa83848f3e269b135fba8761ffadb06f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/google-business/google-business.module.ts",
+        "sha256": "cc8b5cf1c9b175ce54930ee0d75d54d206b299fbd10fd99f80d7d45249a0a3f7"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/google-business/google-business.service.ts",
+        "sha256": "4db4b483aeb9ce6fe11a19558f70450daaca0f6daf482494e40bd69d75fe9faf"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/google-business/index.ts",
+        "sha256": "93b93946efabd1a815122e4fec7a488e5e8ccb2ee8b54798261b59776695a001"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/index.ts",
+        "sha256": "69aca411fc4fd80d784f764047081ce64184386f936790ad459fb350c1c98bb5"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram-analytics.provider.ts",
+        "sha256": "5878465085b056f5962a760b7107cfb0097454b6c10e3c1164a86919159e1624"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram-auth.provider.ts",
+        "sha256": "bbf15924477e9dbd8bf4f6613581f7b44036120239fc9e2815541ed6a9649922"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram-engagement.provider.ts",
+        "sha256": "f26ae8fb92408da8157fd2056eba7ecfdbe272148fe42c4e74293b9a92141c32"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram-publish.provider.ts",
+        "sha256": "699e5a8595910891f1e440378052491a8713aa93142260b60beb7e03a8b004b9"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram-webhook.provider.ts",
+        "sha256": "e4fbe90f3607267d97c4768a269c165503bfb7682048ce6534f491adbc673497"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram-work.provider.ts",
+        "sha256": "1b8d7c30934f4004d3764f63fb10e275b84c40296ae4635fd49afaf55aeb12d2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram.config.ts",
+        "sha256": "6d0f3fa12f9dd7a94dac640b32f524d3de3d6f79033a84c3b4a1e556a285b40c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram.constants.ts",
+        "sha256": "7e8fe0ae9587bf014ce87e9d6a9201314f3dcf6e186150bf68fbd0766777b379"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram.exception.ts",
+        "sha256": "7e9d0f7deea66090fb424370afd18858b9999b037f7320dd1817e986c0959c3b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram.interface.ts",
+        "sha256": "10aa2f1b46e771b048df333039dab4e52cf41a237a46142bb3c1eb217fe6921f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram.module.ts",
+        "sha256": "aa30910ba2565d10aedd668c994117de310610aa7caee631a58dea6b2c18e51e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram.schema.ts",
+        "sha256": "843b3d65728b058c11a47754be9b9ca9b397241b7bbc68590ecf9e051ac8c79b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/instagram/instagram.service.ts",
+        "sha256": "0e63486cf5f12a1df9a72ef99bbf18e8e5489fae425cd9b5ada6c1059fea5456"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/index.ts",
+        "sha256": "585921216a03427c7507393990ac0f1a0816d33ffa06116a4ac2c8f51e8eed82"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai-analytics.provider.ts",
+        "sha256": "5d89ff4026b9077dc06b28f4f04eff8975552fac8dfef7d59041ac76ee57cc58"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai-auth.provider.ts",
+        "sha256": "9db29e0a01c6dbaa6c722926e12fc31d236dba444697ec209847c6643f61d14e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai-publish.provider.ts",
+        "sha256": "49ccd75f899027343669dfc8d1b38ba328f53854cde0a9626a69876e2ba82cd2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai-work.provider.ts",
+        "sha256": "b2865e4b67aa1c75cc666027ffc8813993a5b2c5eae820fe2ac3a27bd91ce069"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai.config.ts",
+        "sha256": "78b6964ea7d57d00c8a0d922c4ae19062610ecac2462124684dbfd9394b42f94"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai.constants.ts",
+        "sha256": "01765138349f9be3d3a8de802d85e1da57e0d509cb1ef954305ad015473ab122"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai.exception.ts",
+        "sha256": "d45ab91a337b3831f68eb0130e9b98e5b6dbc524540ac6069e484135b6d7fc9a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai.interface.ts",
+        "sha256": "0bfdea2af12391f99116aa50d82d2b3ce1e9427b23e1b42a625d589e1080b4c7"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai.module.ts",
+        "sha256": "72310a31c0554c49dba8c391f4a54c63081e0ac7fa1b0dfeeded28cbcf9a2000"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai.schema.ts",
+        "sha256": "d62438598f3e7d095714b30af95a4bf85b39cfbbadaff2bf11dce813844f2e21"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/kwai/kwai.service.ts",
+        "sha256": "a7e0b9dba9f296e20ed39536e32860b080e24101f6ae2ab3b0edc9c2d986af39"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/index.ts",
+        "sha256": "c59257c17e8338be63f36769bbc2438cb36af8b3d510f10a128b5e2734e5cf74"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin-auth.provider.ts",
+        "sha256": "94db0149ecf278270e5f28ea2809158070b851cc4341f96b248a2ee1ee155f2e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin-engagement.provider.ts",
+        "sha256": "2410135517a545241ee5638e19a27dc4502f6a82840732903501866202b51c78"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin-publish.provider.ts",
+        "sha256": "61536436bfe01a30e7ed37136d57c861deccafb32e29deba7209ce6f5505106c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin-webhook.provider.ts",
+        "sha256": "ef92e09e006f65466cf99bedfbe27f71120160aed5cfe601c0737c86b9b60cbb"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin.config.ts",
+        "sha256": "f9d8d905f0b7ff4f88d37cce3a355bef439613d1b412ef2a9d2f2592ef9251dd"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin.constants.ts",
+        "sha256": "7777f5d0896b55e826ed541fe3a4edf72d01dd3b40c4a5026ea873dd6860332b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin.exception.ts",
+        "sha256": "55d5e4e8faed28ac97bccb79c972d2b4d3428eea7ef195105087b774288f5f9e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin.interface.ts",
+        "sha256": "48cfbba46e72eb5370e33c65d2e35ff80ae6c715b4e59d5f32a01e2fe470fd4a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin.module.ts",
+        "sha256": "fdc452348e4736bcd0b2847c872d5004af9c6b89ce65ec118aa253467b7b9ec3"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin.schema.ts",
+        "sha256": "b6812f1bad464e0c8c0000d04feeed0878f1eb9573102f228ae2d471ac07aacf"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/linkedin/linkedin.service.ts",
+        "sha256": "78c9daecda487574cef0e4bcbead3aab6c26ede9902d422afc2ca2956de642ce"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/index.ts",
+        "sha256": "ad3b59be8f2cdb6f27359372ba13f563831257856d8df6d3478870d3a489fbf0"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest-analytics.provider.ts",
+        "sha256": "41d5cfe1e0c8e6ab64eec661440562e51d3791adfecd5004dcb899292fc150b8"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest-auth.provider.ts",
+        "sha256": "dced53794d20dbfabcbfd07d4e6e9030202d0243f923fb04c4352f6ad52012d4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest-publish-options.provider.ts",
+        "sha256": "8cea85ee44e3d2a0332455187594134cf76b13d603ce46da52291447c07daf3b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest-publish.provider.ts",
+        "sha256": "95c2db83b6953bff876236517b7ddecb17157f0f2639f5fbe3f93c454061c773"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest-work.provider.ts",
+        "sha256": "55c6901979dd6217d3a5978462c3c6e4d04b5ab69e6b3c81b8b3dddf36f46cc4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest.config.ts",
+        "sha256": "56849872b0b1e52726cb8be80bd6839cc22d5da42aae904cb5f1fcc93ced22a5"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest.constants.ts",
+        "sha256": "c1296bde81758f46cfb600c531eb01e7a1739e0fec019ccd6037cf9447d8cb50"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest.exception.ts",
+        "sha256": "c0865d252cb8e639824fce5b489f4d5aad96ee43b5cd5168fdd9a069506a2082"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest.interface.ts",
+        "sha256": "ecd0a1d1e3208746187a34d500388ff0b5c969b674c48d6c407415c7c9d73e74"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest.module.ts",
+        "sha256": "5763ed7d04b66496b888164e8d56ab211b8f8565b0b7ed5c9b672ad02b5691f4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest.schema.ts",
+        "sha256": "f215bacabf71a4115602a30efb3a310e8a5c630b8171fcd9fa445bc3b7c4185a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/pinterest/pinterest.service.ts",
+        "sha256": "0ca35843b7ef0a140f71dbf91f7ca7aaa9f839f4736c298aa0691e85092e6a27"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platform-pagination.dto.ts",
+        "sha256": "689146d169c4839af5ef7ac92f377f4da6d4ab21ebc7adc3c8a96a7af2f0e952"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platform-pagination.helper.ts",
+        "sha256": "863916937a75e8625bc5af786ab478eb590d4848201709295f7e0d4db077690e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platform-pagination.vo.ts",
+        "sha256": "a8402f8775bf3c34dc7c8f7d7f25b57dd9401c1e0d532b47bf39279c20196469"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.config.ts",
+        "sha256": "1942b3add196ab78771d2efd5a9c17680e6d2b9fbb73b360c123e8637f6327d7"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.controller.ts",
+        "sha256": "b2879d5e63b677f21eb79ccc93b829817ebe8fb55513488ec2765120873d9dca"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.dto.ts",
+        "sha256": "8a158edadfb27b9fb3bb83d7eef71a6d499c19814a2102e8c396c2932822c36d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.exception.ts",
+        "sha256": "dd0bc6a17107ae1e0c19c07708f3516271bc5b7ba63576f9bd35c607a827758f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.interface.ts",
+        "sha256": "bc37fa918f088c0876d9a7970c095dede504003d82a5bb3bb4596942eb4b76bc"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.module.ts",
+        "sha256": "246d68499edeb94275c33e08a00f858d4fcfd443dd5f6845f4c2d4ffbead3020"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.registry.module.ts",
+        "sha256": "5020ffce1f116c025634d2dc172fc26fbded7b2671481cb5ba8a23788ec3d37b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.registry.ts",
+        "sha256": "aae982fdfd014b25c5874dc7da8b07c01a2e5f5b08e55af10f97a1c284089391"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.service.ts",
+        "sha256": "703eac35617be5b8797119321dfac8116b7eadecdd40e3d53c9528e8a69acf0b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.utils.ts",
+        "sha256": "bac0676353721617248dfe73b5151b77513e4e9693edebafb60c6ef1faa744fd"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/platforms.vo.ts",
+        "sha256": "794968c0f0f93b629b09d1dd1764203a1f45f870b1dd78e8a60b957c12805811"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/publish-media-adaptation.schema.ts",
+        "sha256": "d39727cf1f1bc2b1ded95bafe69df6152454c3b8137140e400780c608ac09603"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/publish.schema.ts",
+        "sha256": "68ee97160cfeac037962d9fe130e5ffca1395aa8ba0e079fc03055c4e81ac732"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/index.ts",
+        "sha256": "a4eea193514bf79f9327308f31a0159b39748cf67a13fead2c03291cc8b3ee3d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/offline-qr/rednote-offline-qr.controller.ts",
+        "sha256": "c4139d55ef3affa7eeb67fb3689df034b503035325866163c5d1d96cd0340fad"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/offline-qr/rednote-offline-qr.dto.ts",
+        "sha256": "d9d66750acc2f6b544e7521c98fa91c3cc14fb763bcac96b4fc56f43d8fd2865"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/offline-qr/rednote-offline-qr.service.ts",
+        "sha256": "2f12fbbf2974aa9495825f6bc030a601e7de92518b34e87974054a611dc176cb"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/offline-qr/rednote-offline-qr.vo.ts",
+        "sha256": "2f0cbabcab82da1b1f835f35522627ee19b7ca3ae8892cf5584f4fd730e2a195"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/rednote-publish.provider.ts",
+        "sha256": "bf7071037809598afb85646e93fcadd1c1b63e2c775882853df315f0c77195bf"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/rednote-work.provider.ts",
+        "sha256": "83c3b1ee7b1be63b090191a0a87c5d6d9391787ed2965c939389e5009c8b901f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/rednote.config.ts",
+        "sha256": "5e486026972a6a3c090958f0bb3fce908e864e36fd851bb4214880fc7bfde23b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/rednote.constants.ts",
+        "sha256": "3f581417236493ccbed46d5baa1e2f01d46b7d3674f93d354261250f808856c0"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/rednote.module.ts",
+        "sha256": "eab044d23f82d133c4ced82fe3a679a76bf56f189778f66de43f4e227e995510"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/rednote/rednote.schema.ts",
+        "sha256": "25b5ed2d09922622cd0aa6be4725a98f4b6aed36260838799f8a4eeaac381d8e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/index.ts",
+        "sha256": "f48ac84e5ea9e986622a780feb7c0c3bdf5206dbbb2dab9dbb9bab163dde251a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads-analytics.provider.ts",
+        "sha256": "3a0a4d28a39d249e0fe0a3558437d53c359c5457437a1c86b06c8e85cd354cad"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads-auth.provider.ts",
+        "sha256": "40a988c659e4b821f288fb54617abaac70602ff58274fc7ef3b3cf70c426c61d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads-engagement.provider.ts",
+        "sha256": "feb9b7b6d637db13b590b0106e8922751bf434d23ff17dd239283d4ada67692d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads-publish-options.provider.ts",
+        "sha256": "6e2e73db3fe11e776cff6ef1be7df1077b8e71c2027dddda23329af3635497f8"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads-publish.provider.ts",
+        "sha256": "7cf6d2dc3906dea7e504fafa9f30406f909c2e76ed33378e0b3d9fd0099df3fa"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads-work.provider.ts",
+        "sha256": "5fa7db98da0cab91451f958af31a45bfd85d9ac53e17b8415b892f3ae204036e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads.config.ts",
+        "sha256": "0947508a4a89754361cb20937b83d4681f341749039a2c749f03b3afed6df621"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads.constants.ts",
+        "sha256": "e1e6941c6dc25f79f63b4a0b13ebb7492264a6fada1223d18c69dfc9a758f023"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads.exception.ts",
+        "sha256": "b9f1904c5b44daa4d7921dd477da2404191a89351e5f2ee37e96d75b3898ea34"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads.interface.ts",
+        "sha256": "4698248ed8ae97a45d2e64450c9f9c08959f787e5c6bbcec7b01f0d2beb6b153"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads.module.ts",
+        "sha256": "7c575818b135442430435ba00a4e8ca39166bcb7f16e12c68d7c7ce67253a908"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads.schema.ts",
+        "sha256": "6d590154c25140c43b77a42c587fb77111f9dea8434d925d20c85e47bf035ad6"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/threads/threads.service.ts",
+        "sha256": "e50a9301c4518b3d797213d80a274b04d3b963b46ae19f75cea7a41d86ac4ebd"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/index.ts",
+        "sha256": "9af3fba1a2f29e43e5e6fa3e1b0c751e6b95b513df7f8023ec91ca8767a44520"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok-analytics.provider.ts",
+        "sha256": "3cff263eca5bdca7de99d39ea91c83abea1fbb7f485b82cbffece6020df10ef1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok-auth.provider.ts",
+        "sha256": "e087957539ae36e2cae3869009e40811ac436a88bfe322dd6ce127f52be29bd7"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok-legacy.controller.ts",
+        "sha256": "5d7bae21922ce924c41ede06e9c97e7980be060d611fd57894ecf848a2fb85a8"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok-publish.provider.ts",
+        "sha256": "850771d8496cd5de1d04980f322fde4a2b8834f6fcd3acb4f1e595e8ab47e821"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok-webhook.provider.ts",
+        "sha256": "efa6c823ebe84c4391e03cb5f0be266eef6b2de5256a8ac68baafe49019b7c03"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok-work.provider.ts",
+        "sha256": "43f720d8763c1e0aed0ff93f6181cc45d6726de91bec9d8986aac6bdc8c69463"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok.config.ts",
+        "sha256": "b1ed5b00ff395eb29121af123616688addef6fab269def3ed06f78e166112d93"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok.constants.ts",
+        "sha256": "1f679b795d8b381c72bda6eeb6ca78c555166161a78027bb190c36cc72e70e42"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok.exception.ts",
+        "sha256": "0d9c348c5db9db1612bcecdc4a405b346bced3ae1dc10ad1a5e0c6cffaee290d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok.interface.ts",
+        "sha256": "6e52d432618384f686217a37492c5bdab3d25131a431e67efe4c2e46b2a34fcd"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok.module.ts",
+        "sha256": "88d73445e0550f8c5e2a8bc741e110560565f493b2d4ba0a7a0521b715cf9fac"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok.schema.ts",
+        "sha256": "5bf666e74f53f4eb20509db98670d45120095c109d371ab31e8f42de1c434597"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/tiktok/tiktok.service.ts",
+        "sha256": "4b85b9f068a9a0503509d49f19f9328d8d81c4960bebcc625c2b404d196ae229"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/index.ts",
+        "sha256": "e3e2309d075c9281670e5fccdc009c94e83d4bccfb5dde36b067295b9e396f8e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter-analytics.provider.ts",
+        "sha256": "a912678aef29af3ac2052402965664c655799c575d2c814d562faa61ac990a5c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter-auth.provider.ts",
+        "sha256": "9387bbbac0cefdd75c2b1b0ad55fa908254a7ddd4edf4618771d4b91c7ef3d27"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter-engagement.provider.ts",
+        "sha256": "a46a6f12d9af172191a048e9c71ec1e194cb2c43f54345c7737eaa5b6ccddd9d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter-publish.provider.ts",
+        "sha256": "848c9fcd664712e33c229e3142e7ac27d61b25de93433d0413aafad9a23d70b6"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter-work.provider.ts",
+        "sha256": "cc5436e12b7fa01c356b6a172de8a7b3eb3ceb75558c11199bcef650b5e0a6bc"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter.config.ts",
+        "sha256": "2ade355b0ecca2b12fa1fd484a2937abb17d2cfbaae587b879f5e65c3b13c578"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter.constants.ts",
+        "sha256": "b03409c2f70d1dcaa80449a8a0caf33202a322da6a86c9552ea929472bb1bd52"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter.enum.ts",
+        "sha256": "cd830b355602564a9296cbe13acd5d84ab7dc94898e36bd65f717051a9f080cc"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter.exception.ts",
+        "sha256": "e848238f1fed5bd1a4896e86903dd9fc7381726abd979b7008d75385dbd13734"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter.interface.ts",
+        "sha256": "ea463fd9e0941f7addbca5ca0e5406ba0b8b35e6b611b61f99292c3c654bc0d6"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter.module.ts",
+        "sha256": "eb2003a41ecc193c0d28b09f30f368d1923dbe5f92b06b16ac5aab226621448d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter.schema.ts",
+        "sha256": "0b9b40f97be077c2254a76b6ae4b94672f65ad4e6b67d0b4bd01ba679f2178fe"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/twitter/twitter.service.ts",
+        "sha256": "00bbfed5c59f8fcc55bcdd570161a8385913a5519070d7ab15a138364162d82c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/index.ts",
+        "sha256": "87fad369a79c5f28ea86d70b111251b5af20caf722ab9f67ed7525305fbe144f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-channels/index.ts",
+        "sha256": "ed2d8f6da98126598e528da96e4242fb346672b18c81f8ce2e535d53fc5e2a18"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-channels/wechat-channels-publish.provider.ts",
+        "sha256": "dfe54dc5c7cb0bd37c96afa5be33538eab5486edeee023d63365570d13505f50"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-channels/wechat-channels-work.provider.ts",
+        "sha256": "ea6e14a786a0394822d48e8380eedefb3b8b6b424bb7b7d716d9170926bc9ab7"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-channels/wechat-channels.constants.ts",
+        "sha256": "234a244754df6fbe6a4c66b5716b1abbbe95dfd45e45746604ba55fbeb091393"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-channels/wechat-channels.exception.ts",
+        "sha256": "8bf2188c1224c636c2a1314a6bddfe922c3a0f449d043b6ba9dd57d0738e2111"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-channels/wechat-channels.module.ts",
+        "sha256": "dff29439cf9a3458ce9240c2466907a0e08810e17083da25bf011498ad00e57a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-channels/wechat-channels.schema.ts",
+        "sha256": "261acb2943e6551342e3cb1b57d41a6197a4df72455f99eaa851c2bffefdd15f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-msg-crypto.service.ts",
+        "sha256": "fd720c3319c5e451ca06b01623b6e7968b23d7ac502eeaa7a9fbe478ad6aa079"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-official/index.ts",
+        "sha256": "146b8c2c3457fb344ac17dcbed30f89d96e911447af47951ee76d42ed0c572dd"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-official/wechat-official-auth.provider.ts",
+        "sha256": "4fcda09d5ef72a56ef1f2989162b51701571a4b14d7f6bd5a1dba2021d289c29"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-official/wechat-official-publish.provider.ts",
+        "sha256": "6fe3691849aac71c7066f3ca0f29d363f1c90c08486575c56edfef26e6ec840e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-official/wechat-official-webhook.provider.ts",
+        "sha256": "5635cab07f1677f4306463294fa817bbfe5e327070b335cca8c9c5d1bb4a8c72"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-official/wechat-official.constants.ts",
+        "sha256": "7cfc715925f3b78bed36104c200a453090bbf00e6fabd6922755cb7a1d14af19"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-official/wechat-official.module.ts",
+        "sha256": "87ff2970bc61a4845cb4a0b63115c3659b18361972a76c9ccc7d072065b3e4d6"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat-official/wechat-official.schema.ts",
+        "sha256": "9a2f23c934b898969b9048842dc1e09880b7f555750a22476ffe560dd04bf4ad"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat.config.ts",
+        "sha256": "121132c67fcdcc98cac84638f90ad9cd3ba8cd47ef052ffb5ecb27ad49c6c815"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat.module.ts",
+        "sha256": "4fd5f8ee119661359e2e5225174f562d87e66745ea20ff05130bfdacac2ee692"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/wechat/wechat.service.ts",
+        "sha256": "d6b2078198c1135482b69004810f7abcee87d9de51670520333b9234220f1b19"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/index.ts",
+        "sha256": "ccedfe8a4daed1a663892841d99637679a012f3a5c277df4b45ab5d4e91976c9"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube-analytics.provider.ts",
+        "sha256": "bd76d19ef31c32da5dae9295ab866bb6ddeb90f18d80eb314ac1ca77512e07cd"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube-auth.provider.ts",
+        "sha256": "4f342c5657fe3327f119b3cdf1fc897dd90d4304c8f095e2216024c0e4aa5f7e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube-engagement.provider.ts",
+        "sha256": "d34ff062a1fb46e376bc13df8dadc5bdd4c5500ab2cb7576976b4ddc79dd2cf8"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube-publish-options.provider.ts",
+        "sha256": "a3104d28b7e07d6fc28eecc03e7438914fd57630110abef72b86fb688ac93a0c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube-publish.provider.ts",
+        "sha256": "3c5a699885d84a88438949bcfaee2c431da603ef860ac5a38889198aaf97c692"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube-webhook.provider.ts",
+        "sha256": "f3370024537e7cde0349f91163fee7b00c265aed9ff347307141f2907deaa29b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube-work.provider.ts",
+        "sha256": "40cce87545a47195e534feb1c12340f7181aadf4b765a37a4b61d72040f753bb"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube.config.ts",
+        "sha256": "dce734de96e98034ccfc2663df9e163612bf9baad6f1daf766810110525e5bcf"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube.constants.ts",
+        "sha256": "d3baf24f076ed48770d643cecb6dda933c7511161ddc2fce8145e56be72f6478"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube.exception.ts",
+        "sha256": "9f112417d4f29c60ee7e0bbebec667c3a1b9dc0f99d7654556bc8a43f3a4cbc4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube.module.ts",
+        "sha256": "fd94af39f9bd934eae4fd2152c8664b5bec29816e0b3fdb6b1acba9996c1fce9"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube.schema.ts",
+        "sha256": "ce81f3346c3ba8484603c840c0ad0c9b031c111e558fb70c5b6af7cc303d7fca"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/platforms/youtube/youtube.service.ts",
+        "sha256": "839181e17f53fc2ce25efb4cd67b702e02310a45172e695f26c15d1f0a3aeab0"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/consumers/media-finalize.consumer.ts",
+        "sha256": "6f183c2d580500ff7d88da792d6a55ac598a2c6e8ed681bf9517215ca411142c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/consumers/publish.consumer.ts",
+        "sha256": "f9946fbb433510f746c32d32d96843e83c3e32023d4898077d60dfdc277cb2b0"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/consumers/update-published.consumer.ts",
+        "sha256": "aea5ad60b9aa4f05c41bb08c9a56f6f3412f0fcefd9a31ec65428921fa649836"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/flows/publish-flow.controller.ts",
+        "sha256": "cf5494bcba07249761881ae2c1212ae54ce39ccfa853b8a8d42863e03e5c87fb"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/flows/publish-flow.dto.ts",
+        "sha256": "6bf22daf5e7984dfd913ca425b740020bf5afffd0039815d5820880c3694c3fe"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/flows/publish-flow.service.ts",
+        "sha256": "f90ec5999a0f31aa8467f4d10ae5fac51e3d20f0d0542523841873c2ee8affc4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/flows/publish-flow.vo.ts",
+        "sha256": "3ddef0ef3c892cb87843cc871531578f07ef50495c4ffbdf7626fda0c6edae6e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/records/publish-record-read.service.ts",
+        "sha256": "3f48523c1037d52567a0212ce5b7530a0f84546f036f2f58b809ad4a70f4a7b9"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/records/publish-record.controller.ts",
+        "sha256": "7659972abe84f4e356e901dfb036bd73365b07dba058695e99393500e3ddaaa3"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/records/publish-record.dto.ts",
+        "sha256": "e6f65d44ccfac06ed40ce2914021514c8c0b27635dd15ff8f01aa0cfbca50450"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/records/publish-record.vo.ts",
+        "sha256": "3b947f074efc1f1e4d8fea37da37de1f6d6bbec4245e2ae09872aa88e7b23250"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/scheduler/publish.scheduler.ts",
+        "sha256": "79c513f8519c36315267abceaa23088f52992d9c8fc24065977ac2fa1a05c5f6"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/schemas/publish-content.schema.ts",
+        "sha256": "341fb6f9802c297a91fcea00c463677b76dc318df5eb15f2416906ae88d07750"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/tasks/publish-queue.service.ts",
+        "sha256": "b6bd0afe2f42382ac214f2bf2c84418048539acc229d9dbdab4f8193e9b0be04"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/tasks/publish-state.service.ts",
+        "sha256": "5a3a02b61bc7582598c32db0a76c013bedbecd06fdc0103f63ad98106b5a034e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/tasks/publish-task.controller.ts",
+        "sha256": "8604b32363198d383191b064a059013a6961978405f128d64b5bb957500b88bc"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/tasks/publish-task.dto.ts",
+        "sha256": "380497382dd560d025b31a4e015fad286d237e9d942a1a0ed18f3872dbea92a2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/tasks/publish-task.service.ts",
+        "sha256": "d0fe4f187136d7295624c29d8374bc18f5e8db2f47b6828da268a691830fc9e8"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/tasks/publish-task.vo.ts",
+        "sha256": "549409d00f78c5cd7fb7e4c8fa1443b15c9f6a95663cc44b9f3afca683410f55"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/publish/tasks/publish-update.schema.ts",
+        "sha256": "85956622d1d070d3dce8bb05c0a1d0c7cf77c3f27fa249f802b5121b6c5dd665"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/relay/relay-account.exception.ts",
+        "sha256": "e0f5ab7692d56d778bfa658dfc6da4cb47f3e0d8131b97ddd22719d7f14ad259"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/relay/relay-auth.exception.ts",
+        "sha256": "683238caeaa47a239f25a7142d63c1df74dda40fff5fccffcef8769de3814333"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/relay/relay-callback.controller.ts",
+        "sha256": "dff680f85de6c0c9ab553bf8ee1519f9e5c3014a628e5a8006704585f15eaf98"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/relay/relay-callback.dto.ts",
+        "sha256": "ba478010dd51ed71119201099be46f581ea2575e52ece245a345dd1d58a2c558"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/relay/relay-client.service.ts",
+        "sha256": "ed37b6d3c54abdc3c0114a460e58ccd4279fd6fe09a0e0f74470f4804bdee383"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/relay/relay-exception.filter.ts",
+        "sha256": "7b9d614600095b1e0f2c371d56800a4fc386d8db0ac36df7c009ce7b868f05ec"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/relay/relay.module.ts",
+        "sha256": "a6c7078dd585c3296127a086fe1566553f5e780b7c02fe65e3e825272eab6a27"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/utils/auth-callback-state.util.ts",
+        "sha256": "a5e7b06695118ee973e0368188e3e4d41d24c5347608d7a0f6c02e764c1e2176"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/utils/auth.utils.ts",
+        "sha256": "dbd79e76f2b5260dec6b9d85352f7b8df8d85957f75117156760845548224dba"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/utils/google-api-error.util.ts",
+        "sha256": "56b61469bc642420eda6c334a0f0d3f80b8473a9681ec9e96730df1097028133"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/utils/meta-graph-error.util.ts",
+        "sha256": "40e9265ebabc643e879e391a31fe521fba19d8204459a8d09e5549b3429c791a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/utils/platform-error-classifier.util.ts",
+        "sha256": "bf5ea787d560f283c7ffcaa5b182c07f34190e8b8d340452eb7479ba95b4f438"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/utils/publish-content.utils.ts",
+        "sha256": "6512820d540ecd62cfed46948c047061514451add90dbe7a9183a6ed86f887c8"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/utils/wechat-error.util.ts",
+        "sha256": "1be217647e4fdb40e5dfe616c36dcf6e8208e03486a4718f08012a91f3cb5f64"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/works/work.service.ts",
+        "sha256": "86ac372eafeeeea6513bafa7bbc598b79b9f383b6afc71425e3a76aea1889d36"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/works/works.controller.ts",
+        "sha256": "f6557dcf4bc69de10f64985c416ebbb8f8840728ca8a73141f4a5a50790c3c63"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/works/works.dto.ts",
+        "sha256": "659bb693e634d55b8a6fffd6033a8d8360e8e784798ccd6fb9b009af30ea00fd"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/channels/works/works.vo.ts",
+        "sha256": "852573c850ae5dd09845c0a3ede5aa12ce4fdd9376999adfc473ca2ce3b7acf2"
+      }
+    ],
+    "content": [
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/common.ts",
+        "sha256": "49114c690cc97ac3e64381f14cbd359fded9d523066218dfb80769c856b2d7a1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/content-mcp.module.ts",
+        "sha256": "72037a58795d459fa3c39f1935301f6164192bcaea48c29909371a3d73fda9a3"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/content.mcp.controller.ts",
+        "sha256": "bd940f1370d13d3bf268ed5f96ed04620b7ff078cb355e02c23ff0d412684a75"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/content.module.ts",
+        "sha256": "8c85c884aafda9ab8bc47c6b7043fb122d35b308eaaf0351c1b7983ea12b1916"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/content.vo.ts",
+        "sha256": "e4c215443498ddfc17af0843cb79dd628d47fd894f3646c8046c623b216514f1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/material-group.controller.ts",
+        "sha256": "c0b09dadea6089598b58404bb24dd4fda7ee96d9b95a9312bbb54189d602f9eb"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/material-group.dto.ts",
+        "sha256": "f82777144c31cf7cc594c3645fe406480f65b2cd4f7eda753d6be7c96e5da765"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/material-group.service.ts",
+        "sha256": "9aca76e5f27e35eb6f71f51aa482735ffd1e60046ebb7b20a5af3a5c25650817"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/material-group.vo.ts",
+        "sha256": "965b8ce720f0b200aea1b3eb32916e37d4fbdf4dd7c2b87c039dec4745bd8ada"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/material.controller.ts",
+        "sha256": "9df0f7b87cede5959a241354a85f47b7ca6dc7671f7e316aba598b8f2270255d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/material.dto.ts",
+        "sha256": "ae9961ab399c5a4a288ae694acb045b39e75f22f738a26f55bc05db8fcc3ad2f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/material.service.ts",
+        "sha256": "29e8fcd13db84de523754bb40e5b3e830a55d2fd9f2e6b015f36d6df282e40fe"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/media-group.controller.ts",
+        "sha256": "e94752b6cfdeb50812f9c00af60534e1d1b14ed53b9e8e561962d51f993ad85e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/media-group.dto.ts",
+        "sha256": "62195a3618ffea6afb11feddef9c61834effbb5f384595b54ba1974a0c8898d8"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/media-group.service.ts",
+        "sha256": "4084b194ced3f68125e6971808d630c0c542ff320bb940b0e023a6c84597a171"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/media.controller.ts",
+        "sha256": "b683ec1fba3344d7d8077115d2d3d483e4f85249dd792b15de8a78b72467a8f4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/media.dto.ts",
+        "sha256": "77a4cb06cb161cb1fcfa4953919af82a14829a854f61b1436776777582d51267"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/content/media.service.ts",
+        "sha256": "5d830357cb52d6d3208ca21f90132d7c8fc111ec78ba24b6917efe1cc795bbe2"
+      }
+    ],
+    "publish-record": [
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/publish-record/common.ts",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/publish-record/publish-record.dto.ts",
+        "sha256": "59fe8f9261f39ee9d6ecce307230785186aa799bd96ec4c04a58085ab37d3776"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/publish-record/publish-record.module.ts",
+        "sha256": "59e26545e9ff170c8522ed240f4e0791de04c205fbdca8c9e71ab2928e8ed899"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/publish-record/publish-record.service.ts",
+        "sha256": "5bdac4eab6229a471f81f97df72abb2ee94e01c5275356716d2efb082d9cc4f8"
+      }
+    ],
+    "short-link": [
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/short-link/short-link.controller.ts",
+        "sha256": "04fadda7c632fded2aaad086144d924195a7873fcf1a8dee6a42c4f4d3f397c4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/short-link/short-link.dto.ts",
+        "sha256": "762799433cd4f157d15290cfc3a64ddff4525e3ea32ecbddfc45d489d6b6003f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/short-link/short-link.module.ts",
+        "sha256": "794e05ef256b121b204551a20112553683b781e3ef24318c9baa62d6594a6031"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/short-link/short-link.service.ts",
+        "sha256": "d716456615b902f61bf9fb9ee86e26a56fdf4c322a55c7d9efaf272d4c5ea718"
+      }
+    ],
+    "unified-mcp": [
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/unified-mcp/draft-generation.mcp.controller.ts",
+        "sha256": "7fba24348bf68562ec58e899d0d9285ad8fc18c14781b1884ffedd60f9d7797d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/unified-mcp/unified-mcp.module.ts",
+        "sha256": "800d0e7b0576049b34edcc0e662542af82798dd4e9e92ef7c68ea07acee8a225"
+      }
+    ],
+    "user": [
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/user/user.controller.ts",
+        "sha256": "547e563fb2411cd20cf084c984a9a3171bdede4702119834649ff1d4066564bf"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/user/user.dto.ts",
+        "sha256": "866e291ee00f2201eab56a6ee30192ef6d1d43031a5b99574719d6cebd411c7d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/user/user.module.ts",
+        "sha256": "1e08f20233b571480cdbb6fde272aa1e2fc65d8f9ad37aff252a2c10b6089c1b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/user/user.service.ts",
+        "sha256": "c90153b7446919ce78507b1d65bdd0535b1e8994cc8ddff41514f3ffde89c558"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-server/src/core/user/user.vo.ts",
+        "sha256": "65d6d9cd3c0995ef90b76a4d125a0e3c1a8d1804303278282f60f012e87434e0"
+      }
+    ],
+    "ai-service": [
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/agent-task-timeout.scheduler.ts",
+        "sha256": "6393b1a6ffaa49a4dedb2e85f6f2b4af11907e9af2f3f03a87d648db17bc20fa"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/agent.constants.ts",
+        "sha256": "fb8713cbab68dad1448a461baee8f6b9bbec4b4e9d0059e41e4de9f505625ca4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/agent.controller.ts",
+        "sha256": "88c8b40fda2a5fa3f23527bbfe814f44a18b1c3e377b2ccf185ed879eaffc452"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/agent.dto.spec.ts",
+        "sha256": "de4532e091f2ca2e5ebd7cfeba77d15991312dc922899aecc9b3fd154871f585"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/agent.dto.ts",
+        "sha256": "61a849366576a476108f0816eb9a0fd641fee834699cfcbe015fccf0e622b29e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/agent.module.ts",
+        "sha256": "39bf0b1795e54cefccbeb739042475af91032bb73142bce0e4244ec767a27f41"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/agent.service.ts",
+        "sha256": "7532b6287af092542aa12895fffec6779cc7b39c242c09a5f2ba82f5f16e15f8"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/agent.utils.ts",
+        "sha256": "7518dc1db1ff1255a43f643f501050e4c72c677d91702f0bdf1aa1375e31111c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/agent.vo.ts",
+        "sha256": "80686c01ccfa9cdcee3e98e7c04c3b0bae7d1ac6c33db2a402abc662d73caae7"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/claude-code-router/claude-code-router.module.ts",
+        "sha256": "a98a7ae3205c9c5ce1c556b5957f49f1b617d4091dfcebb27e4ebef77d0b48b9"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/claude-code-router/claude-code-router.service.spec.ts",
+        "sha256": "bd7bc2f01a9f2aba9b891297dbc835ed1f077d12635bcfa325fe1b83cb8732b5"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/claude-code-router/claude-code-router.service.ts",
+        "sha256": "e19c94c88e638ff15eccf247b1254d3f0cd48dadbde41efabaca5d7f32c717ca"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/image-edit.mcp.ts",
+        "sha256": "14284608131f40ee9c37b1a77b23aebd2667324d8c5d097827b315de0ac9df61"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/mcp.utils.spec.ts",
+        "sha256": "add5a691bccee469f2b83da21be5d6482276816227ab60d686ce86b01ac5250b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/mcp.utils.ts",
+        "sha256": "ae77a2e645f1abcbf6670318cf33b532b0d063a8f5fd529e26ae288be43ccf4c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/media.mcp.spec.ts",
+        "sha256": "387c08bb3b2003ba4acfaf12b9a632a0b3a9bfcbaef03c384baa9a60d19713b4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/media.mcp.ts",
+        "sha256": "f47872200cda5d8022d667ed7845d9af1b3f179803e8f4e6773991ddba457b53"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/subtitle.mcp.ts",
+        "sha256": "83690eb71a50ca53e9a64e035d0831b810fbeeb966c62b3d3ecdca8eb458c93a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/util.mcp.spec.ts",
+        "sha256": "2f355ecd376191a89ae9018d8f0ab29011aed4c81d2a3067a238012bb819a48a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/util.mcp.ts",
+        "sha256": "af7df5716febb1cfde96abeab70107a6ad2db5aa49ad98e6c1fc6fef5d8b9468"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/video-utils.mcp.ts",
+        "sha256": "a5d97433b6338851c31d5f53cf4791a887a5a46e6ee30d0faae0beb98b4acd14"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/volcengine/aideo.mcp.spec.ts",
+        "sha256": "af9373395c2c35d799325c921ba997a2303c6b3f3a6cbf7e870cf1660d72d325"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/volcengine/aideo.mcp.ts",
+        "sha256": "0e4d57a078c23d9c70e9ff71192d1de7a9110f94114437fdf48ceae15c36b3ef"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/volcengine/common.ts",
+        "sha256": "ea02d959d75cf0e226e0c45347c21ef4b9ed4db95ec97a0ba12ecc622bceef2c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/volcengine/drama-recap.mcp.ts",
+        "sha256": "924b2c3f5835addb09a3d06899c1255a79ce7c7fd476029c46b9607b5bf6ea49"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/volcengine/style-transfer.mcp.ts",
+        "sha256": "700e7f96a875ab06f88b1764e8b53f160ca09d238cbe2faa03d08f685944579d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/volcengine/video-edit.mcp.ts",
+        "sha256": "dde49393a583fe5aca7bc00834e3c38b6862dfed64a945f53736cca8fef68ffd"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/mcp/volcengine/volcengine.utils.ts",
+        "sha256": "373d59167b180d98499eb7883e54e498d857c51247c18e6ca3581ae114de306e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/services/agent-runtime.service.spec.ts",
+        "sha256": "7992a39d6cde5e050eb78461a8bf9ad986175a94826e835c110b3967290bd249"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/services/agent-runtime.service.ts",
+        "sha256": "9b184fa7f5bcd7f8ac279188206bdb3c9eb69b0b4496633720ad3e5fdca62b26"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/agent/skill-init.service.ts",
+        "sha256": "7fd10f75f408aa7ca8fecf70fba6afcb543b84b7b04ff8fce8f7e6726be959cb"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/ai-generation-retry.util.spec.ts",
+        "sha256": "e05f3b2fdef26b28fcb708e392c46c251593b0f6534bbaa5fe7816b360932630"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/ai-generation-retry.util.ts",
+        "sha256": "49a2deb6a88fb8780a2ec02ad06840ff94da11813c1a4505b191a445cfc6b3e3"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/ai.module.ts",
+        "sha256": "4ea44d8b924fc6753902e0ba92df9cfd693660809027cb183e8952358d07421b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/aideo/aideo-task-status.scheduler.ts",
+        "sha256": "e7d451e8bccf69e22da7b4ac83175430180a908ceb0b339ae02bc81ed5046284"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/aideo/aideo.controller.ts",
+        "sha256": "f2a37134fe36e06eee02a197b2d12070e6312f298a93702001e349dfad50a9b8"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/aideo/aideo.dto.ts",
+        "sha256": "d2cc38144d7c5c0ef35a52f042c3bcda4684b2bc3f4149ab44d182e4ca8617fb"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/aideo/aideo.module.ts",
+        "sha256": "ba444efb16b800cfdfd9d6875712e691d5ef4ea05052c9ed72415316a597e1ad"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/aideo/aideo.service.ts",
+        "sha256": "77572e7e734c2f3a28349d17d224aca604dcd1ee7c5e110cefbc4d168394ae1d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/aideo/aideo.vo.ts",
+        "sha256": "a2240e7246bcd3f801c60112eee0876512cb23e0aa6244c4fb62175ee4bdfd44"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/aideo/drama-recap.service.ts",
+        "sha256": "28a80e3bc5938b83e39692da64b9d68d7ed923c900efbfbb247b79ffee9ff862"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/aideo/index.ts",
+        "sha256": "70a8ee8f5ddd381a269a7310e05e0acf6d896d945622bfb05ed9e2214b5ce39d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/aideo/video-style-transfer.service.ts",
+        "sha256": "b9a634b7e0e6a4c77987d16ff62f1ae7274d28e38fab6e86009e32cfe270b0df"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/assets/assets.controller.ts",
+        "sha256": "b3476425671abec901081a8489184ca551cae40f2fde98bb97c1a8b7a60fe22d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/assets/assets.module.ts",
+        "sha256": "4f52799e98aec1d40eb2ebba15c542c46dde9a2070bdc7b55d091be7e5dde4ca"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/assets/index.ts",
+        "sha256": "ac29fd519fb45accabd90526cdda24585c8966c3dcc8bd1eab41e26b58a929b7"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/chat/chat.controller.ts",
+        "sha256": "2695201f6dbe7e06a89aa988cbd1eb443b2d4a724543530322003d5e7a001d1c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/chat/chat.dto.ts",
+        "sha256": "8b3ea4a05fd1620b9d8d6e38308cb6c6838610593df225e2c21dcf8a9faf21a1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/chat/chat.module.ts",
+        "sha256": "e55e36033797b34ce36e7d03b23c09159f1a4ddc1a1d8486123a64e1fe5b11e9"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/chat/chat.service.spec.ts",
+        "sha256": "7992a39d6cde5e050eb78461a8bf9ad986175a94826e835c110b3967290bd249"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/chat/chat.service.ts",
+        "sha256": "6b22d5b7efdabfed53a5cd95bf30054c385b8c3a1c71c4ef3c02e7bede11cbf1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/chat/chat.vo.ts",
+        "sha256": "375cacfdc8d0d7cd9b8ccd7566981a95c30ccd5b6183de12184008fce98c5230"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/chat/index.ts",
+        "sha256": "3782777a8521a8e53306ccad596dd51f0c36d665f1d0a4e37d9be8ecc8e4040c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/image/image.consumer.ts",
+        "sha256": "f244cc565eae69a64a3c9b91dd81df4f25acb2148c4d3ae007055491b8504ee2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/image/image.controller.ts",
+        "sha256": "5e83d71f8f5a2e72e0ea971f15a900a131df7fbff7657f119f3081feeb95122a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/image/image.dto.ts",
+        "sha256": "f24cc9edb2de9863bfeac3f5a91fc692d97f7e5be4c652b757fd18bb04435ad1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/image/image.module.ts",
+        "sha256": "e32f23d2b185e801d643179aaec916e947be2d2e0811317602f079b4d6d08334"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/image/image.service.ts",
+        "sha256": "cec0ce4fbb42baaf1fcedf638719ddc8dc07c0280882eb0ae9229db1d211e017"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/image/image.vo.ts",
+        "sha256": "caeb5feccc388d983bfca84d89ddd106a83a13624cce27faea8ea549772dc384"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/image/index.ts",
+        "sha256": "2aa8b9e1f589c635665d3a9046ef0ef524ecfb908e9bdcb09aed62883d46ba72"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/dashscope/dashscope.config.ts",
+        "sha256": "7c2a55c719fcb5c8e048e2c4af72b88cab31943ff0e948a1d92ccba89cd178d0"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/dashscope/dashscope.interface.ts",
+        "sha256": "f92758e0637c55fa1d430fa05ff2073a98f636a8c7ed84377a32cdb231ee1962"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/dashscope/dashscope.module.ts",
+        "sha256": "a15a50c9b444836794e9b4c385a46757c75a8b23ba5dc74710700de76159cd32"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/dashscope/dashscope.service.ts",
+        "sha256": "6bd0ac1824f8ef0852eaa859ca8e171496dfea812dfab351c66720c11abd464a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/dashscope/index.ts",
+        "sha256": "90aff9c0888a46a398be73608b8ff8d35bcba5ba7a6693d50e911623e7bbace3"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/gemini/gemini.config.ts",
+        "sha256": "6cb32721a8e9f9818d2eaebdb4a7c842668b84ce073d280fedd2a29ee8af75f6"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/gemini/gemini.interface.ts",
+        "sha256": "98b8be898ed3a46e2ba208ce6963f7c72440680f98ebbaed05723b8e71dfd4f1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/gemini/gemini.module.ts",
+        "sha256": "6a7ebbe2da287d547df4b0aca0f2521974ea0836015a89e8c616c588abbdd055"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/gemini/gemini.service.ts",
+        "sha256": "495fc900f4a663f312436e8782118c07a29a6da84903f172eb15104d77164e2e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/gemini/index.ts",
+        "sha256": "64cbf8d9d42ba6be9e87284637e73dd3e6321c05d75642c3a765bdcaf444e880"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/grok/grok.config.ts",
+        "sha256": "b238b9a4bba04f7b8d3d6225ab802617ae7f125c012a93bcd4391d156c2d3752"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/grok/grok.interface.ts",
+        "sha256": "48b9241e79233dbc96a3ce1656ed36a416e4e6fa50b702c027a2dc6ab7f14b8b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/grok/grok.module.ts",
+        "sha256": "f44a9af2e3282356bf514d86e381f1b7ee4f5aac8b6897c01fa06cb27a7f6c82"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/grok/grok.service.ts",
+        "sha256": "e397b47a61478d7f198af0e1ac9b3dc8f6759b019c990c8fe5b82fcfeee6fe50"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/grok/index.ts",
+        "sha256": "eb122caf5aa523c43e27dd82d3f555d0483b2b94e0a2aec05a4fb9a521fd4246"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/openai/index.ts",
+        "sha256": "39cb617505b4afb75d3de20bf5cc395f60fa9fcbac03cafbf0167d3d81b4c518"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/openai/openai.config.ts",
+        "sha256": "7ad3e9978bb40f865a29ff31d83d9eddbe50867dbb7461f05d100781ff450e52"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/openai/openai.interface.ts",
+        "sha256": "9ca3e3975b21a3cdf12619b55d489e3ea67663d6be733fe5c696a16b3abecd7d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/openai/openai.module.ts",
+        "sha256": "8b424b2aac4da9d71f567e228c29605b0038a571b1ebef89cc51b383793a7a7d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/openai/openai.service.ts",
+        "sha256": "0586087b62ac84e7bf0abfebdfd147a7ef5ec19c2d6a7a36cb1a98013d0f9d81"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/relay/index.ts",
+        "sha256": "0d3ea3089960aadf3c6ec77bb341791fddf2969dfbe9d135095d24b4d04c3f64"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/relay/relay.config.ts",
+        "sha256": "19bd3f88dcaa5a0f6ba2d1f26057e3725ee1be429eef9e7200e211f15d46338d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/relay/relay.interface.ts",
+        "sha256": "2ddc9bb3f37ec723b3fc439d553e23f18eb04887b2552b19b99116f3b3b9d0b2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/relay/relay.module.ts",
+        "sha256": "db7191bb929a04fb6d20982c35e26a06e9746bd52fee4f7d5e748306d14dc49c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/relay/relay.service.spec.ts",
+        "sha256": "8d8a7fad06196755d7446e286402de2da2c41c39421a6da808ccd83931c17ec7"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/relay/relay.service.ts",
+        "sha256": "3aef5ce1fd8e9e9b77e3580716b1f540835367bc8549c6b5ff08faf35233595b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/index.ts",
+        "sha256": "27c97834aaa4752dff42b8fd49db852c4e3cb25b39e161ef04a0e247756af373"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/prompt-parser.ts",
+        "sha256": "919dffc61d7e3ec5993ed0eaca0c6fd3bc0f01b73366fc0236b892bfb1a62816"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/services/aideo.service.ts",
+        "sha256": "413f8606fcbf23ed1e4741eee60149a4c7124510626ebf10803f03205dabe76e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/services/base.service.ts",
+        "sha256": "60c966d6f366ec56974f58c008491a90703a049f6a906da3d07d6e8ef9295012"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/services/direct-edit.service.ts",
+        "sha256": "7906e28e6aeb430fc872011240921a27380a2eaecec64c4554dd48fe0d6ecbca"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/services/drama-recap.service.ts",
+        "sha256": "3f49fc0952b5725e22804543ce8031f690c3a6f208de8513845133a1fa4bb5b2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/services/index.ts",
+        "sha256": "af0867b5092ac031fe1014a3d8f5df0de14e9193f63795044ced353664654863"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/services/media.service.ts",
+        "sha256": "09c3ad92cb54164c6c9bbfa07829ab20d8006ecdf317d792815da2be3bf0ad97"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/services/upload.service.ts",
+        "sha256": "852beb2a5e8bd09591b73be8416f2f9ae3ea89bae91908b84187cc3f7701de0f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/services/vcreative.service.ts",
+        "sha256": "b42a1c488cdb1b74075702bc61856eaa58344d7447b316215090cabec6f0a359"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/services/video-gen.service.ts",
+        "sha256": "2b0119ecb909d37459632d59ef5a1acf840c2a50bb6de5e8c00713d8998ee79b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/volcengine.config.ts",
+        "sha256": "0d3024a2b445ac0a2bab87b3c1b2c91ccc40d694efc4e5165300e78af960e6fb"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/volcengine.exception.spec.ts",
+        "sha256": "97a7075f34bbe0937fecb6a8a623bcefb33f5c069b2a5e764d404f6ec189c9ff"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/volcengine.exception.ts",
+        "sha256": "e5c50ced3106f0ef2f53d27c0216d9242b1d7d42c5b416da8539a507535451fc"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/volcengine.interface.ts",
+        "sha256": "49bb8b48d6c6d16c0086212e8f0b5e82a4c92e7f42fd5baaf224a17dae3f3959"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/volcengine.module.ts",
+        "sha256": "7884b435ca48a51601507db3d2aeb1fc826bfa0d4283ea3b848588d7fdbeb985"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/volcengine.service.ts",
+        "sha256": "422ea97b72e52f38b7e79f1da4a7699f07c38a6d0949261eb18225459aed3b0f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/libs/volcengine/volcengine.utils.ts",
+        "sha256": "d9add296addec6fc8c018a5bc41f39bc29bd7f60266d0ee708b62f868fa92fd1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/logs/index.ts",
+        "sha256": "f61727eba98abc58bcee0ea180e18841944fa97500546d71512a67050346dd51"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/logs/logs.controller.ts",
+        "sha256": "4db64aa36f33181a1b6a4e74c59be0a1413f56e1e1817c60f4a50fc28d763442"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/logs/logs.dto.ts",
+        "sha256": "f83c1a9ce7ee4c2cb7fa67c79a1fb5a5e4a00e4ff5b7c6b2047a1b8e0b09e89c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/logs/logs.module.ts",
+        "sha256": "3d7a1ac2958d643df501fa03796e90448782e90a03eef567263d2162eb569180"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/logs/logs.service.ts",
+        "sha256": "9e5f420a233d375d2ca557855e6dd482b6d268b74d905d935e4a391a4aaa0c5f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/logs/logs.vo.ts",
+        "sha256": "cf31e7cb2ee6bdd2716f41247dbbbc6a503e0b0fe172ed5a2395ce7f0c056a42"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/models-config/index.ts",
+        "sha256": "722b55efc11da364c318f4bfa226b024dcd4786f8f3e280eb24b958f01b18492"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/models-config/models-config.controller.ts",
+        "sha256": "c478f48359bebacab93f56363d6c2f10782f4602ea68801604dcf25bd524aa58"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/models-config/models-config.dto.ts",
+        "sha256": "22fbe31cb8d598eda4a7e78b1d1b8faad5d07f8906bd7266b87cb0c16a39b21d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/models-config/models-config.module.ts",
+        "sha256": "05515448fd404a2bf8bc4d982a1d450db2e9509a48a0bc45e0f0f488bc82f8c4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/models-config/models-config.service.ts",
+        "sha256": "edcc4a8c1cfad58db197e904369f624f7f72ef42e78e24258f234f2388e3dd2b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/models-config/models-config.vo.ts",
+        "sha256": "2023b1a0b7979c5422e909b9654231b855da6656c9a538f8e64f5417677863bb"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/relay-media/index.ts",
+        "sha256": "ccfa070341f3ef6b70f0b767164d5107dd8e8608e5ec4de8aae7b7a1f2564f5a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/relay-media/relay-media-resolver.service.spec.ts",
+        "sha256": "cc60618a57e85bedd4d36fde67659601335b6c52c4b71bf7614b58ee51b46af2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/relay-media/relay-media-resolver.service.ts",
+        "sha256": "1b2b30ad23cebfd419f7d4d27c01c17e440392e6929439ed389d9fc02e540708"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/relay-media/relay-media.module.ts",
+        "sha256": "bd6083d20c2efccb7edc14c28870edcd705d7e21e0756226704afbc56952133f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/dashscope/dashscope.module.ts",
+        "sha256": "072c73790895738deeddba417f8676049338569fc5908f1631994c24fc7e8bf1"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/dashscope/dashscope.service.ts",
+        "sha256": "628d0204950fb294aea24a0f260631566490b116ef3633a7b7bdbb3396a1d71d"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/dashscope/index.ts",
+        "sha256": "76bf00ad18702ea5b00d0683bc5a231e452d0c5bfa1ccc212c83df090090e792"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/grok/grok.module.ts",
+        "sha256": "245c39c15fa62b1b0e9c28fa7c9c10dc368f730af9cae27e6c68b9b695732da6"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/grok/grok.service.ts",
+        "sha256": "16a398015212a3250ddd7ada3a149876c1fda8cefb1f865b288dc06145551420"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/grok/index.ts",
+        "sha256": "48cf3bf1f8612b731bc9e871ff9345067befadf56860c861b877333fa2e6a7bc"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/index.ts",
+        "sha256": "402d8aed967f094c93daa40d07356c67db53a47aed86e91aed97ff37b2c91df2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/openai/index.ts",
+        "sha256": "ae457ce6ac3797c83e63c71f25bd609092b23522a599672ba870279ca8816355"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/openai/openai.controller.ts",
+        "sha256": "035e0ddc5000f0c75041dbd92c0f5121a562173a2a75126da9a8205ad391a2bf"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/openai/openai.dto.ts",
+        "sha256": "23fe96b4a6c06cf1e11b47c3349afef71c765340774b11e0d65b33d0ec15f3c7"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/openai/openai.module.ts",
+        "sha256": "e97b3cfbb4846c27d3433a163466783ae652debf0653d3d673889649578a6994"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/openai/openai.service.ts",
+        "sha256": "78bff55b58f3147e091419b455c83854b050f0ac05acd51115ffebe2517a5b38"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/openai/openai.vo.ts",
+        "sha256": "8dfb18b58c4ec127496713a4cde9899fe02c039df4be254839a589ede33a2fe9"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/relay/index.ts",
+        "sha256": "290eb0e579bef7c9d078bf69e301bedc13d078cadb77f7e4e6a5aeb3f9cabfb2"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/relay/relay-video.module.spec.ts",
+        "sha256": "47275ef3a06785cc168d5afd2e55a1e4bcb4801db6fbc7df4d4ad8883cad2677"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/relay/relay-video.module.ts",
+        "sha256": "7f34703770922578cd7f406f65a9679cb9828cfbeb2dab5030b04333bd6dfd70"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/relay/relay-video.service.spec.ts",
+        "sha256": "3c104b4e0c3b7ca210c6b3020714709fe38d4399455a1eddad30c2a3708eb4d6"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/relay/relay-video.service.ts",
+        "sha256": "ee06923c812018c73e30681aaa7d0caf2a5b5874aa7823033562d19bf3c7cb79"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/video-ai-log.interface.ts",
+        "sha256": "a510605c7c4df7aac8a74942a511320a9c02c4438aac77c79f70369301e3c6e5"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/video-task-status.scheduler.ts",
+        "sha256": "ec3c8ce78bb191a8e7a1c01477de90aaf2901d6b853d62ffd128aa4b94a0f8b9"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/video.controller.ts",
+        "sha256": "c1f95e2cbcf8d4d113b94ce41ddb0eccf89a153c316b8faddb2c0768ef20e336"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/video.dto.ts",
+        "sha256": "92cf9e4bebe1afc38ce1417b7e95c48a4fc7e7f87a990d27f0934d305867b51a"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/video.module.ts",
+        "sha256": "03358c8d90f4a21a97177e8ea18196323ae21fe084ae7936d32206ec10d05a20"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/video.service.spec.ts",
+        "sha256": "1e4a606cc2e15537422603e50016dedc958a2f234f1da9454b8fa49961416e51"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/video.service.ts",
+        "sha256": "30f205389d709d9f7323ea3799906b3c24272ec72285ced6cbe92ef0e3ff1f3b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/video.vo.ts",
+        "sha256": "6a51f79e9b4949fd3ae6719aa76841461217daee3ae1ffcd002aa485da6bf2b4"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/volcengine/index.ts",
+        "sha256": "207be730947defd6ad8fc6a6074a530f4e1eb54b07d9a1bf9c9d2a14d5b09dfe"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/volcengine/volcengine.controller.ts",
+        "sha256": "abdd3204fe0c4357c4531291638a22fb30758ad91d76199c575f0e166dbdc2ed"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/volcengine/volcengine.dto.ts",
+        "sha256": "75edfe4794b34c7362bc6edc49e143860fbed785e4438c858c3fdc5f2194d547"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/volcengine/volcengine.module.ts",
+        "sha256": "67b261cad1ebb1b7816bf72ded45fdab74b0e1f9624d875340705f6b948aee6e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/volcengine/volcengine.service.ts",
+        "sha256": "71478e6512190e8ae15b29ec5a03002f13c48e1ba7dfb3a576df1ff5b088d4d8"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai/video/volcengine/volcengine.vo.ts",
+        "sha256": "a70bd8597defd38dde55349eefb8354b6527cc68db7b2a324289b8c22a24cf88"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai-availability/ai-availability.module.ts",
+        "sha256": "8b76fd293341447fd9098d2ebe64abc76d947658b8a5f89ca619b0b448680881"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai-availability/ai-availability.service.ts",
+        "sha256": "ec9c9922fda3409d43f13a8dfa6c823193b274097e7f263586244438e731e061"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/ai-availability/index.ts",
+        "sha256": "ccabddb00a05ec48bc175939d605dc78889cd468c0fb3a281c98a17012f740d3"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation-memory.scheduler.ts",
+        "sha256": "e381df5a69a0c2419fdf6f9ce8e1572b523aaa50c66e3af18c2c83fc42ed8c9c"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation-memory.service.ts",
+        "sha256": "919b9a02817263d541a60c4a5a4700c35e5c3954a2008c1703337579ab79877b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation-planner.service.spec.ts",
+        "sha256": "ffa82b04d1c047eb84065722b8786d91bb48d0893733af2c1342c95e85e8458b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation-planner.service.ts",
+        "sha256": "dcaa17624e0a3634409a75eecc848c055803960f4a53619db8627c4da68e9d26"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation-platforms.ts",
+        "sha256": "619bebf469b631f7e446ef7e0d8465ca47873cd3dc4c47a5431be5e5b2d71e21"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation.consumer.spec.ts",
+        "sha256": "91b55a00900ca2f0d556574bc66b30d25b62bcf3b0d29dacd805e035a9ea46dc"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation.consumer.ts",
+        "sha256": "7ec08c21e6a177e614997e4e581cbb8ec8215be0c286bdba44ab22f2795da86f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation.controller.ts",
+        "sha256": "4d39d8c056b566fe33ffb7fe3eeb112522f02e00dc146ec1ddf51f6cf24bd1bc"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation.dto.ts",
+        "sha256": "c2fa4e3b9ac496f2f162c99bb68ba597adc056df73eae525d997305f5623dc4b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation.module.ts",
+        "sha256": "e7ee067ee0a046500401940ab3995a43440809d93d6caa2ed143be07c7683e0e"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation.service.spec.ts",
+        "sha256": "7992a39d6cde5e050eb78461a8bf9ad986175a94826e835c110b3967290bd249"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation.service.ts",
+        "sha256": "c1d8505b930fc864778fc2e8b481818c28e516388b33acf30519fe37af9909fc"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/draft-generation.vo.ts",
+        "sha256": "823c7e390a970628cbf8160c923036c4fbafc7bd5a206503f321afddbe251867"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/draft-generation/index.ts",
+        "sha256": "a5e80f79638deea6913725aecf2cb6ae3f1b535ce1a91f371f03e41d744f315f"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/internal/draft-generation.controller.ts",
+        "sha256": "26aca4dc4a5fc1403b95b127f447a791b1e3ae04b586f735b1e178701c3bf19b"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/internal/draft-generation.dto.ts",
+        "sha256": "2c72f824f0abb520e64a455948007fb3452e4d0859bedca6417704926630ff55"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/internal/index.ts",
+        "sha256": "a82cbc557a7636b1a17ba7f456de5cdfa3d7db69487d08b4274f502edb1321cd"
+      },
+      {
+        "path": "project/aitoearn-backend/apps/aitoearn-ai/src/core/internal/internal.module.ts",
+        "sha256": "9530c17d5aa743f05b4bf90ff54baf3d7f1927fb02edc2fc2013c329bd3096e1"
+      }
+    ],
+    "ai-shared-contracts": [
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/dtos/ai.dto.ts",
+        "sha256": "5454e136c0b654c786c77811f79aa79cc75fa1c919982b01258b9e7b471db495"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/dtos/chat.dto.ts",
+        "sha256": "863cc3605ccd7f7fcfa3f0e2226fe565be185afa447751b5c2a3a8ed40b337fa"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/dtos/draft-generation-memory.dto.ts",
+        "sha256": "62658cde0db6355a4bd5c8ff8af18587955df07571e65e8d98f109c5d964ecd2"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/dtos/draft-generation.dto.ts",
+        "sha256": "f667f5107cfc838ef5882b6e743fe28c58a5d4013f4bd4899702b38be8576fdb"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/dtos/image.dto.ts",
+        "sha256": "a0b313b0a0b4a34adf5f92a64857b653db9fa02bbe43c5fe565ddae6f3281422"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/dtos/index.ts",
+        "sha256": "b816d5fdeab9d511f66013d33daef7ca253539532e0c4b382e929bf71043dd95"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/dtos/logs.dto.ts",
+        "sha256": "ac81ad188debe1ad2abc744dec47c6621d1a5515cd9e0f9abd16e33b1e26e064"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/dtos/video.dto.ts",
+        "sha256": "2a7b6f65dda925ae291012888db77a1f86617b999ef59a2d6036cb1da929c2ad"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/dtos/volcengine.dto.ts",
+        "sha256": "7acd8d95b014466f523256be9bf6b693a036f0a95fc927e3ce71fceb5a0a8391"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/enums/ai-log.enum.ts",
+        "sha256": "e0a2b33c90dd89344e4fd8daed563ace62727785f0effc2666692dc17df42e3e"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/enums/index.ts",
+        "sha256": "c0484778425723c06c55f51b02f4f34ae27402b7bcce1eedf03b8fa03c2bcdad"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/enums/volcengine.enum.ts",
+        "sha256": "85949b969e184c1318cf2f4bec3a61b1c873980730937c1e438a3cff0f040497"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/index.ts",
+        "sha256": "3b1639f0fe9cd0a116e2d2d1ef1371c3effff2541fe5d0f11e02649285efc791"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/interfaces/index.ts",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/vos/chat.vo.ts",
+        "sha256": "4cdd797aa488eedfe1311583db7a29ba823b2ca47c5b5f05f546d083df067773"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/vos/draft-generation-memory.vo.ts",
+        "sha256": "e6686b035515af3d6b9578920f5a451db25202ba2da178bb380217dcf207a9ee"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/vos/draft-generation.vo.ts",
+        "sha256": "b542647d067036209825ae83fbbb157b31adfb7fd114d3922071bd32b5c866d9"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/vos/image.vo.ts",
+        "sha256": "6414234c9b955828c45fbf4e4b7fcc3008ec4f9016720d831c6b5da8c13cd8ef"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/vos/index.ts",
+        "sha256": "ffc16e4ef86775b09f89a90df66f5dd4393501c2cafb05f8ab70d3e4aea9feb6"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/vos/logs.vo.ts",
+        "sha256": "a0a2e4bebb87063a0ec28ec3164f53dde8ed230b7feb7e781781fdb44634a24d"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/vos/models-config.vo.ts",
+        "sha256": "3e29738eb7aaffe4d08fd121c3f2690dad665eec5b1b7abc91ed5ad21fd3ada4"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/vos/video.vo.ts",
+        "sha256": "edbecc3004377e25528da6958b4c7c4698ba89d62588ba5a8455293ca0254159"
+      },
+      {
+        "path": "project/aitoearn-backend/libs/aitoearn-ai-shared/src/vos/volcengine.vo.ts",
+        "sha256": "bc635309b2913bb9f6f3157fb75c91bd819ec75461c9998f16cb98c08f178122"
+      }
+    ]
+  }
+}

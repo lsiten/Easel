@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+from urllib.request import urlopen
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from easel.hypit_studio import _USED
 from easel.hypit_variants import HypitVariantStore
 from easel.video_provider_policy import CredentialRef, ProviderPolicy, ProviderPolicyError, ProviderRef
 from easel.video_run_manifest import read_openfilm_session_pointer
+from easel.ownership import OwnershipError, owned_media_path
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -86,7 +88,7 @@ def e2e(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 def test_allowlisted_reference_to_full_build_manifest_artifact_and_studio_rerun(e2e):
     workspace, reference_url, client, adapter = e2e
-    fixture = json.loads(fetch_reference(reference_url, resolver=_public_resolver))
+    fixture = json.loads(fetch_reference(reference_url, resolver=_public_resolver, opener=urlopen))
     assert fixture["source_id"] == "synthetic-reference"
     with pytest.raises(ReferenceURLBlocked, match="not allowlisted"):
         fetch_reference(reference_url.replace("127.0.0.1", "evil.example"), resolver=_public_resolver)
@@ -144,7 +146,12 @@ def test_allowlisted_reference_to_full_build_manifest_artifact_and_studio_rerun(
 
     manifest = workspace / "profiles" / "profile-a" / "sessions" / "session-a" / "video" / full_id / "run-manifest.json"
     assert manifest.is_file() and json.loads(manifest.read_text(encoding="utf-8"))["engine"] == "hypit"
-    assert (workspace / "outputs" / "derived" / "profile-a" / "mp4" / "final.mp4").read_bytes().startswith(b"synthetic-full")
+    _identity, media = owned_media_path(workspace / 'outputs', 'profile-a', imported.json()['output_path'])
+    assert media.read_bytes().startswith(b'synthetic-full')
+    with pytest.raises(OwnershipError):
+        owned_media_path(workspace / 'outputs', 'profile-b', imported.json()['output_path'])
+    repeated = client.post(f'/api/hypit/runs/{full_id}/artifacts/import', json={**scope, 'run_id': full_id, 'artifact': 'final.mp4'})
+    assert repeated.json()['output_path'] == imported.json()['output_path']
     assert client.post(f"/api/hypit/runs/{full_id}/rerun", json=scope).json()["state"] == "succeeded"
     assert read_openfilm_session_pointer(workspace, "session-a") == workspace / "outputs" / "existing-openfilm"
     assert (workspace / "profiles" / "profile-a" / "assets" / "asset.txt").is_file()

@@ -30,7 +30,8 @@ def publishing_mode(settings: Mapping[str, str]) -> str:
 
 
 def build_package(outputs: Path, platform: str, title: str, body: str,
-                  tags: str, media: list[str], reviewed: bool) -> Path:
+                  tags: str, media: list[str], reviewed: bool, *, persona: str = "",
+                  run_id: str = "", media_manifest: list[dict[str, object]] | None = None) -> Path:
     if platform not in PLATFORMS:
         raise ValueError("未知平台")
     if reviewed is not True:
@@ -53,7 +54,10 @@ def build_package(outputs: Path, platform: str, title: str, body: str,
         files.append(path)
     if sum(path.stat().st_size for path in files) > 2 * 1024**3:
         raise ValueError("素材超过 2GB，请分批导出")
-    destination = root / "_publish" / "manual"
+    scope = persona.strip() or "_general"
+    if not re.fullmatch(r"[A-Za-z0-9_.\u4e00-\u9fff-]+", scope):
+        raise ValueError("画像作用域非法")
+    destination = root / "_publish" / "manual" / scope
     destination.mkdir(parents=True, exist_ok=True)
     package = destination / f"easel-{platform}-{uuid.uuid4().hex[:12]}.zip"
     label, url = PLATFORMS[platform]
@@ -61,6 +65,12 @@ def build_package(outputs: Path, platform: str, title: str, body: str,
                 "reviewed": True, "exportedAt": datetime.now(timezone.utc).isoformat(),
                 "status": "ready_for_manual_submission", "officialUrl": url,
                 "media": [f"media/{index:02d}_{path.name}" for index, path in enumerate(files, 1)]}
+    if persona:
+        metadata["persona"] = persona
+    if run_id:
+        metadata["run_id"] = run_id
+    if media_manifest is not None:
+        metadata["mediaManifest"] = media_manifest
     try:
         with zipfile.ZipFile(package, "w") as archive:
             for name, text in {"title.txt": title, "body.txt": body, "tags.txt": tags,

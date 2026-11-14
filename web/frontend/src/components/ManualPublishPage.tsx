@@ -53,7 +53,12 @@ export default function ManualPublishPage({ persona }: { persona: string }) {
   useEffect(() => { savePublishDraft({ title, body, platforms, overrides, tags }); }, [title, body, platforms, overrides, tags]);
   useEffect(() => () => ctl.current?.abort(), []);
   useEffect(() => {
-    fetchOutputs().then((roots) => {
+    let current = true;
+    setSelectedMedia([]);
+    setMediaFiles([]);
+    setReviewed({});
+    fetchOutputs(persona).then((roots) => {
+      if (!current) return;
       const files: OutputFile[] = [];
       const walk = (node: OutputFile) => {
         if (node.type === 'file') { if (node.kind === 'image' || node.kind === 'video') files.push(node); }
@@ -62,7 +67,8 @@ export default function ManualPublishPage({ persona }: { persona: string }) {
       roots.forEach(walk);
       setMediaFiles(files.sort((a, b) => (b.mtime || 0) - (a.mtime || 0)));
     }).catch(() => setToast('内容库暂时无法读取，仍可编辑和复制文案'));
-  }, []);
+    return () => { current = false; };
+  }, [persona]);
 
   const effective = (key: string) => overrides[key] ?? body;
   const snapshot = (key: string) => JSON.stringify([title, effective(key), tags, selectedMedia]);
@@ -125,7 +131,9 @@ export default function ManualPublishPage({ persona }: { persona: string }) {
     if (!approved(key) || exporting) return;
     setExporting(key);
     try {
-      const result = await exportManualPackage(key, { title, body: effective(key), tags, media: [...selectedMedia], reviewed: true });
+      const result = await exportManualPackage(key, {
+        title, body: effective(key), tags, media: [...selectedMedia], reviewed: true, persona,
+      });
       const a = document.createElement('a');
       a.href = mediaUrl(result.path); a.download = result.filename;
       document.body.appendChild(a); a.click(); a.remove();
@@ -163,7 +171,7 @@ export default function ManualPublishPage({ persona }: { persona: string }) {
     try {
       await createSchedule({ title: title.trim() || effective(key).slice(0, 20), date: today(), time: '',
         platform: PLATFORMS.find((p) => p.key === key)?.label || '', status: published ? 'published' : 'draft',
-        note: published ? `【人工确认已发布，未自动验证平台状态】\n${link}\n\n${effective(key)}` : effective(key) });
+        note: published ? `【人工确认已发布，未自动验证平台状态】\n${link}\n\n${effective(key)}` : effective(key) }, persona);
       if (published) setRecorded((prev) => ({ ...prev, [key]: version + (links[key] || '') }));
       showToast(published ? '已按你的确认记录到日历，未自动校验平台结果' : '已保存为日历草稿，不会自动发布');
     } catch (error) { showToast(error instanceof Error ? error.message : '保存失败'); }

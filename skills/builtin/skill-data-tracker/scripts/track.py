@@ -79,6 +79,23 @@ def load_snapshots(profile: str) -> list:
                 by_key[key] = snap
             except (json.JSONDecodeError, OSError):
                 print(f"警告：跳过无法解析的快照 {fp}", file=sys.stderr)
+        for fp in sorted(directory.glob('*.jsonl')):
+            for line in fp.read_text(encoding='utf-8').splitlines():
+                try:
+                    row = json.loads(line)
+                    if row.get('persona') != profile:
+                        continue
+                    observed = row['observed_at']
+                    metrics = row.get('account_metrics', {})
+                    current = {'date': observed[:10], 'recorded_at': observed,
+                               'platform': row['platform'], 'profile': profile,
+                               'account_uid': row.get('account_uid'),
+                               'account_metrics': {**metrics, 'total_likes': metrics.get('likes'),
+                                                   'total_posts': metrics.get('posts')},
+                               'post_snapshots': row.get('works', [])}
+                    by_key[(current['date'], current['platform'], row.get('account_uid') or '')] = current
+                except (ValueError, KeyError, TypeError):
+                    continue
     return [by_key[key] for key in sorted(by_key)]
 
 

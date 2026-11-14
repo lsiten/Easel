@@ -71,3 +71,19 @@ def test_export_followers_builds_analysis_view(tmp_path, monkeypatch):
     assert {(row["platform"], row["followers"]) for row in payload["snapshots"]} == {
         ("douyin", 20), ("xiaohongshu", 12),
     }
+
+
+def test_tracker_consumes_normalized_account_and_work_snapshots(tmp_path, monkeypatch):
+    from easel.analytics_snapshots import append_snapshot, normalize_snapshot
+    track = load_module()
+    monkeypatch.setattr(track, 'SNAP_ROOT', tmp_path / '_analytics' / 'snapshots')
+    monkeypatch.setattr(track, 'LEGACY_SNAP_ROOT', tmp_path / 'legacy')
+    append_snapshot(tmp_path, normalize_snapshot('demo', 'xiaohongshu', {
+        'account_uid': 'self', 'followers': 10, 'likes': None, 'posts': 1,
+        'notes': [{'id': 'work-1', 'title': '标题', 'likes': 0}],
+    }, observed_at='2026-11-14T01:02:03+00:00'))
+    rows = track.load_snapshots('demo')
+    assert rows[0]['account_uid'] == 'self'
+    assert rows[0]['account_metrics']['followers'] == 10
+    assert rows[0]['account_metrics']['total_likes'] is None
+    assert rows[0]['post_snapshots'][0]['platform_work_id'] == 'work-1'

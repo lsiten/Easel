@@ -28,7 +28,7 @@ const EMPTY: ScheduleInput = {
   kind: 'content', url: '', source: 'manual', event_type: '', end_date: '',
 };
 
-export default function CalendarPage() {
+export default function CalendarPage({ persona }: { persona?: string }) {
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [items, setItems] = useState<ScheduleItem[]>([]);
@@ -41,9 +41,9 @@ export default function CalendarPage() {
   const [dayView, setDayView] = useState<string | null>(null);   // 展开查看某天全部（date，null=关闭）
 
   const load = useCallback(() => {
-    fetchSchedule().then(setItems).catch(() => {});
-    fetchScheduleContext(14).then(setCtx).catch(() => {});
-  }, []);
+    fetchSchedule(persona).then(setItems).catch(() => {});
+    fetchScheduleContext(14, persona).then(setCtx).catch(() => {});
+  }, [persona]);
   useEffect(() => { load(); }, [load]);
 
   const visible = useMemo(
@@ -107,15 +107,15 @@ export default function CalendarPage() {
     if (!form || !form.title.trim() || !form.date) return;
     setSaving(true);
     try {
-      if (editing) await updateSchedule(editing.id, form);
-      else await createSchedule(form);
+      if (editing) await updateSchedule(editing.id, form, persona);
+      else await createSchedule(form, persona);
       close(); load();
     } finally { setSaving(false); }
   };
   const remove = async () => {
     if (!editing) return;
     setSaving(true);
-    try { await deleteSchedule(editing.id); close(); load(); } finally { setSaving(false); }
+    try { await deleteSchedule(editing.id, persona); close(); load(); } finally { setSaving(false); }
   };
 
   const monthLabel = `${cursor.getFullYear()} 年 ${cursor.getMonth() + 1} 月`;

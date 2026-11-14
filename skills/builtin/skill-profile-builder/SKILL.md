@@ -33,7 +33,7 @@ layer: general
 
 ## 执行步骤
 
-1. **确定画像名**，检查 `profiles/<名>/` 是否已存在（存在则问是覆盖还是完善）。不存在则复制 `profiles/_template/` 为骨架。
+1. **确定画像名**，检查 `profiles/<名>/` 是否已存在（存在则问是覆盖还是完善）。不存在则复制 `profiles/_template/` 为骨架，同时建立 `profiles/<名>/assets/` 默认素材目录。完善旧画像时补建缺少的素材目录，保留已有素材。
 
 2. **收集社媒链接**。按 [onboarding-questions.md](references/onboarding-questions.md) 的清单引导用户给出主页链接与基础信息。
 

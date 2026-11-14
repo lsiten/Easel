@@ -147,3 +147,23 @@ def test_atomic_brief_write_cleans_temp_on_interruption(tmp_path, monkeypatch):
         raise AssertionError("write interruption should propagate")
     assert brief_path.read_text(encoding="utf-8") == '{"old": true}'
     assert not tmp_brief.exists()
+
+
+def test_reference_metadata_contains_owned_relative_evidence(tmp_path):
+    from easel.reference_output import bind_reference_owner, safe_reference_metadata
+    from easel.ownership import OwnershipError, project_identity
+    import pytest
+
+    outputs = tmp_path / 'outputs'
+    directory = outputs / 'analysis-project' / 'reference'
+    directory.mkdir(parents=True)
+    bind_reference_owner(directory, outputs, 'alice')
+    assert project_identity(outputs, 'analysis-project', 'alice').persona == 'alice'
+    with pytest.raises(OwnershipError):
+        project_identity(outputs, 'analysis-project', 'bob')
+    metadata = safe_reference_metadata({
+        'file': '/private/source.mp4', 'source': 'https://media.example/video?token=secret',
+        'keyframes': [{'path': str(directory / 'frames' / 'one.jpg')}],
+    }, directory)
+    assert metadata == {'file': 'source.mp4', 'source': 'https://media.example/video',
+                        'keyframes': [{'path': 'frames/one.jpg'}]}

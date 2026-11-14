@@ -56,17 +56,17 @@ function readMigratedLocalValue(key: string, suffix: string): string | null {
 const PUBLISH_DEFAULT: PublishDraft = {
   title: '', body: '', platforms: ['xiaohongshu', 'douyin'], overrides: {}, tags: '',
 };
-export function loadPublishDraft(): PublishDraft {
+export function loadPublishDraft(scope?: string): PublishDraft {
   try {
-    const raw = readMigratedLocalValue(PUBLISH_KEY, 'publish_draft');
+    const raw = scope ? localStorage.getItem(`${PUBLISH_KEY}:${encodeURIComponent(scope)}`) : readMigratedLocalValue(PUBLISH_KEY, 'publish_draft');
     if (!raw) return { ...PUBLISH_DEFAULT };
     return { ...PUBLISH_DEFAULT, ...(JSON.parse(raw) as PublishDraft) };
   } catch {
     return { ...PUBLISH_DEFAULT };
   }
 }
-export function savePublishDraft(d: PublishDraft): void {
-  try { localStorage.setItem(PUBLISH_KEY, JSON.stringify(d)); } catch { /* quota */ }
+export function savePublishDraft(d: PublishDraft, scope?: string): void {
+  try { localStorage.setItem(scope ? `${PUBLISH_KEY}:${encodeURIComponent(scope)}` : PUBLISH_KEY, JSON.stringify(d)); } catch { /* quota */ }
 }
 
 const STORAGE_KEY = 'easel_sessions';

@@ -1,7 +1,11 @@
 import sys
+from importlib import import_module
 from pathlib import Path
 
 import pytest
+
+# Bind the repository test package before skill-local packages share its name.
+import_module('tests')
 
 
 @pytest.fixture(autouse=True)

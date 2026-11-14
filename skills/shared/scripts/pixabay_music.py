@@ -45,6 +45,12 @@ except Exception:  # noqa: BLE001
     def validate_output_path(value, **_kwargs):  # type: ignore
         return Path(value).expanduser()
 
+try:
+    from easel.remote_media import RemoteMediaError, download_to_file
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from easel.remote_media import RemoteMediaError, download_to_file
+
 # ── 颜色（与 install_tool / doctor 一致）──────────────────────────────────
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
@@ -183,13 +189,14 @@ def _run_capture(keyword: str, *, mode: str = "get", pick: int = 1,
 
 def _download(url: str, dest: Path) -> int:
     """urllib 直连下载 CDN 直链到 dest，返回字节数。"""
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    req = urllib.request.Request(
-        url, headers={"User-Agent": UA, "Referer": PIXBAY_HOME, "Accept": "audio/mpeg,*/*"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        data = r.read()
-    dest.write_bytes(data)
-    return len(data)
+    try:
+        return download_to_file(
+            url, dest, max_bytes=512 * 1024**2, timeout=120,
+            headers={"User-Agent": UA, "Referer": PIXBAY_HOME, "Accept": "audio/mpeg,*/*"},
+            direct=True,
+        )
+    except RemoteMediaError as exc:
+        raise RuntimeError(f"音乐下载失败：{exc}") from exc
 
 
 def _safe_name(name: str) -> str:

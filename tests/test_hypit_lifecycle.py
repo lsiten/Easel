@@ -4,6 +4,19 @@ import pytest
 from easel.hypit_lifecycle import HypitLifecycle, LifecycleError, QuotaExceeded
 
 
+@pytest.mark.parametrize('run_id', ['readiness', 'new-run'])
+def test_config_initializes_profile_asset_directory(tmp_path: Path, run_id: str):
+    service = HypitLifecycle(tmp_path / 'outputs' / '_hypit' / 'runs')
+    config = service._config_for('alice', 'session-a', run_id)
+    assert config.asset_root == tmp_path / 'profiles' / 'alice' / 'assets'
+    assert config.asset_root.is_dir()
+    marker = config.asset_root / 'existing.txt'
+    marker.write_text('keep my asset')
+    repeated = service._config_for('alice', 'session-a', run_id)
+    assert (repeated.asset_root / 'existing.txt').read_text() == 'keep my asset'
+    assert not (tmp_path / 'profiles' / 'bob').exists()
+
+
 def test_resumable_sample_cancel_retry_and_preserve_output(tmp_path):
     calls = []
     output = tmp_path / "out.mp4"

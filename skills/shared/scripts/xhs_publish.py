@@ -865,17 +865,23 @@ def _diag_after_publish(page) -> str:
 
 def _confirm_publish_dialog(page) -> None:
     """点发布后若弹二次确认框，点其确认按钮（保守：仅当可见且文案匹配）。"""
+    from publish_guard import PublishGuardError, require_publish_commit
     deadline = time.time() + 5
     while time.time() < deadline:
+        from publish_guard import require_publish_allowed
+        require_publish_allowed('xiaohongshu')
         for b in page.query_selector_all("button, .d-button, [role=button]"):
             try:
                 if not b.is_visible():
                     continue
                 tx = (b.inner_text() or "").strip()
                 if tx in ("确认发布", "确定发布", "继续发布", "立即发布", "确认", "确定"):
+                    require_publish_commit('xiaohongshu', page)
                     b.click()
                     page.wait_for_timeout(1000)
                     return
+            except PublishGuardError:
+                raise
             except Exception:
                 pass
         page.wait_for_timeout(500)
@@ -942,6 +948,8 @@ def _fill_and_submit(page, title, content, tags):
     btn.scroll_into_view_if_needed()
     page.wait_for_timeout(300)
     box = btn.bounding_box()
+    from publish_guard import require_publish_commit
+    require_publish_commit('xiaohongshu', page)
     if kind == "new" and box:
         # xhs-publish-btn 是宽横条(闭合 Shadow DOM)，内含[暂存离开][发布]两个按钮；
         # 点 host 中心会落在两按钮间隙→无效。发布按钮在右侧约 62% 处（实测像素为品牌红），按坐标点它。
@@ -950,6 +958,7 @@ def _fill_and_submit(page, title, content, tags):
         try:
             btn.click(force=True)
         except Exception:
+            require_publish_commit('xiaohongshu', page)
             btn.click()
     page.wait_for_timeout(1000)
     _confirm_publish_dialog(page)   # 若弹二次确认框，点确认
@@ -1334,6 +1343,7 @@ def cmd_whoami(a) -> int:
                 account = _authenticated_account(ctx)
                 if account is not None:
                     result["loggedIn"] = True
+                    result['accountUid'] = account.get('userId', '')
                     if not all(_account_identity(account).values()):
                         account = _self_profile_account(ctx, account)
                     result.update(_account_identity(account))

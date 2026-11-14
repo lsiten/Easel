@@ -114,3 +114,22 @@ def test_http_error_redirect_to_private_is_blocked(monkeypatch):
         raise urllib.error.HTTPError(url, 302, "redirect", {"Location": "https://private.example/x"}, None)
     with pytest.raises(ReferenceURLBlocked):
         fetch_reference("https://example.com/start", opener=opener, resolver=lambda host, *a, **k: [(None,None,None,None,("127.0.0.1",0))] if host == "private.example" else _public_resolver(host))
+
+
+def test_default_reference_transport_blocks_rebinding_before_connect(monkeypatch):
+    import socket
+    from easel.hypit_security import fetch_reference
+
+    monkeypatch.setenv("EASEL_VIDEO_REFERENCE_HOSTS", "example.com")
+    responses = iter(["93.184.216.34", "127.0.0.1"])
+
+    def changing_resolver(_host, port, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (next(responses), port or 80))]
+
+    def forbidden_socket(*_args, **_kwargs):
+        pytest.fail("private destination reached the socket boundary")
+
+    monkeypatch.setattr(socket, "getaddrinfo", changing_resolver)
+    monkeypatch.setattr(socket, "socket", forbidden_socket)
+    with pytest.raises(ReferenceURLBlocked, match="connection address"):
+        fetch_reference("http://example.com/reference.mp4")

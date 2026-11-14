@@ -196,7 +196,7 @@ def cmd_whoami(a) -> int:
             nav = (_api("https://api.bilibili.com/x/web-interface/nav", cookie).get("data") or {})
             if nav.get("isLogin"):
                 result = {"loggedIn": True, "name": (nav.get("uname") or "")[:40],
-                          "avatar": nav.get("face") or ""}
+                          "avatar": nav.get("face") or "", 'accountUid': str(nav.get('mid') or '')}
         except Exception as e:  # noqa: BLE001 — whoami 永远输出 JSON
             result["error"] = str(e)
     print(json.dumps(result, ensure_ascii=False))
@@ -219,7 +219,11 @@ def cmd_stats(a) -> int:
         nav = (_api("https://api.bilibili.com/x/web-interface/nav", cookie).get("data") or {})
         r["loggedIn"] = bool(nav.get("isLogin"))
         r["nickname"] = (nav.get("uname") or "")[:40]
-        mid = mid or int(nav.get("mid") or 0)
+        mid = int(nav.get("mid") or 0) if r['loggedIn'] else 0
+        r['account_uid'] = str(mid) if mid else ''
+        if not r['loggedIn'] or not mid:
+            print(json.dumps(r, ensure_ascii=False))
+            return 0
         stat = (_api("https://api.bilibili.com/x/web-interface/nav/stat", cookie).get("data") or {})
         r["followers"] = stat.get("follower")
         r["following"] = stat.get("following")

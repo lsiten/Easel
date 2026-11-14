@@ -1,0 +1,268 @@
+{
+  "fields": [
+    {
+      "name": "GEMINI_API_KEY",
+      "label": "Gemini native API Key",
+      "secret": true,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "GEMINI_BASE_URL",
+      "label": "Gemini native API URL",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "IMG_PROVIDER",
+      "label": "Image provider channel",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "IMG_MODEL",
+      "label": "Image model",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "IMG_BASE_URL",
+      "label": "Image API URL",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "IMG_API_KEY",
+      "label": "Image API Key",
+      "secret": true,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "VIDEO_MODEL",
+      "label": "Video model",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "VIDEO_BASE_URL",
+      "label": "Video API URL",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "VIDEO_API_KEY",
+      "label": "Video API Key",
+      "secret": true,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "EASEL_DIRECT_API_BASE_URL",
+      "label": "Chat API URL",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "EASEL_DIRECT_API_KEY",
+      "label": "Chat API Key",
+      "secret": true,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "EASEL_DIRECT_API_MODEL",
+      "label": "Chat API model",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "label": "Anthropic API URL",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "label": "Anthropic API Key",
+      "secret": true,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "ANTHROPIC_AUTH_TOKEN",
+      "label": "Anthropic auth token",
+      "secret": true,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "GROK_API_KEY",
+      "label": "Grok API Key",
+      "secret": true,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "GROK_BASE_URL",
+      "label": "Grok API URL",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "GROK_VIDEO_MODEL",
+      "label": "Grok video model",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "RELAY_API_KEY",
+      "label": "Relay API Key",
+      "secret": true,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "RELAY_BASE_URL",
+      "label": "Relay API URL",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "RELAY_VIDEO_MODEL",
+      "label": "Relay video model",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "VOLCENGINE_ACCESS_KEY_ID",
+      "label": "Volcengine Access Key ID",
+      "secret": true,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "VOLCENGINE_SECRET_ACCESS_KEY",
+      "label": "Volcengine Secret Access Key",
+      "secret": true,
+      "configured": true,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "VOLCENGINE_SPACE_NAME",
+      "label": "Volcengine VOD space",
+      "secret": false,
+      "configured": true,
+      "value": "fixture-space",
+      "locked": false
+    },
+    {
+      "name": "VOLCENGINE_VOD_BASE_URL",
+      "label": "Volcengine VOD URL",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "VOLCENGINE_REGION",
+      "label": "Volcengine region",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "VOLCENGINE_PLAYBACK_BASE_URL",
+      "label": "Volcengine playback URL",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "VOLCENGINE_URL_AUTH_PRIMARY_KEY",
+      "label": "Volcengine playback signing key",
+      "secret": true,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "ANTHROPIC_MODEL",
+      "label": "Anthropic chat API model",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "EASEL_DRAFT_PLANNER_MODEL",
+      "label": "Draft planner model",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "EASEL_DRAFT_MODEL_RATES",
+      "label": "Draft model rate JSON",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    },
+    {
+      "name": "EASEL_DRAFT_ASR_MODEL",
+      "label": "Cached local ASR model",
+      "secret": false,
+      "configured": true,
+      "value": "locked-fixture-model",
+      "locked": true
+    },
+    {
+      "name": "EASEL_CHANNEL_MEDIA_BASE_URL",
+      "label": "Public HTTPS media URL",
+      "secret": false,
+      "configured": false,
+      "value": "",
+      "locked": false
+    }
+  ]
+}

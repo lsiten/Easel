@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "skills/shared/scripts"))
@@ -81,6 +82,57 @@ class HypitAdapterTests(unittest.TestCase):
         self.assertEqual(manifest.engine, "hypit")
         self.assertEqual(manifest.state, "succeeded")
         self.assertEqual(manifest.provenance["version"], "0.3.2")
+
+
+def test_readiness_accepts_supported_node_without_project_pin(tmp_path: Path):
+    from unittest.mock import patch
+
+    (tmp_path / 'assets').mkdir()
+    (tmp_path / 'package.json').write_text('{"dependencies":{"@hypit/hypit":"0.3.2"}}')
+    executable = tmp_path / 'hypit'
+    executable.write_text('#!/bin/sh\nexit 0\n')
+    executable.chmod(0o755)
+    versions = {'node': 'v24.22.1', 'pnpm': '10.33.0', 'ffmpeg': 'ffmpeg version 8', 'google-chrome': 'Chrome 140'}
+    with patch.object(hypit, '_which', side_effect=lambda name: name), patch.object(
+        hypit, '_probe', side_effect=lambda path, args: (True, versions[path])
+    ):
+        result = hypit.readiness(hypit.HypitConfig(tmp_path, tmp_path / 'assets', tmp_path / 'outputs', executable=executable))
+    assert result['requirements']['node']['ok'] is True
+    assert result['ok'] is True
+
+
+def test_readiness_uses_shared_runtime_and_macos_chrome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import easel.browser
+
+    project = tmp_path / 'project'
+    assets = project / 'assets'
+    assets.mkdir(parents=True)
+    runtime = tmp_path / 'runtime'
+    binaries = runtime / 'node_modules' / '.bin'
+    binaries.mkdir(parents=True)
+    (runtime / 'package.json').write_text('{"dependencies":{"@hypit/hypit":"0.3.2"}}')
+    for name, version in [('node', 'v24.22.1'), ('pnpm', '10.33.0'), ('ffmpeg', 'ffmpeg 8'), ('hypit', '0.3.2'), ('mac-chrome', 'Chrome 157')]:
+        path = binaries / name
+        path.write_text(f'#!/bin/sh\nprintf "%s\\n" "{version}"\n')
+        path.chmod(0o755)
+    monkeypatch.setenv('PATH', str(binaries))
+    monkeypatch.setattr(easel.browser.sys, 'platform', 'darwin')
+    monkeypatch.setattr(easel.browser, '_candidates', lambda name: [binaries / 'mac-chrome'])
+    result = hypit.readiness(hypit.HypitConfig(project, assets, project / 'outputs', runtime_root=runtime))
+    assert result['ok'] is True
+    assert result['executable']['path'] == str(binaries / 'hypit')
+    assert result['requirements']['chrome']['detail'] == 'Chrome 157'
+    assert result['requirements']['pnpm']['detail'] == '10.33.0'
+    (project / 'package.json').write_text('{"dependencies":{"@hypit/hypit":"latest"}}')
+    assert hypit.readiness(hypit.HypitConfig(project, assets, project / 'outputs', runtime_root=runtime))['ok'] is False
+
+
+def test_integrity_belongs_to_hypit_package(tmp_path: Path):
+    (tmp_path / 'package-lock.json').write_text(json.dumps({'packages': {
+        'node_modules/unrelated': {'integrity': 'sha512-unrelated'},
+        'node_modules/@hypit/hypit': {'integrity': 'sha512-hypit'},
+    }}))
+    assert hypit._integrity(tmp_path) == 'sha512-hypit'
 
 
 if __name__ == "__main__":

@@ -88,7 +88,7 @@ layer: general
 ### create 流程
 
 2. **检查画像是否已存在**：读取 `profiles/` 目录，确认同名画像不存在
-3. **复制模板**：将 `profiles/_template/` 复制为 `profiles/{profile_name}/`
+3. **复制模板**：将 `profiles/_template/` 复制为 `profiles/{profile_name}/`，同时建立 `profiles/{profile_name}/assets/` 默认素材目录。完善旧画像时补建缺少的素材目录，保留已有素材。
 4. **引导填写核心信息**：依次向用户提问，收集以下信息
    - **identity.md**：你是谁？做什么内容？和别人有什么不同？
    - **style.md**：你的语言风格是什么？正式/轻松/搞笑？常用口头禅？

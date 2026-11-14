@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
+from easel.remote_media import RemoteMediaError, public_opener
+
 MAX_REDIRECTS = 3
 MAX_BYTES = 1_000_000_000
 MAX_DURATION_SECONDS = 20 * 60
@@ -78,7 +80,8 @@ def validate_reference_url(url: str, *, resolver: Callable[..., Any] | None = No
 
     Credentials, non-http schemes, unallowlisted hosts and private/link-local/
     multicast/reserved addresses are rejected. DNS is resolved on each call,
-    allowing callers to revalidate redirected destinations and prevent rebinding.
+    allowing callers to revalidate redirected destinations. The default fetch
+    transport also checks and pins the connected socket address.
     """
     if not isinstance(url, str) or len(url) > 4096:
         raise ReferenceURLBlocked("invalid reference URL")
@@ -105,12 +108,14 @@ def fetch_reference(url: str, *, opener: Callable[..., Any] | None = None, resol
         class _NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 return None
-        open_fn = urllib.request.build_opener(_NoRedirect()).open
+        open_fn = public_opener(_NoRedirect()).open
     else:
         open_fn = opener
     for _ in range(max_redirects + 1):
         try:
             response = open_fn(current, timeout=30)
+        except RemoteMediaError as exc:
+            raise ReferenceURLBlocked("reference connection address blocked") from exc
         except urllib.error.HTTPError as exc:
             if exc.code not in {301, 302, 303, 307, 308}:
                 raise

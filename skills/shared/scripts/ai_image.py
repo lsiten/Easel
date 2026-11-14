@@ -41,17 +41,21 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from output_paths import validate_output_path
+try:
+    from .output_paths import validate_output_path
+    from .image_provider_config import ENV_BASE_URL, ENV_MODEL, ENV_API_KEY, ENV_ALIASES, MIME_MAP, detect_mode, detect_provider
+    from .image_generation_receipt import save_image_receipt
+except ImportError:
+    from output_paths import validate_output_path
+    from image_provider_config import ENV_BASE_URL, ENV_MODEL, ENV_API_KEY, ENV_ALIASES, MIME_MAP, detect_mode, detect_provider
+    from image_generation_receipt import save_image_receipt
 
+try:
+    from easel.remote_media import RemoteMediaError, download_to_file
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    from easel.remote_media import RemoteMediaError, download_to_file
 
-ENV_BASE_URL = "IMG_BASE_URL"
-ENV_MODEL = "IMG_MODEL"
-ENV_API_KEY = "IMG_API_KEY"
-ENV_ALIASES = {
-    ENV_BASE_URL: ("OPENAI_BASE_URL", "OPENAI_API_BASE", "BASE_URL"),
-    ENV_MODEL: ("OPENAI_IMAGE_MODEL", "IMAGE_MODEL", "OPENAI_MODEL"),
-    ENV_API_KEY: ("OPENAI_API_KEY", "API_KEY"),
-}
 
 VALID_RATIOS = ("auto", "1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5",
                 "16:9", "9:16", "2:1", "1:2", "21:9", "9:21")
@@ -72,9 +76,6 @@ PIXEL_TO_RATIO: dict[str, str] = {
     "2016x864": "21:9", "2688x1152": "21:9", "3840x1648": "21:9",
     "864x2016": "9:21", "1152x2688": "9:21", "1648x3840": "9:21",
 }
-
-MIME_MAP = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-            "webp": "image/webp", "gif": "image/gif"}
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
@@ -173,37 +174,6 @@ def load_and_require() -> tuple[str, str, str, argparse.Namespace | None]:
 
 # ── 模式检测 / 尺寸 ──────────────────────────────────────────
 
-def detect_mode(base_url: str, explicit_mode: str | None) -> str:
-    if explicit_mode in ("sync", "async"):
-        return explicit_mode
-    if urllib.parse.urlsplit(base_url).hostname in {
-        "api.apimart.ai", "api.apib.ai", "api.aiuxu.com", "api.aishuch.com",
-    }:
-        return "async"
-    return "sync"
-
-
-def detect_provider(base_url: str) -> str:
-    """按 base_url 主机名识别非标准 provider。
-
-    Agnes AI 是 OpenAI 兼容的「形状」但不兼容的实例：它没有 /images/edits 与
-    /images/variations，文生图 / 图生图 / 多图合成统一打 /images/generations，
-    输入图放在 extra_body.image（官方文档：docs/agnes-image-21-flash）。
-    未识别的 base_url 一律返回 "openai"，走原有标准分支，零影响。
-    """
-    # 已知 Agnes 域名（官方文档 api.agnes-ai.cn；apihub.agnes-ai.com 见仓库内引用）。
-    AGNES_DOMAINS = ("agnes-ai.cn", "agnes-ai.com")
-    host = (urllib.parse.urlsplit(base_url).hostname or "").lower()
-    # 对已知 Agnes 域名做精确后缀匹配，不用子串包含 —— 否则像
-    # stagneschurch.com / magnes.com 这类「含 agnes 字母序列」的无关域名
-    # 会被误判成 Agnes，被打到不存在端点的分支上全部报错（404）。
-    # 反过来说也不能只写 agnes.ai：真实域名是 agnes-ai.cn / agnes-ai.com。
-    for domain in AGNES_DOMAINS:
-        if host == domain or host.endswith("." + domain):
-            return "agnes"
-    return "openai"
-
-
 def agnes_split_size(size: str, resolution: str) -> tuple[str, str]:
     """把 --size 拆成 Agnes 的档位式 size + 独立 ratio。
 
@@ -253,7 +223,9 @@ def _agnes_generate(base_url: str, api_key: str, model: str, prompt: str,
     - 多张改为客户端循环，结果合并成一个 data 数组交给 save_sync_data。
     """
     tier, ratio = agnes_split_size(args.size, args.resolution)
-    extra: dict[str, Any] = {"response_format": "url"}
+    if getattr(args, 'style', '') or getattr(args, 'user', ''):
+        fail('Agnes 不支持 style/user 请求字段。')
+    extra: dict[str, Any] = {"response_format": getattr(args, 'response_format', None) or "url"}
     if images:
         extra["image"] = images
     payload: dict[str, Any] = {
@@ -400,17 +372,11 @@ def _suffix_from_url(url: str, fallback: str) -> str:
 
 
 def _download_to(image_url: str, out_path: Path) -> None:
-    parsed = urllib.parse.urlparse(image_url)
-    if parsed.scheme not in ("http", "https"):
-        fail(f"拒绝下载非 http(s) 协议的 URL：{parsed.scheme}")
-    dl_req = urllib.request.Request(image_url, headers={"User-Agent": UA})
     try:
-        with _open(dl_req, 120) as resp:
-            out_path.write_bytes(resp.read())
-    except urllib.error.URLError as exc:
-        fail(f"无法下载图片：{getattr(exc, 'reason', exc)}")
-    except TimeoutError:
-        fail("下载图片超时。")
+        download_to_file(image_url, out_path, max_bytes=100 * 1024**2,
+                         timeout=120, headers={"User-Agent": UA}, direct=_use_direct())
+    except RemoteMediaError as exc:
+        fail(f"无法下载图片：{exc}")
 
 
 def _out_paths(output: str, count: int, fmt: str) -> list[Path]:
@@ -461,6 +427,7 @@ def save_sync_data(result: dict[str, Any], output: str, fmt: str) -> list[Path]:
             _download_to(image_url, target)
         else:
             fail("图片结果既没有 b64_json，也没有 url。")
+    save_image_receipt(result)
     return paths
 
 
@@ -532,6 +499,7 @@ def _save_async_images(task_data: dict[str, Any], output: str, fmt: str) -> list
         paths[index] = target
         print(f"  下载图片: {image_url}", file=sys.stderr)
         _download_to(image_url, target)
+    save_image_receipt({**task_data, **result, 'data': images})
     return paths
 
 
@@ -550,6 +518,7 @@ def cmd_text2img(args: argparse.Namespace) -> None:
             "model": model, "prompt": prompt, "n": args.n,
             "size": size_to_ratio(args.size), "resolution": args.resolution,
         }
+        payload.update(_generation_options(args, model))
         paths = run_async(base_url, api_key, payload, args.output, args.format,
                           args.poll_interval, args.timeout)
     elif detect_provider(base_url) == "agnes":
@@ -557,6 +526,7 @@ def cmd_text2img(args: argparse.Namespace) -> None:
         paths = save_sync_data(result, args.output, args.format)
     else:
         payload = {"model": model, "prompt": prompt, "n": args.n, "size": args.size}
+        payload.update(_generation_options(args, model))
         if args.quality:
             payload["quality"] = args.quality
         endpoint = _api_url(base_url, "images/generations")
@@ -577,14 +547,18 @@ def cmd_img2img(args: argparse.Namespace) -> None:
     mode = detect_mode(base_url, args.mode)
     print(f"[img2img] 模式={mode} base_url={base_url} model={model} image={args.image}",
           file=sys.stderr)
+    image_paths = [args.image, *getattr(args, 'reference_image', [])]
 
     if mode == "async":
+        if args.mask:
+            fail('异步图片接口不支持 --mask 局部编辑。')
         # apimart：把参考图作为 image_urls 传入生成端点
         payload: dict[str, Any] = {
             "model": model, "prompt": prompt, "n": args.n,
             "size": size_to_ratio(args.size), "resolution": args.resolution,
-            "image_urls": [encode_image_data_uri(args.image)],
+            "image_urls": [encode_image_data_uri(path) for path in image_paths],
         }
+        payload.update(_generation_options(args, model))
         paths = run_async(base_url, api_key, payload, args.output, args.format,
                           args.poll_interval, args.timeout)
     elif detect_provider(base_url) == "agnes":
@@ -593,7 +567,7 @@ def cmd_img2img(args: argparse.Namespace) -> None:
         if args.mask:
             fail("Agnes 不支持 --mask 局部编辑（无 /images/edits 端点）。")
         result = _agnes_generate(base_url, api_key, model, prompt, args,
-                                 images=[encode_image_data_uri(args.image)])
+                                 images=[encode_image_data_uri(path) for path in image_paths])
         paths = save_sync_data(result, args.output, args.format)
     else:
         # OpenAI 兼容 /images/edits：优先 multipart，失败时回退 JSON data-uri
@@ -613,7 +587,16 @@ def _post_edits_multipart(base_url: str, api_key: str, model: str,
         fail(f"无法读取输入图片：{exc}")
         return {}
     fields = {"model": model, "prompt": prompt, "n": str(args.n), "size": args.size}
-    files = [("image", path.name, mime, img_bytes)]
+    fields.update(_generation_options(args, model))
+    references = getattr(args, 'reference_image', [])
+    image_field = 'image[]' if references else 'image'
+    files = [(image_field, path.name, mime, img_bytes)]
+    for reference in references:
+        reference_path, reference_mime = _check_image(reference)
+        try:
+            files.append((image_field, reference_path.name, reference_mime, reference_path.read_bytes()))
+        except OSError as exc:
+            fail(f'无法读取参考图片：{exc}')
     if args.mask:
         mpath, mmime = _check_image(args.mask)
         try:
@@ -647,6 +630,16 @@ def _post_edits_multipart(base_url: str, api_key: str, model: str,
     if not isinstance(parsed, dict):
         fail("图生图接口返回格式不正确：顶层不是对象。")
     return parsed
+
+
+def _generation_options(args: argparse.Namespace, model: str) -> dict[str, str]:
+    options = {}
+    keys = ('user',) if model == 'gpt-image-1' else ('style', 'user', 'response_format')
+    for key in keys:
+        value = getattr(args, key, None)
+        if value:
+            options[key] = str(value)
+    return options
 
 
 def _encode_multipart(fields: dict[str, str],
@@ -809,15 +802,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p_t2i = sub.add_parser("text2img", help="文生图：--prompt → 图片")
     p_t2i.add_argument("--prompt", required=True, help="图片生成 Prompt。")
     p_t2i.add_argument("--quality", help="同步模式质量参数，如 low/medium/high。")
+    p_t2i.add_argument('--style', help='模型支持的图片风格。')
     _add_common_output(p_t2i)
     p_t2i.set_defaults(func=cmd_text2img)
 
     p_i2i = sub.add_parser("img2img", help="图生图/图像编辑：--prompt + --image → 新图")
     p_i2i.add_argument("--prompt", required=True, help="编辑/改图指令 Prompt。")
     p_i2i.add_argument("--image", required=True, help="输入图片路径。")
+    p_i2i.add_argument('--reference-image', action='append', default=[], help='额外输入图片，可重复。')
     p_i2i.add_argument("--mask", help="可选遮罩图（仅 OpenAI 同步 /images/edits 局部编辑用）。")
     _add_common_output(p_i2i)
     p_i2i.set_defaults(func=cmd_img2img)
+
+    for image_parser in (p_t2i, p_i2i):
+        image_parser.add_argument('--response-format', choices=('url', 'b64_json'))
+        image_parser.add_argument('--user', help='发送给模型服务的用户标识。')
 
     p_var = sub.add_parser("variations", help="图像变体：--image → 多个变体")
     p_var.add_argument("--image", required=True, help="输入图片路径。")

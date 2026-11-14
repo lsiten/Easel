@@ -27,6 +27,8 @@ import social_stats as ss  # noqa: E402
 # PROJECT_ROOT：优先 EASEL_ROOT env，否则按 __file__ 上溯（workspace 拍平副本会算错，
 # 故 env 兜底不可省，见 manifest.py 同款说明）。
 PROJECT_ROOT = Path(os.environ.get("EASEL_ROOT") or Path(__file__).resolve().parents[4])
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 DEFAULT_DATA = PROJECT_ROOT / "outputs" / "_analytics" / "publish-log.json"
 LEGACY_DATA = PROJECT_ROOT / "outputs" / "publish-log.json"
 CST = timezone(timedelta(hours=8))
@@ -58,6 +60,8 @@ def atomic_write(path: Path, data: dict) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
@@ -90,6 +94,12 @@ def _parse_dt(s: str):
 def cmd_record(args) -> None:
     path = Path(args.data)
     data = load(path)
+    run_id = getattr(args, 'run_id', '') or ''
+    if run_id:
+        existing = next((entry for entry in data['entries'] if entry.get('run_id') == run_id), None)
+        if existing is not None:
+            print(json.dumps({'ok': True, 'id': existing['id'], 'entry': existing}, ensure_ascii=False))
+            return
     new_id = max((e.get("id", 0) for e in data["entries"]), default=0) + 1
 
     metrics = {}
@@ -99,6 +109,7 @@ def cmd_record(args) -> None:
     tags = [t.strip() for t in args.tags.split(",")] if args.tags else []
     entry = {
         "id": new_id,
+        "run_id": run_id,
         "platform": args.platform,
         "title": args.title,
         "url": args.url or "",
@@ -216,6 +227,7 @@ def build_parser():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("record", help="写入一条发布记录")
+    r.add_argument("--run-id", default="")
     r.add_argument("--platform", required=True)
     r.add_argument("--title", required=True)
     r.add_argument("--url")
@@ -259,7 +271,20 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    args.func(args)
+    profile = getattr(args, 'profile', '') or os.environ.get('EASEL_PERSONA', '')
+    if profile and Path(args.data) == DEFAULT_DATA:
+        from easel.persona import valid_persona_name
+        if not valid_persona_name(profile):
+            raise ValueError('非法画像')
+        args.data = str(PROJECT_ROOT / 'outputs' / '_analytics' / 'publish-log' / f'{profile}.json')
+    if args.cmd == 'record':
+        from asset_storage import _storage_lock
+        path = Path(args.data)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _storage_lock(path.with_suffix('.lock')):
+            args.func(args)
+    else:
+        args.func(args)
 
 
 if __name__ == "__main__":

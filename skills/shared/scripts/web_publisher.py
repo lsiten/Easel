@@ -177,11 +177,11 @@ PLATFORMS: dict[str, dict] = {
              "selector": "[class*=_description], [placeholder*=描述], [contenteditable=true]",
              "value": "{title}\n{desc}\n{tags}"},
             {"action": "wait", "value": "1500"},
-            {"action": "click",
+            {"action": "click", "commit": True,
              "selector": "[class*=button-primary]:has-text('发布'), "
                          "div[class*=_button]:has-text('发布'):not(:has-text('作品'))"},
             {"action": "wait", "value": "2500"},
-            {"action": "click",
+            {"action": "click", "commit": True,
              "selector": "[class*=dialog] [class*=button-primary], [class*=dialog] button:has-text('确认'), "
                          "[class*=dialog] button:has-text('确定'), text=确认发布, text=确定发布",
              "optional": True},
@@ -258,7 +258,7 @@ PLATFORMS: dict[str, dict] = {
             {"action": "fill", "selector": ".WriteIndex-titleInput textarea,textarea[placeholder*='标题']", "value": "{title}"},
             {"action": "type", "selector": ".public-DraftEditor-content,[contenteditable=true]", "value": "{desc}"},
             {"action": "wait", "value": "2000"},
-            {"action": "click", "selector": "button:text-is('发布')"},
+            {"action": "click", "commit": True, "selector": "button:text-is('发布')"},
         ],
         # 发布成功校验：知乎发成功后跳到文章页 zhuanlan.zhihu.com/p/<id>（草稿是 /p/<id>/edit，需排除）
         "publish_success": {"url_contains": "/p/", "url_not_contains": "/edit"},
@@ -289,7 +289,7 @@ PLATFORMS: dict[str, dict] = {
             {"action": "fill", "selector": ".article-bar__title--input, input[placeholder*='标题']", "value": "{title}"},
             {"action": "type", "selector": "pre.editor__inner, [contenteditable=true]", "value": "{desc}"},
             {"action": "wait", "value": "2000"},
-            {"action": "click", "selector": "button.btn-publish"},
+            {"action": "click", "commit": True, "selector": "button.btn-publish"},
         ],
         # 发布成功后离开创作编辑器（editor.csdn.net/md → 文章页/首页）——避免「点了发布=成功」假阳性
         "publish_success": {"url_not_contains": "editor.csdn.net/md"},
@@ -322,7 +322,7 @@ PLATFORMS: dict[str, dict] = {
             {"action": "fill", "selector": ".title-input", "value": "{title}"},
             {"action": "fill", "selector": "textarea.byte-input__textarea", "value": "{desc}"},
             {"action": "wait", "value": "2000"},
-            {"action": "click", "selector": "button.xitu-btn:not(.btn-drafts)"},
+            {"action": "click", "commit": True, "selector": "button.xitu-btn:not(.btn-drafts)"},
         ],
         # 发布成功后离开创作编辑器（editor/drafts → 文章页/作品列表）
         "publish_success": {"url_not_contains": "editor/drafts"},
@@ -569,6 +569,8 @@ def _publish_weixin_channels(page, ctx: dict) -> None:
                 last_err = "未找到发表按钮"
                 page.wait_for_timeout(3000)
                 continue
+            from publish_guard import require_publish_commit
+            require_publish_commit('weixin-channels', page)
             page.keyboard.press("Enter")   # 可信提交
             # 等 URL 离开创作页 = 提交成功（真机 ~6s 跳 /post/list）
             for _ in range(12):
@@ -579,6 +581,9 @@ def _publish_weixin_channels(page, ctx: dict) -> None:
             if not published:
                 last_err = "发表后未跳转（可能未提交），换新 frame 重试"
         except Exception as e:
+            from publish_guard import PublishGuardError
+            if isinstance(e, PublishGuardError):
+                raise
             last_err = e
             page.wait_for_timeout(3000)   # 多半是 frame 刚重载，换新 frame 重试
     if not published:
@@ -713,6 +718,8 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                 _publish_weixin_channels(page, ctx)
                 steps = []
             for i, s in enumerate(steps, 1):
+                from publish_guard import require_publish_allowed
+                require_publish_allowed(a.platform)
                 act = s["action"]
                 sel = s.get("selector", "")
                 val = s.get("value", "")
@@ -724,6 +731,9 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                     # 单次提交契约 × 人类节奏：提交前「复核 + 反应」双停顿（human_pace）
                     human_pace.pause_before_commit(
                         len(str(ctx.get("title") or "")) + len(str(ctx.get("desc") or "")))
+                from publish_guard import PublishGuardError, require_publish_commit
+                if s.get('commit'):
+                    require_publish_allowed(a.platform)
                 try:
                     if act == "goto":
                         page.goto(val)
@@ -776,9 +786,13 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                         except Exception:
                             pass
                         # 先尝试 Playwright 原生 force click（React/Vue 合成事件能感知）
+                        if s.get('commit'):
+                            require_publish_commit(a.platform, page)
                         try:
                             el.click(force=True, timeout=5000)
                         except Exception:
+                            if s.get('commit'):
+                                require_publish_commit(a.platform, page)
                             # 回退：完整指针事件链（pointerdown→mousedown→mouseup→click）
                             page.evaluate("""
                                 el => {
@@ -796,6 +810,8 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                         page.screenshot(path=str(_sp))
                     elif act == "js_eval":
                         # 直接执行 JS 代码（用于快手等框架按钮，CSS选择器/has-text 匹配不稳定）
+                        if s.get('commit'):
+                            require_publish_commit(a.platform, page)
                         page.evaluate(val)
                     elif act == "click":
                         # 多候选（快手『发布作品』是 div.publish-button 非 <button>）+ 滚动到可点
@@ -806,14 +822,20 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                             el.scroll_into_view_if_needed()
                         except Exception:
                             pass
+                        if s.get('commit'):
+                            require_publish_commit(a.platform, page)
                         el.click()
                     elif act == "wait":
                         page.wait_for_timeout(int(val or 1000))
                     elif act == "press":
+                        if s.get('commit'):
+                            require_publish_commit(a.platform, page)
                         page.keyboard.press(val)
                     elif act == "waitfor":
                         page.wait_for_selector(sel, timeout=int(val or 30000))  # 逗号=CSS group
                 except Exception as e:
+                    if isinstance(e, PublishGuardError):
+                        raise
                     if opt:
                         print(f"    (可选步骤跳过：{e})", file=sys.stderr)
                         continue
@@ -856,6 +878,7 @@ def _run_browser(a, headed: bool, do_publish: bool) -> int:
                 _acct = (verdict.evidence or {}).get("account") or {}
                 _who = f"；账号：{_acct.get('display_name')}" if _acct.get("display_name") else ""
                 print(f"✅ {cfg['name']}发布成功（读回核验：作品 {m.platform_content_id}，{m.status or 'published'}{_who}）")
+                print(json.dumps({'easel_publish_receipt': verdict.as_dict()}, ensure_ascii=False))
             elif chk:
                 if not ui_ok:
                     try:  # 仅失败时截图，供排错（正常成功不截）
@@ -1621,6 +1644,7 @@ def cmd_whoami(a) -> int:
                 account = _authenticated_account(browser, cfg)
                 if account is not None:
                     result.update(loggedIn=True, **_account_identity(account))
+                    result['accountUid'] = str(account.get('id') or '')
                     print(json.dumps(result, ensure_ascii=False))
                     return 0
                 _navigate_login(page, cfg.get("whoami_url") or cfg.get("login_probe_url") or cfg["publish_url"])
@@ -1640,6 +1664,11 @@ def cmd_whoami(a) -> int:
                 result["loggedIn"] = logged
                 if logged:
                     result.update(_account_identity(account) if account else _visible_account_identity(page, cfg))
+                    if account:
+                        result['accountUid'] = str(account.get('id') or '')
+                    else:
+                        from browser_identity import authenticated_uid
+                        result['accountUid'] = authenticated_uid(a.platform, page)
                 elif cfg.get("profile") == "ChannelsProfile":
                     login_url = any(marker in (page.url or "").lower() for marker in _LOGIN_MARKERS)
                     login_visible = any(element.is_visible() for selector in cfg["logged_out_selector"].split(",")

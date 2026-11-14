@@ -35,6 +35,15 @@ def _id(value: Any, label: str) -> str:
         raise VariantError(f"invalid {label}")
     return value
 
+
+def _scope(value: Any, label: str) -> str:
+    if (not isinstance(value, str) or not value or len(value) > 120
+            or value.startswith((".", "_"))
+            or any(ch in value for ch in ("/", "\\", ":"))
+            or any(ord(ch) < 32 for ch in value)):
+        raise VariantError(f"invalid {label}")
+    return value
+
 def _text(value: Any, label: str, *, max_length: int = 20000) -> str:
     if not isinstance(value, str) or len(value) > max_length or any(ord(ch) < 32 and ch not in "\n\t" for ch in value):
         raise VariantError(f"invalid {label}")
@@ -96,7 +105,7 @@ class HypitVariantStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.reference_root = _root(reference_root, "reference root") if reference_root else self.root / "_reference"
         self.reference_root.mkdir(parents=True, exist_ok=True)
-        self._reference_path = self.reference_root / "evidence.json"
+        self._reference_path = self.reference_root / "evidence.json"  # legacy read-only compatibility
 
     def _path(self, variant_id: str) -> Path:
         return self.root / variant_id / "variant.json"
@@ -116,6 +125,8 @@ class HypitVariantStore:
             rec = VariantRecord.from_dict(value)
             if rec.variant_id != variant_id or rec.approval_state not in {"pending", "approved", "rejected"}:
                 raise VariantError("malformed persisted variant record")
+            _scope(rec.profile_id, "profile_id")
+            _scope(rec.session_id, "session_id")
             for label, raw in (("brief", rec.brief), ("treatment", rec.treatment), ("analysis", rec.analysis), ("timeline", rec.timeline), ("sample_target", rec.sample_target), ("full_target", rec.full_target)):
                 if not isinstance(raw, dict):
                     raise VariantError(f"malformed persisted {label}")
@@ -134,18 +145,21 @@ class HypitVariantStore:
         records = [self.get(p.parent.name) for p in self.root.glob("*/variant.json")]
         return [r for r in records if (profile_id is None or r.profile_id == profile_id) and (session_id is None or r.session_id == session_id)]
 
-    def _reference(self, evidence: list[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+    def _reference(self, evidence: list[Mapping[str, Any]] | None, *, profile_id: str, session_id: str,
+                   variant_id: str) -> list[dict[str, Any]]:
         values = [_json_value(dict(item), "reference evidence") for item in (evidence or [])]
-        if not values and not self._reference_path.exists():
+        scoped_path = self.reference_root / profile_id / session_id / variant_id / "evidence.json"
+        if not values and not scoped_path.exists():
             return []
         encoded = json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(encoded.encode()).hexdigest()
-        if self._reference_path.exists():
-            existing = json.loads(self._reference_path.read_text(encoding="utf-8"))
+        if scoped_path.exists():
+            existing = json.loads(scoped_path.read_text(encoding="utf-8"))
             if existing.get("digest") != digest or existing.get("evidence") != values:
-                raise VariantError("shared reference evidence is immutable")
+                raise VariantError("scoped reference evidence is immutable")
         else:
-            self._reference_path.write_text(json.dumps({"digest": digest, "evidence": values}, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+            scoped_path.parent.mkdir(parents=True, exist_ok=True)
+            scoped_path.write_text(json.dumps({"digest": digest, "evidence": values}, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
         return values
 
     def create_variant(self, *, variant_id: str | None = None, profile_id: str, session_id: str,
@@ -156,7 +170,7 @@ class HypitVariantStore:
                        selected_assets: list[str] | None = None, reference_evidence: list[Mapping[str, Any]] | None = None,
                        source_root: Path | str | None = None, output_root: Path | str | None = None) -> VariantRecord:
         variant_id = _id(variant_id or f"v-{uuid.uuid4().hex[:12]}", "variant_id")
-        _text(profile_id, "profile_id", max_length=120); _text(session_id, "session_id", max_length=120)
+        _scope(profile_id, "profile_id"); _scope(session_id, "session_id")
         if self._path(variant_id).exists():
             raise VariantExistsError(variant_id)
         parent = None
@@ -177,7 +191,7 @@ class HypitVariantStore:
             raise BranchOverwriteError("output branch already contains artifacts")
         anchors = [_text(v, "selected anchor", max_length=500) for v in (selected_anchors or [])]
         assets = [_text(v, "selected asset", max_length=500) for v in (selected_assets or [])]
-        evidence = self._reference(reference_evidence)
+        evidence = self._reference(reference_evidence, profile_id=profile_id, session_id=session_id, variant_id=variant_id)
         rec = VariantRecord(variant_id, profile_id, session_id, parent,
             _json_value(dict(brief), "brief"), _json_value(dict(treatment), "treatment"),
             _json_value(dict(analysis), "analysis"), _json_value(dict(timeline), "timeline"),

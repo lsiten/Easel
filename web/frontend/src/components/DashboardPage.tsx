@@ -72,7 +72,7 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
 
   useEffect(() => {
     fetchTrends('weibo,douyin', 6).then((d) => setTrends(d.trends)).catch(() => {});
-    fetchSchedule().then(setSchedule).catch(() => {});
+    fetchSchedule(persona).then(setSchedule).catch(() => {});
     fetchOutputs(persona).then(setOutputs).catch(() => {});
     fetchAccounts(persona).then(setAccounts).catch(() => {});
     fetchIdeas().then(setIdeas).catch(() => {});
