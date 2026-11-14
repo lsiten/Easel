@@ -136,14 +136,14 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
     { label: '拆爆款', page: 'breakdown', Icon: IconSkills },
     { label: '记选题', page: 'ideas', Icon: IconIdea },
     { label: '排日历', page: 'calendar', Icon: IconCalendar },
-    { label: '去发布', page: 'publish', Icon: IconPublish },
+    { label: '去发布', page: 'platform', Icon: IconPublish },
   ];
 
   const stats: { label: string; value: string; page: Page; Icon: typeof IconChat }[] = [
     { label: '待做选题', value: String(pendingIdeas.length), page: 'ideas', Icon: IconIdea },
     { label: '待发排期', value: String(upcoming.length), page: 'calendar', Icon: IconCalendar },
     { label: '内容项目', value: String(outputs.length), page: 'outputs', Icon: IconOutputs },
-    { label: '已登录账号', value: `${loggedIn}/${accounts.length}`, page: 'accounts', Icon: IconAccounts },
+    { label: '已登录账号', value: `${loggedIn}/${accounts.length}`, page: 'platform', Icon: IconAccounts },
   ];
 
   return (
@@ -257,7 +257,7 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
             if (anaPlats.length === 0) return <div className="dash-empty">加载中 / 需配置代理</div>;
             if (logged.length === 0) {
               return (
-                <div className="dash-empty" onClick={() => onNavigate('accounts')} style={{ cursor: 'pointer' }}>
+                <div className="dash-empty" onClick={() => onNavigate('platform')} style={{ cursor: 'pointer' }}>
                   去账号页登录后，这里看各平台粉丝 / 获赞 / 关注、增长趋势与最新笔记 →
                 </div>
               );
@@ -282,7 +282,7 @@ export default function DashboardPage({ persona, gatewayStatus, apiDirect, agent
                   <div className="dash-empty" style={{ color: 'var(--red)' }}>{anaErrors[anaSel] || '抓取失败，请稍后重试'}；点平台重试</div>
                 )}
                 {d && d !== 'loading' && d !== 'error' && (!d.loggedIn ? (
-                  <div className="dash-empty" onClick={() => onNavigate('accounts')} style={{ cursor: 'pointer' }}>
+                  <div className="dash-empty" onClick={() => onNavigate('platform')} style={{ cursor: 'pointer' }}>
                     该平台登录态已失效，去账号页重登 →
                   </div>
                 ) : (

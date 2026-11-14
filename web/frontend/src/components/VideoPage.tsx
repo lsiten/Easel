@@ -5,7 +5,12 @@ import { useOpenfilmStudio } from '../lib/useOpenfilmStudio';
 import { IconVideo, IconRefresh } from './icons';
 import HypitReplicationWorkspace from './HypitReplicationWorkspace';
 
-interface Props { session?: string; persona: string; onMakeVideo: () => void; }
+interface Props {
+  session?: string;
+  persona: string;
+  onMakeVideo: () => void;
+  mode?: 'studio' | 'library';
+}
 
 /** 收集所有视频文件（带其所属 openfilm 项目标记）。 */
 function collectVideos(roots: OutputNode[], ofAncestor = false): { node: OutputNode; ofProject: boolean }[] {
@@ -22,7 +27,7 @@ function collectVideos(roots: OutputNode[], ofAncestor = false): { node: OutputN
 }
 
 /** 视频制作：由 AI 驱动 OpenFilm 制作视频，Studio 可视化编辑；素材来自素材库。 */
-export default function VideoPage({ session, persona, onMakeVideo }: Props) {
+export default function VideoPage({ session, persona, onMakeVideo, mode = 'studio' }: Props) {
   const { studio, refresh } = useOpenfilmStudio({ session, persona });
   const scope = JSON.stringify([session ?? null, persona]);
   const [revision, setRevision] = useState(0);
@@ -51,12 +56,14 @@ export default function VideoPage({ session, persona, onMakeVideo }: Props) {
     <div className="gallery-page">
       <div className="gallery-head">
         <div>
-          <h1 className="page-title"><IconVideo size={21} /> 视频制作</h1>
-          <p className="page-subtitle">由 AI 驱动 OpenFilm 制作视频，Studio 可视化编辑；可从素材库取用图片 / 视频 / 文本。</p>
+          <h1 className="page-title"><IconVideo size={21} /> {mode === 'studio' ? '视频制作' : '视频项目'}</h1>
+          <p className="page-subtitle">{mode === 'studio'
+            ? '由 AI 驱动 OpenFilm 制作视频，Studio 可视化编辑；可从素材库取用图片 / 视频 / 文本。'
+            : '查看 OpenFilm、Hypit 与历史生产流程生成的视频项目和成品。'}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <button className="btn btn-sm" onClick={load}><IconRefresh size={14} /> 刷新</button>
-          <button className="btn btn-sm" onClick={onMakeVideo}><IconVideo size={14} /> 用 AI 做一支视频</button>
+          <button className="btn btn-sm" onClick={onMakeVideo}><IconVideo size={14} /> {mode === 'studio' ? '用 AI 做一支视频' : '去创作视频'}</button>
         </div>
       </div>
 
@@ -113,7 +120,7 @@ export default function VideoPage({ session, persona, onMakeVideo }: Props) {
           )}
       </div>
 
-      <HypitReplicationWorkspace session={session} persona={persona} />
+      {mode === 'studio' && <HypitReplicationWorkspace session={session} persona={persona} />}
     </div>
   );
 }

@@ -1,13 +1,11 @@
 import { useCallback, useState } from 'react';
 import AccountsPage from '../AccountsPage';
 import PublishPage from '../PublishPage';
-import { ChannelSettings } from '../ChannelSettings';
 import type { AccountItem } from '../../lib/api';
 import { BrowserChannelData } from './BrowserChannelData';
-import { ChannelContent } from './ChannelContent';
 import { ChannelTasks } from './ChannelTasks';
 
-const TABS = [['publish', '发布'], ['data', '作品数据'], ['content', '内容'], ['tasks', '任务记录'], ['settings', '设置']] as const;
+const TABS = [['publish', '发布'], ['data', '作品数据'], ['tasks', '任务记录']] as const;
 type BrowserTab = typeof TABS[number][0];
 
 export function BrowserChannelWorkspace({ persona, account, onConnectionChange }: {
@@ -24,9 +22,7 @@ export function BrowserChannelWorkspace({ persona, account, onConnectionChange }
     switch (tab) {
       case 'publish': return <PublishPage persona={persona} platform={account.platform} embedded />;
       case 'data': return <BrowserChannelData persona={persona} platform={account.platform} />;
-      case 'content': return <ChannelContent persona={persona} />;
       case 'tasks': return <ChannelTasks platform={account.platform} scope={{ persona, account_uid: '' }} />;
-      case 'settings': return <ChannelSettings persona={persona} />;
     }
   }
   return <>

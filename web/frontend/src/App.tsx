@@ -1,26 +1,21 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react';
 import Sidebar from './components/Sidebar';
-import type { Page } from './components/Sidebar';
-import { AiWorkspace } from './components/ai/AiWorkspace';
 import ChatPage from './components/ChatPage';
 import SkillPage from './components/SkillPage';
-import OutputsPage from './components/OutputsPage';
-import AssetsPage from './components/AssetsPage';
-import VideoPage from './components/VideoPage';
 import VideoStudioPanel from './components/VideoStudioPanel';
-import AccountsPage from './components/AccountsPage';
 import ChannelsPage from './components/ChannelsPage';
 import ProfilePage from './components/ProfilePage';
 import DashboardPage from './components/DashboardPage';
-import TrendsPage from './components/TrendsPage';
-import CalendarPage from './components/CalendarPage';
-import IdeasPage from './components/IdeasPage';
-import PublishPage from './components/PublishingPage';
-import BreakdownPage from './components/BreakdownPage';
-import SubNav from './components/SubNav';
 import OnboardingWizard from './components/OnboardingWizard';
 import SettingsPanel from './components/SettingsPanel';
+import { AgentTasks } from './components/ai/AgentTasks';
+import { ContentNav, WorkspaceNav, moduleForPage } from './components/ModuleNav';
+import { PlanningWorkspace } from './components/workspace/PlanningWorkspace';
+import { CreationWorkspace } from './components/workspace/CreationWorkspace';
+import { ContentCenter } from './components/workspace/ContentCenter';
+import type { Page } from './lib/navigation';
+import { contentSectionFor, normalizePage, pageFromHash, routeForPage, workspaceSectionFor } from './lib/navigation';
 import { fetchStatus, fetchPersonas, streamChat, fetchLastTurn, stopChat } from './lib/api';
 import type { PersonaItem, UploadedFile, ChatQuestion } from './lib/api';
 import { OpenfilmStudioContext, useOpenfilmStudio } from './lib/useOpenfilmStudio';
@@ -70,8 +65,21 @@ function savePersona(name: string): void {
   } catch { /* ignore */ }
 }
 
+function initialOutputsPath(hash: string): string {
+  const match = hash.match(/^#\/outputs\/(.+)$/);
+  if (!match) return '';
+  try { return decodeURIComponent(match[1]); } catch { return match[1]; }
+}
+
+function initialPage(hash: string): Page {
+  if (initialOutputsPath(hash)) return 'outputs';
+  return pageFromHash(hash) ?? 'dashboard';
+}
+
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+  const initialHash = window.location.hash;
+  const [currentPage, setCurrentPage] = useState<Page>(() => initialPage(initialHash));
+  const [outputsJump, setOutputsJump] = useState(() => initialOutputsPath(initialHash));
   const [personas, setPersonas] = useState<PersonaItem[]>([]);
   const [selectedPersona, setSelectedPersona] = useState(loadPersona());
   const [sessions, setSessions] = useState<ChatSession[]>(() => loadSessions());
@@ -92,21 +100,31 @@ export default function App() {
   // 对话里的「产物路径 → 内容库」跳转：linkifyOutputs 把目录路径生成为
   // `#/outputs/<路径>` 锚点，这里监听 hashchange 切页并带上下文，随后清掉 hash
   // （不污染地址栏与前进/后退历史）。
-  const [outputsJump, setOutputsJump] = useState('');
   useEffect(() => {
     const onHash = () => {
       const m = window.location.hash.match(/^#\/outputs\/(.+)$/);
-      if (!m) return;
-      let path = m[1];
-      try { path = decodeURIComponent(path); } catch { /* 保留原样 */ }
-      setOutputsJump(path);
-      setCurrentPage('outputs');
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      if (m) {
+        setOutputsJump(initialOutputsPath(window.location.hash));
+        setCurrentPage('outputs');
+        return;
+      }
+      const page = pageFromHash(window.location.hash);
+      if (page) {
+        setOutputsJump('');
+        setCurrentPage(page);
+      }
     };
     window.addEventListener('hashchange', onHash);
-    onHash();
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+  useEffect(() => {
+    const desired = currentPage === 'outputs' && outputsJump
+      ? `#/outputs/${encodeURIComponent(outputsJump)}`
+      : routeForPage(currentPage);
+    if (window.location.hash !== desired) {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${desired}`);
+    }
+  }, [currentPage, outputsJump]);
   const clearOutputsJump = useCallback(() => setOutputsJump(''), []);
 
   // 挂载时决定进哪个会话。规则：
@@ -772,9 +790,8 @@ export default function App() {
 
   // 流式生命周期在 App，页面切换随意——ChatPage 可自由卸载/重挂，回来从 props 读流式态即可。
   const renderPage = () => {
-    switch (currentPage) {
-      case 'ai':
-        return <AiWorkspace key={selectedPersona} persona={selectedPersona} />;
+    const page = normalizePage(currentPage);
+    switch (page) {
       case 'dashboard':
         return (
           <DashboardPage
@@ -821,38 +838,46 @@ export default function App() {
             isVideoSession={videoPanel}
           />
         ) : null;
+      case 'tasks':
+        return <AgentTasks persona={selectedPersona} />;
       case 'trends':
-        return <TrendsPage onUseTopic={handleUseTopic} />;
       case 'ideas':
-        return <IdeasPage onUseTopic={handleUseTopic} />;
       case 'calendar':
-        return <CalendarPage persona={selectedPersona} />;
-      case 'publish':
-        return <PublishPage persona={selectedPersona} />;
       case 'breakdown':
-        return <BreakdownPage persona={selectedPersona} />;
+        return <PlanningWorkspace page={page} persona={selectedPersona}
+          onUseTopic={handleUseTopic} onNavigate={setCurrentPage} />;
+      case 'create':
+      case 'create-drafts':
+      case 'create-memory':
+      case 'create-video':
+        return <CreationWorkspace page={page} persona={selectedPersona} session={activeSession?.id}
+          onMakeVideo={handleMakeVideo} onNavigate={setCurrentPage} />;
+      case 'platform':
+        return <ChannelsPage key={selectedPersona} persona={selectedPersona} onConfigureApplication={configureChannelApplication} />;
+      case 'outputs':
+      case 'assets':
+      case 'content-drafts':
+      case 'generated-history':
+      case 'generated-assets':
+      case 'video-projects':
+        return <ContentCenter page={page} persona={selectedPersona} session={activeSession?.id}
+          jumpPath={outputsJump} onJumpHandled={clearOutputsJump}
+          onMakeVideo={handleMakeVideo} onNavigate={setCurrentPage} />;
       case 'skills':
         return <SkillPage persona={selectedPersona} />;
-      case 'outputs':
-        return <OutputsPage key={JSON.stringify([activeSession?.id, selectedPersona])} session={activeSession?.id} jumpPath={outputsJump} onJumpHandled={clearOutputsJump} persona={selectedPersona} />;
-      case 'assets':
-        return <AssetsPage key={selectedPersona || 'generic'} persona={selectedPersona} />;
-      case 'video':
-        return <VideoPage session={activeSession?.id} persona={selectedPersona} onMakeVideo={handleMakeVideo} />;
-      case 'accounts':
-        return <AccountsPage persona={selectedPersona} />;
-      case 'channels':
-        return <ChannelsPage key={selectedPersona} persona={selectedPersona} onConfigureApplication={configureChannelApplication} />;
       case 'profile':
         return <ProfilePage persona={selectedPersona} onUsePersona={handlePersonaChange} onNewProfile={() => setShowWizard(true)} onDeleted={handleProfileDeleted} />;
+      case 'content':
+        return <ContentCenter page="outputs" persona={selectedPersona} session={activeSession?.id}
+          jumpPath={outputsJump} onJumpHandled={clearOutputsJump}
+          onMakeVideo={handleMakeVideo} onNavigate={setCurrentPage} />;
       default:
-        return null;
+        return <div className="panel">页面暂不可用。</div>;
     }
   };
 
   const handlePersonaChange = useCallback((persona: string) => {
     setSelectedPersona(persona);
-    setCurrentPage('chat');
     const cur = sessionsRef.current.find((s) => s.id === activeSessionId);
     if (cur && cur.messages.length === 0) {
       setSessions((prev) => {
@@ -876,6 +901,8 @@ export default function App() {
     currentPage === 'chat' &&
     !!activeSession &&
     (activeSession.video === true || hasVideo);
+  const activePage = normalizePage(currentPage);
+  const activeModule = moduleForPage(activePage);
 
   const [videoPanelWidth, setVideoPanelWidth] = useState(42);
   const videoHostRef = useRef<HTMLDivElement>(null);
@@ -906,6 +933,7 @@ export default function App() {
         selectedPersona={selectedPersona}
         onPersonaChange={handlePersonaChange}
         onNewProfile={() => setShowWizard(true)}
+        onManageProfiles={() => setCurrentPage('profile')}
         sessions={sessions}
         activeSessionId={activeSessionId}
         onSessionSelect={handleSessionSelect}
@@ -919,9 +947,8 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <main className="main-content">
-        {(['trends', 'ideas', 'calendar', 'publish', 'breakdown'] as Page[]).includes(currentPage) && (
-          <SubNav current={currentPage} onNavigate={setCurrentPage} />
-        )}
+        {activeModule === 'workspace' && <WorkspaceNav current={activePage} onNavigate={setCurrentPage} />}
+        {activeModule === 'content' && <ContentNav current={activePage} onNavigate={setCurrentPage} />}
         <OpenfilmStudioContext.Provider value={currentPage === 'chat' ? conversationStudio : null}>
           <div
             ref={videoHostRef}
@@ -979,6 +1006,10 @@ export default function App() {
               setAgentRuntime(data.runtime || '');
               setGatewayStatus(data.gateway ? 'connected' : 'disconnected');
             }).catch(() => setGatewayStatus('disconnected'));
+          }}
+          onOpenProfiles={() => {
+            setSettingsOpen(false);
+            setCurrentPage('profile');
           }}
         />
       )}

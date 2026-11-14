@@ -11,11 +11,13 @@ import {
 } from '../lib/api';
 import type { EnvTool, ModelRow, SelftestResult } from '../lib/api';
 import { IconSlidersHorizontal, IconPackage, IconEllipsis } from './settingsIcons';
+import { IconProfile } from './icons';
 
 interface Props {
   onClose: () => void;
   /** 非空时在面板顶部显示一条提示条。首开未配置模型时由 App 传入。 */
   banner?: string;
+  onOpenProfiles?: () => void;
 }
 
 type Sec = 'model' | 'env' | 'more';
@@ -59,7 +61,7 @@ const hhmm = (ts: number) => {
 };
 
 /** 设置（统一入口）：竖＝功能分类（模型配置 / 环境安装 / 更多设置），横＝模型六通道。 */
-export default function SettingsPanel({ onClose, banner = '' }: Props) {
+export default function SettingsPanel({ onClose, banner = '', onOpenProfiles }: Props) {
   const [sec, setSec] = useState<Sec>('model');
   const [chan, setChan] = useState<Chan>('chat');
   const [harness, setHarness] = useState('');
@@ -814,6 +816,9 @@ export default function SettingsPanel({ onClose, banner = '' }: Props) {
                   <span className="desc">同一个面板，以后放更多设置</span>
                 </div>
                 <div className="board">
+                  {onOpenProfiles && <button className="stub-row" onClick={onOpenProfiles}>
+                    <span className="tag2">画像</span><IconProfile size={15} />管理画像资料与创作身份<span className="future">打开</span>
+                  </button>}
                   <div className="stub-row"><span className="tag2">预留</span>网关参数（端口 / 绑定 / 会话）<span className="future">就挂在这页旁边</span></div>
                   <div className="stub-row"><span className="tag2">预留</span>通用设置（语言 / 更新 / 数据目录）<span className="future">按需加</span></div>
                 </div>
